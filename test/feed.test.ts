@@ -22,14 +22,41 @@ test("RSS item has exactly the requested fields and escapes XML", () => {
   const feed = renderFeed([book], "https://example.workers.dev/book-express-rss");
   assert.match(feed, /<link>\s*<!\[CDATA\[https:\/\/book\.douban\.com\/subject\/123\/\?a=1&b=2\]\]>/);
   assert.match(feed, /<title>\s*<!\[CDATA\[甲 & 乙\]\]>/);
-  assert.match(feed, /<!\[CDATA\[<img src="https:\/\/example\.workers\.dev\/book-express-rss\/cover\/book-1" alt="封面" \/><br \/>\n书名：甲 &amp; 乙<br \/>\n作者：张三<br \/>\n简介：一部 &lt;书&gt;\]\]>/);
+  assert.match(feed, /<!\[CDATA\[<img src="https:\/\/example\.workers\.dev\/book-express-rss\/cover\/book-1" alt="封面" width="120" style="max-width:120px;height:auto" \/><br \/>\n书名：甲 &amp; 乙<br \/>\n作者：张三<br \/>\n简介：一部 &lt;书&gt;\]\]>/);
   assert.match(feed, /<guid isPermaLink="false">notion:book-1<\/guid>/);
   assert.match(feed, /<atom:link href="https:\/\/example\.workers\.dev\/book-express-rss" rel="self" type="application\/rss\+xml"\/>/);
   assert.match(feed, /<language>zh-CN<\/language>/);
-  assert.doesNotMatch(feed, /不应出现的出版社|<category>|files\.example/);
+  assert.doesNotMatch(feed, /不应出现的出版社|<category>|files\.example|来源：/);
   const withoutCover = bookFromPage({ ...page, properties: { ...page.properties, "封面": { type: "files", files: [] } } });
   assert.equal(withoutCover?.hasCover, false);
   assert.doesNotMatch(renderFeed(withoutCover ? [withoutCover] : [], "https://example.workers.dev/book-express-rss"), /<img /);
+});
+
+test("source name links to the recommendation URL", () => {
+  const sourced = bookFromPage({
+    ...page,
+    properties: {
+      ...page.properties,
+      "来源": { type: "select", select: { name: "新京报 & 周刊" } },
+      "推荐来源": { type: "url", url: "https://example.com/review?a=1&b=2" },
+    },
+  });
+  assert.ok(sourced);
+  const feed = renderFeed([sourced], "https://example.workers.dev/book-express-rss");
+  assert.match(feed, /简介：一部 &lt;书&gt;<br \/>\n来源：<a href="https:\/\/example\.com\/review\?a=1&amp;b=2">新京报 &amp; 周刊<\/a>/);
+
+  const plain = bookFromPage({
+    ...page,
+    properties: {
+      ...page.properties,
+      "来源": { type: "select", select: { name: "周刊" } },
+      "推荐来源": { type: "url", url: "javascript:alert(1)" },
+    },
+  });
+  assert.ok(plain);
+  const plainFeed = renderFeed([plain], "https://example.workers.dev/book-express-rss");
+  assert.match(plainFeed, /来源：周刊/);
+  assert.doesNotMatch(plainFeed, /<a href/);
 });
 
 test("missing or invalid external links fall back to the Notion page", () => {

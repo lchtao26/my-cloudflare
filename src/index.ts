@@ -21,6 +21,7 @@ type NotionProperty = {
   rich_text?: RichText[];
   url?: string | null;
   files?: NotionFile[];
+  select?: { name?: string } | null;
 };
 
 type WorkerBindings = {
@@ -54,6 +55,8 @@ export type Book = {
   summary: string;
   link: string;
   hasCover: boolean;
+  sourceName: string;
+  sourceUrl: string | null;
   pubDate: Date | null;
 };
 
@@ -70,6 +73,12 @@ function textProperty(properties: NotionPage["properties"], name: string): strin
   if (property?.type !== "title" && property?.type !== "rich_text") return "";
   const parts = property.type === "title" ? property.title : property.rich_text;
   return (parts ?? []).map((part) => part.plain_text ?? part.text?.content ?? "").join("").trim();
+}
+
+function selectProperty(properties: NotionPage["properties"], name: string): string {
+  const property = properties?.[name];
+  if (property?.type !== "select") return "";
+  return property.select?.name?.trim() ?? "";
 }
 
 function externalUrl(value: string | null | undefined): string | null {
@@ -100,6 +109,7 @@ export function bookFromPage(page: NotionPage): Book | null {
   const link = externalUrl(externalLink?.type === "url" ? externalLink.url : null) ?? externalUrl(page.url);
   if (!title || !link || !page.id) return null;
 
+  const recommendation = properties["推荐来源"];
   const date = new Date(page.last_edited_time ?? page.created_time ?? "");
   return {
     id: page.id,
@@ -108,19 +118,27 @@ export function bookFromPage(page: NotionPage): Book | null {
     summary: textProperty(properties, "简介"),
     link,
     hasCover: coverFileUrl(page) !== null,
+    sourceName: selectProperty(properties, "来源"),
+    sourceUrl: externalUrl(recommendation?.type === "url" ? recommendation.url : null),
     pubDate: Number.isNaN(date.getTime()) ? null : date,
   };
 }
 
 function itemDescription(book: Book, feedUrl: string): string {
-  const text = [
-    `书名：${book.title}`,
-    `作者：${book.author}`,
-    `简介：${book.summary}`,
-  ].map(htmlText).join("<br />\n");
+  const lines = [
+    `书名：${htmlText(book.title)}`,
+    `作者：${htmlText(book.author)}`,
+    `简介：${htmlText(book.summary)}`,
+  ];
+  if (book.sourceName) {
+    const name = htmlText(book.sourceName);
+    const source = book.sourceUrl ? `<a href="${htmlText(book.sourceUrl)}">${name}</a>` : name;
+    lines.push(`来源：${source}`);
+  }
+  const text = lines.join("<br />\n");
   if (!book.hasCover) return text;
   const src = htmlText(`${feedUrl}/cover/${encodeURIComponent(book.id)}`);
-  return `<img src="${src}" alt="封面" /><br />\n${text}`;
+  return `<img src="${src}" alt="封面" width="120" style="max-width:120px;height:auto" /><br />\n${text}`;
 }
 
 export function renderFeed(books: Book[], feedUrl: string): string {
