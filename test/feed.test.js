@@ -11,6 +11,7 @@ const page = {
     "简介": { type: "rich_text", rich_text: [{ plain_text: "一部 <书>" }] },
     "作者": { type: "rich_text", rich_text: [{ plain_text: "张三" }] },
     "豆瓣 / 亚马逊": { type: "url", url: "https://book.douban.com/subject/123/?a=1&b=2" },
+    "封面": { type: "files", files: [{ name: "cover.jpg", type: "file", file: { url: "https://files.example/cover.jpg?X-Amz-Signature=abc" } }] },
     "出版社 / 品牌": { type: "rich_text", rich_text: [{ plain_text: "不应出现的出版社" }] },
   },
 };
@@ -20,9 +21,12 @@ test("RSS item has exactly the requested fields and escapes XML", () => {
   const feed = renderFeed([book], "https://example.workers.dev/book-express-rss");
   assert.match(feed, /<link>https:\/\/book\.douban\.com\/subject\/123\/\?a=1&amp;b=2<\/link>/);
   assert.match(feed, /<title>甲 &amp; 乙<\/title>/);
-  assert.match(feed, /<description>书名：甲 &amp; 乙\n作者：张三\n简介：一部 &lt;书&gt;<\/description>/);
+  assert.match(feed, /<description><img src="https:\/\/example\.workers\.dev\/book-express-rss\/cover\/book-1" alt="封面" \/><br>\n书名：甲 &amp; 乙<br>\n作者：张三<br>\n简介：一部 &lt;书&gt;<\/description>/);
   assert.match(feed, /<guid isPermaLink="false">notion:book-1<\/guid>/);
-  assert.doesNotMatch(feed, /不应出现的出版社|<category>/);
+  assert.doesNotMatch(feed, /不应出现的出版社|<category>|files\.example/);
+  const withoutCover = bookFromPage({ ...page, properties: { ...page.properties, "封面": { type: "files", files: [] } } });
+  assert.equal(withoutCover.hasCover, false);
+  assert.doesNotMatch(renderFeed([withoutCover], "https://example.workers.dev/book-express-rss"), /<img /);
 });
 
 test("missing or invalid external links fall back to the Notion page", () => {
@@ -62,6 +66,37 @@ test("worker fetches all Notion pages and exposes only the feed path", async (co
   const method = await worker.fetch(new Request("https://example.workers.dev/book-express-rss", { method: "POST" }), env);
   assert.equal(method.status, 405);
   assert.equal(method.headers.get("Allow"), "GET, HEAD");
+});
+
+test("cover image is loaded from the Notion page and proxied", async (context) => {
+  const pageId = "3f8e75a1-639c-8120-9671-f146488f6d82";
+  const originalFetch = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    if (String(url).includes("/pages/")) {
+      return Response.json({ properties: page.properties });
+    }
+    return new Response("image-bytes", { headers: { "Content-Type": "image/jpeg" } });
+  };
+  context.after(() => { globalThis.fetch = originalFetch; });
+
+  const env = { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source" };
+  const missing = await worker.fetch(new Request("https://example.workers.dev/book-express-rss/cover/not-a-page"), env);
+  assert.equal(missing.status, 404);
+  assert.equal(urls.length, 0);
+
+  const response = await worker.fetch(new Request(`https://example.workers.dev/book-express-rss/cover/${pageId}`), env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Content-Type"), "image/jpeg");
+  assert.equal(response.headers.get("Cache-Control"), "public, max-age=300");
+  assert.equal(await response.text(), "image-bytes");
+  assert.equal(urls[0], `https://api.notion.com/v1/pages/${pageId}`);
+  assert.equal(urls[1], "https://files.example/cover.jpg?X-Amz-Signature=abc");
+
+  globalThis.fetch = async () => Response.json({ properties: { "封面": { type: "files", files: [] } } });
+  const empty = await worker.fetch(new Request(`https://example.workers.dev/book-express-rss/cover/${pageId}`), env);
+  assert.equal(empty.status, 404);
 });
 
 test("missing configuration and Notion failures return explicit errors", async (context) => {

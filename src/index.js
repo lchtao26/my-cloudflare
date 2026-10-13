@@ -11,6 +11,10 @@ function xml(value) {
     .replaceAll("'", "&apos;");
 }
 
+function rssDescription(value) {
+  return xml(value).replaceAll("\n", "<br>\n");
+}
+
 function textProperty(properties, name) {
   const property = properties?.[name];
   if (property?.type !== "title" && property?.type !== "rich_text") return "";
@@ -25,6 +29,17 @@ function externalUrl(value) {
   } catch {
     return null;
   }
+}
+
+function coverFileUrl(page) {
+  const files = page?.properties?.["封面"]?.files;
+  if (!Array.isArray(files)) return null;
+  for (const file of files) {
+    const url = file?.type === "external" ? file.external?.url : file?.type === "file" ? file.file?.url : null;
+    const href = externalUrl(url);
+    if (href) return href;
+  }
+  return null;
 }
 
 export function bookFromPage(page) {
@@ -45,8 +60,16 @@ export function bookFromPage(page) {
     title,
     link,
     description,
+    hasCover: coverFileUrl(page) !== null,
     pubDate: Number.isNaN(date.getTime()) ? null : date.toUTCString(),
   };
+}
+
+function itemDescription(book, feedUrl) {
+  const text = rssDescription(book.description);
+  if (!book.hasCover) return text;
+  const src = `${feedUrl}/cover/${encodeURIComponent(book.id)}`;
+  return `<img src="${xml(src)}" alt="封面" /><br>\n${text}`;
 }
 
 export function renderFeed(books, feedUrl) {
@@ -54,7 +77,7 @@ export function renderFeed(books, feedUrl) {
       <title>${xml(book.title)}</title>
       <link>${xml(book.link)}</link>
       <guid isPermaLink="false">notion:${xml(book.id)}</guid>
-      <description>${xml(book.description)}</description>${book.pubDate ? `
+      <description>${itemDescription(book, feedUrl)}</description>${book.pubDate ? `
       <pubDate>${xml(book.pubDate)}</pubDate>` : ""}
     </item>`).join("\n");
 
@@ -106,10 +129,44 @@ async function fetchBooks(env) {
   return books;
 }
 
+const NOTION_PAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const FEED_PATH = "/book-express-rss";
+
+function coverIdFromPath(pathname) {
+  const match = pathname.match(/^\/book-express-rss\/cover\/([^/]+)$/);
+  return match && NOTION_PAGE_ID.test(match[1]) ? match[1] : null;
+}
+
+async function fetchCover(env, pageId) {
+  const response = await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
+    headers: {
+      Authorization: `Bearer ${env.NOTION_TOKEN}`,
+      "Notion-Version": NOTION_VERSION,
+    },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
+
+  const imageUrl = coverFileUrl(await response.json());
+  if (!imageUrl) return null;
+  const image = await fetch(imageUrl);
+  if (!image.ok) throw new Error(`Cover image returned ${image.status}`);
+  const contentType = image.headers.get("Content-Type") ?? "";
+  if (!contentType.startsWith("image/")) throw new Error("Cover image has an unexpected content type");
+  return new Response(image.body, {
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": "public, max-age=300",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname !== "/book-express-rss") {
+    const coverId = coverIdFromPath(url.pathname);
+    if (url.pathname !== FEED_PATH && !coverId) {
       return new Response("Not found", { status: 404 });
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
@@ -120,6 +177,12 @@ export default {
     }
 
     try {
+      if (coverId) {
+        const cover = await fetchCover(env, coverId);
+        if (!cover) return new Response("Not found", { status: 404 });
+        return request.method === "HEAD" ? new Response(null, { status: cover.status, headers: cover.headers }) : cover;
+      }
+
       const books = await fetchBooks(env);
       const feedUrl = `${url.origin}${url.pathname}`;
       return new Response(request.method === "HEAD" ? null : renderFeed(books, feedUrl), {
@@ -130,8 +193,8 @@ export default {
         },
       });
     } catch (error) {
-      console.error("Failed to build book RSS", error);
-      return new Response("Feed temporarily unavailable", { status: 502 });
+      console.error(coverId ? "Failed to load book cover" : "Failed to build book RSS", error);
+      return new Response(coverId ? "Cover temporarily unavailable" : "Feed temporarily unavailable", { status: 502 });
     }
   },
 };
