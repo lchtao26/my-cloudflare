@@ -11,7 +11,7 @@ const page: NotionPage = {
     "简介": { type: "rich_text", rich_text: [{ plain_text: "一部 <书>" }] },
     "作者": { type: "rich_text", rich_text: [{ plain_text: "张三" }] },
     "作者介绍": { type: "rich_text", rich_text: [{ plain_text: "写过 & 小说" }] },
-    "豆瓣 / 亚马逊": { type: "url", url: "https://book.douban.com/subject/123/?a=1&b=2" },
+    "详情链接": { type: "url", url: "https://book.douban.com/subject/123/?a=1&b=2" },
     "封面": { type: "files", files: [{ name: "cover.jpg", type: "file", file: { url: "https://files.example/cover.jpg?X-Amz-Signature=abc" } }] },
     "出版社 / 品牌": { type: "rich_text", rich_text: [{ plain_text: "三联 & 书店" }] },
   },
@@ -65,10 +65,10 @@ test("source name links to the recommendation URL", () => {
 
 test("missing or invalid external links fall back to the Notion page", () => {
   for (const value of [null, "javascript:alert(1)", "not a URL"]) {
-    const book = bookFromPage({ ...page, properties: { ...page.properties, "豆瓣 / 亚马逊": { type: "url", url: value } } });
+    const book = bookFromPage({ ...page, properties: { ...page.properties, "详情链接": { type: "url", url: value } } });
     assert.equal(book?.link, page.url);
   }
-  assert.equal(bookFromPage({ ...page, url: null, properties: { ...page.properties, "豆瓣 / 亚马逊": { type: "url", url: null } } }), null);
+  assert.equal(bookFromPage({ ...page, url: null, properties: { ...page.properties, "详情链接": { type: "url", url: null } } }), null);
   assert.equal(bookFromPage({ ...page, properties: { ...page.properties, "书名": { type: "title", title: [] } } }), null);
 });
 

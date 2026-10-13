@@ -107,7 +107,7 @@ function coverFileUrl(page: NotionPage): string | null {
 export function bookFromPage(page: NotionPage): Book | null {
   const properties = page.properties ?? {};
   const title = textProperty(properties, "书名");
-  const externalLink = properties["豆瓣 / 亚马逊"];
+  const externalLink = properties["详情链接"];
   const link = externalUrl(externalLink?.type === "url" ? externalLink.url : null) ?? externalUrl(page.url);
   if (!title || !link || !page.id) return null;
 
