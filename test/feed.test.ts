@@ -12,7 +12,7 @@ const page: NotionPage = {
     "作者": { type: "rich_text", rich_text: [{ plain_text: "张三" }] },
     "豆瓣 / 亚马逊": { type: "url", url: "https://book.douban.com/subject/123/?a=1&b=2" },
     "封面": { type: "files", files: [{ name: "cover.jpg", type: "file", file: { url: "https://files.example/cover.jpg?X-Amz-Signature=abc" } }] },
-    "出版社 / 品牌": { type: "rich_text", rich_text: [{ plain_text: "不应出现的出版社" }] },
+    "出版社 / 品牌": { type: "rich_text", rich_text: [{ plain_text: "三联 & 书店" }] },
   },
 };
 
@@ -22,11 +22,11 @@ test("RSS item has exactly the requested fields and escapes XML", () => {
   const feed = renderFeed([book], "https://example.workers.dev/book-express-rss");
   assert.match(feed, /<link>\s*<!\[CDATA\[https:\/\/book\.douban\.com\/subject\/123\/\?a=1&b=2\]\]>/);
   assert.match(feed, /<title>\s*<!\[CDATA\[甲 & 乙\]\]>/);
-  assert.match(feed, /<!\[CDATA\[书名：甲 &amp; 乙<br \/>\n作者：张三<br \/>\n简介：一部 &lt;书&gt;<br \/>\n<img src="https:\/\/example\.workers\.dev\/book-express-rss\/cover\/book-1" alt="封面" width="120" style="max-width:120px;height:auto" \/>\]\]>/);
+  assert.match(feed, /<!\[CDATA\[作者：张三<br \/>\n简介：一部 &lt;书&gt;<br \/>\n出版社：三联 &amp; 书店<br \/>\n<img src="https:\/\/example\.workers\.dev\/book-express-rss\/cover\/book-1" alt="封面" \/>\]\]>/);
+  assert.doesNotMatch(feed, /书名：|width=|style=|<category>|files\.example|来源：/);
   assert.match(feed, /<guid isPermaLink="false">notion:book-1<\/guid>/);
   assert.match(feed, /<atom:link href="https:\/\/example\.workers\.dev\/book-express-rss" rel="self" type="application\/rss\+xml"\/>/);
   assert.match(feed, /<language>zh-CN<\/language>/);
-  assert.doesNotMatch(feed, /不应出现的出版社|<category>|files\.example|来源：/);
   const withoutCover = bookFromPage({ ...page, properties: { ...page.properties, "封面": { type: "files", files: [] } } });
   assert.equal(withoutCover?.hasCover, false);
   assert.doesNotMatch(renderFeed(withoutCover ? [withoutCover] : [], "https://example.workers.dev/book-express-rss"), /<img /);
@@ -43,7 +43,7 @@ test("source name links to the recommendation URL", () => {
   });
   assert.ok(sourced);
   const feed = renderFeed([sourced], "https://example.workers.dev/book-express-rss");
-  assert.match(feed, /简介：一部 &lt;书&gt;<br \/>\n来源：<a href="https:\/\/example\.com\/review\?a=1&amp;b=2">新京报 &amp; 周刊<\/a>/);
+  assert.match(feed, /简介：一部 &lt;书&gt;<br \/>\n出版社：三联 &amp; 书店<br \/>\n来源：<a href="https:\/\/example\.com\/review\?a=1&amp;b=2">新京报 &amp; 周刊<\/a>/);
 
   const plain = bookFromPage({
     ...page,

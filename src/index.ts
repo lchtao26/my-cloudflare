@@ -55,6 +55,7 @@ export type Book = {
   summary: string;
   link: string;
   hasCover: boolean;
+  publisher: string;
   sourceName: string;
   sourceUrl: string | null;
   pubDate: Date | null;
@@ -118,6 +119,7 @@ export function bookFromPage(page: NotionPage): Book | null {
     summary: textProperty(properties, "简介"),
     link,
     hasCover: coverFileUrl(page) !== null,
+    publisher: textProperty(properties, "出版社 / 品牌"),
     sourceName: selectProperty(properties, "来源"),
     sourceUrl: externalUrl(recommendation?.type === "url" ? recommendation.url : null),
     pubDate: Number.isNaN(date.getTime()) ? null : date,
@@ -126,10 +128,10 @@ export function bookFromPage(page: NotionPage): Book | null {
 
 function itemDescription(book: Book, feedUrl: string): string {
   const lines = [
-    `书名：${htmlText(book.title)}`,
     `作者：${htmlText(book.author)}`,
     `简介：${htmlText(book.summary)}`,
   ];
+  if (book.publisher) lines.push(`出版社：${htmlText(book.publisher)}`);
   if (book.sourceName) {
     const name = htmlText(book.sourceName);
     const source = book.sourceUrl ? `<a href="${htmlText(book.sourceUrl)}">${name}</a>` : name;
@@ -137,7 +139,7 @@ function itemDescription(book: Book, feedUrl: string): string {
   }
   if (book.hasCover) {
     const src = htmlText(`${feedUrl}/cover/${encodeURIComponent(book.id)}`);
-    lines.push(`<img src="${src}" alt="封面" width="120" style="max-width:120px;height:auto" />`);
+    lines.push(`<img src="${src}" alt="封面" />`);
   }
   return lines.join("<br />\n");
 }
