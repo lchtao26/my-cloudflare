@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import worker, { bookFromPage, renderFeed } from "../src/index.js";
+import worker, { bookFromPage, renderFeed, type NotionPage } from "../src/index.ts";
 
-const page = {
+const page: NotionPage = {
   id: "book-1",
   url: "https://www.notion.so/book-1",
   last_edited_time: "2026-10-13T10:00:00.000Z",
@@ -18,21 +18,24 @@ const page = {
 
 test("RSS item has exactly the requested fields and escapes XML", () => {
   const book = bookFromPage(page);
+  assert.ok(book);
   const feed = renderFeed([book], "https://example.workers.dev/book-express-rss");
-  assert.match(feed, /<link>https:\/\/book\.douban\.com\/subject\/123\/\?a=1&amp;b=2<\/link>/);
-  assert.match(feed, /<title>甲 &amp; 乙<\/title>/);
-  assert.match(feed, /<description><img src="https:\/\/example\.workers\.dev\/book-express-rss\/cover\/book-1" alt="封面" \/><br>\n书名：甲 &amp; 乙<br>\n作者：张三<br>\n简介：一部 &lt;书&gt;<\/description>/);
+  assert.match(feed, /<link>\s*<!\[CDATA\[https:\/\/book\.douban\.com\/subject\/123\/\?a=1&b=2\]\]>/);
+  assert.match(feed, /<title>\s*<!\[CDATA\[甲 & 乙\]\]>/);
+  assert.match(feed, /<!\[CDATA\[<img src="https:\/\/example\.workers\.dev\/book-express-rss\/cover\/book-1" alt="封面" \/><br \/>\n书名：甲 &amp; 乙<br \/>\n作者：张三<br \/>\n简介：一部 &lt;书&gt;\]\]>/);
   assert.match(feed, /<guid isPermaLink="false">notion:book-1<\/guid>/);
+  assert.match(feed, /<atom:link href="https:\/\/example\.workers\.dev\/book-express-rss" rel="self" type="application\/rss\+xml"\/>/);
+  assert.match(feed, /<language>zh-CN<\/language>/);
   assert.doesNotMatch(feed, /不应出现的出版社|<category>|files\.example/);
   const withoutCover = bookFromPage({ ...page, properties: { ...page.properties, "封面": { type: "files", files: [] } } });
-  assert.equal(withoutCover.hasCover, false);
-  assert.doesNotMatch(renderFeed([withoutCover], "https://example.workers.dev/book-express-rss"), /<img /);
+  assert.equal(withoutCover?.hasCover, false);
+  assert.doesNotMatch(renderFeed(withoutCover ? [withoutCover] : [], "https://example.workers.dev/book-express-rss"), /<img /);
 });
 
 test("missing or invalid external links fall back to the Notion page", () => {
   for (const value of [null, "javascript:alert(1)", "not a URL"]) {
     const book = bookFromPage({ ...page, properties: { ...page.properties, "豆瓣 / 亚马逊": { type: "url", url: value } } });
-    assert.equal(book.link, page.url);
+    assert.equal(book?.link, page.url);
   }
   assert.equal(bookFromPage({ ...page, url: null, properties: { ...page.properties, "豆瓣 / 亚马逊": { type: "url", url: null } } }), null);
   assert.equal(bookFromPage({ ...page, properties: { ...page.properties, "书名": { type: "title", title: [] } } }), null);
@@ -40,13 +43,13 @@ test("missing or invalid external links fall back to the Notion page", () => {
 
 test("worker fetches all Notion pages and exposes only the feed path", async (context) => {
   const originalFetch = globalThis.fetch;
-  const requests = [];
-  globalThis.fetch = async (_url, init) => {
-    requests.push(JSON.parse(init.body));
+  const requests: Array<{ sorts?: unknown; start_cursor?: string }> = [];
+  globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    requests.push(JSON.parse(String(init?.body)));
     return Response.json(requests.length === 1
       ? { results: [page], has_more: true, next_cursor: "next" }
       : { results: [{ ...page, id: "book-2" }], has_more: false, next_cursor: null });
-  };
+  }) as typeof fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
 
   const env = { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source" };
@@ -54,11 +57,11 @@ test("worker fetches all Notion pages and exposes only the feed path", async (co
   assert.equal(missing.status, 404);
   const response = await worker.fetch(new Request("https://example.workers.dev/book-express-rss"), env);
   assert.equal(response.status, 200);
-  assert.match(response.headers.get("Content-Type"), /application\/rss\+xml/);
+  assert.match(response.headers.get("Content-Type") ?? "", /application\/rss\+xml/);
   assert.equal(response.headers.get("Cache-Control"), "public, max-age=300");
   assert.equal((await response.text()).match(/<item>/g)?.length, 2);
-  assert.deepEqual(requests[0].sorts, [{ timestamp: "last_edited_time", direction: "descending" }]);
-  assert.equal(requests[1].start_cursor, "next");
+  assert.deepEqual(requests[0]?.sorts, [{ timestamp: "last_edited_time", direction: "descending" }]);
+  assert.equal(requests[1]?.start_cursor, "next");
 
   const head = await worker.fetch(new Request("https://example.workers.dev/book-express-rss", { method: "HEAD" }), env);
   assert.equal(head.status, 200);
@@ -71,14 +74,14 @@ test("worker fetches all Notion pages and exposes only the feed path", async (co
 test("cover image is loaded from the Notion page and proxied", async (context) => {
   const pageId = "3f8e75a1-639c-8120-9671-f146488f6d82";
   const originalFetch = globalThis.fetch;
-  const urls = [];
-  globalThis.fetch = async (url) => {
+  const urls: string[] = [];
+  globalThis.fetch = (async (url: RequestInfo | URL) => {
     urls.push(String(url));
     if (String(url).includes("/pages/")) {
       return Response.json({ properties: page.properties });
     }
     return new Response("image-bytes", { headers: { "Content-Type": "image/jpeg" } });
-  };
+  }) as typeof fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
 
   const env = { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source" };
@@ -94,7 +97,7 @@ test("cover image is loaded from the Notion page and proxied", async (context) =
   assert.equal(urls[0], `https://api.notion.com/v1/pages/${pageId}`);
   assert.equal(urls[1], "https://files.example/cover.jpg?X-Amz-Signature=abc");
 
-  globalThis.fetch = async () => Response.json({ properties: { "封面": { type: "files", files: [] } } });
+  globalThis.fetch = (async () => Response.json({ properties: { "封面": { type: "files", files: [] } } })) as typeof fetch;
   const empty = await worker.fetch(new Request(`https://example.workers.dev/book-express-rss/cover/${pageId}`), env);
   assert.equal(empty.status, 404);
 });
@@ -105,8 +108,8 @@ test("missing configuration and Notion failures return explicit errors", async (
 
   const originalFetch = globalThis.fetch;
   const originalError = console.error;
-  globalThis.fetch = async () => Response.json({ message: "rate limited" }, { status: 429 });
-  console.error = () => {};
+  globalThis.fetch = (async () => Response.json({ message: "rate limited" }, { status: 429 })) as typeof fetch;
+  console.error = (() => {}) as typeof console.error;
   context.after(() => {
     globalThis.fetch = originalFetch;
     console.error = originalError;

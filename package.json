@@ -5,9 +5,16 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node --test"
+    "check": "tsc --noEmit",
+    "types": "wrangler types",
+    "test": "tsc --noEmit && node --test"
   },
   "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
     "wrangler": "^4.0.0"
+  },
+  "dependencies": {
+    "feedsmith": "^3.0.1"
   }
 }
