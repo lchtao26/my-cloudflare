@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "book-express-rss",
+  "name": "my-cloudflare",
   "account_id": "9d43af5ca1b5b8bdf48701c030ed2d52",
   "main": "src/index.js",
   "compatibility_date": "2026-10-13",

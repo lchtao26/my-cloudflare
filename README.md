@@ -16,4 +16,4 @@ Cloudflare Worker 从 Notion「书籍推荐」数据库读取全部书目，在 
 
 `NOTION_TOKEN` 只保存在 Cloudflare Worker Secret 中。Worker 上还没有这个密钥时，Actions 会拒绝部署；先在本地执行一次 `npx wrangler deploy --secrets-file .dev.vars`。不要再把这个仓库接到 Cloudflare Worker 的 Builds，否则每次推送会部署两次。
 
-部署成功后的订阅地址为 `https://book-express-rss.lichcode.workers.dev/book-express-rss`。接口返回 RSS 2.0，按 Notion 的最后编辑时间排序，为每本书使用稳定的 Notion 页面 ID 作为 GUID，并缓存 5 分钟。
+部署成功后的订阅地址为 `https://my-cloudflare.lichcode.workers.dev/book-express-rss`。接口返回 RSS 2.0，按 Notion 的最后编辑时间排序，为每本书使用稳定的 Notion 页面 ID 作为 GUID，并缓存 5 分钟。
