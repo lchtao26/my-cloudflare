@@ -22,7 +22,7 @@ test("RSS item has exactly the requested fields and escapes XML", () => {
   const feed = renderFeed([book], "https://example.workers.dev/book-express-rss");
   assert.match(feed, /<link>\s*<!\[CDATA\[https:\/\/book\.douban\.com\/subject\/123\/\?a=1&b=2\]\]>/);
   assert.match(feed, /<title>\s*<!\[CDATA\[甲 & 乙\]\]>/);
-  assert.match(feed, /<!\[CDATA\[<img src="https:\/\/example\.workers\.dev\/book-express-rss\/cover\/book-1" alt="封面" width="120" style="max-width:120px;height:auto" \/><br \/>\n书名：甲 &amp; 乙<br \/>\n作者：张三<br \/>\n简介：一部 &lt;书&gt;\]\]>/);
+  assert.match(feed, /<!\[CDATA\[书名：甲 &amp; 乙<br \/>\n作者：张三<br \/>\n简介：一部 &lt;书&gt;<br \/>\n<img src="https:\/\/example\.workers\.dev\/book-express-rss\/cover\/book-1" alt="封面" width="120" style="max-width:120px;height:auto" \/>\]\]>/);
   assert.match(feed, /<guid isPermaLink="false">notion:book-1<\/guid>/);
   assert.match(feed, /<atom:link href="https:\/\/example\.workers\.dev\/book-express-rss" rel="self" type="application\/rss\+xml"\/>/);
   assert.match(feed, /<language>zh-CN<\/language>/);

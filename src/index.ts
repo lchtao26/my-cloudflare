@@ -135,10 +135,11 @@ function itemDescription(book: Book, feedUrl: string): string {
     const source = book.sourceUrl ? `<a href="${htmlText(book.sourceUrl)}">${name}</a>` : name;
     lines.push(`来源：${source}`);
   }
-  const text = lines.join("<br />\n");
-  if (!book.hasCover) return text;
-  const src = htmlText(`${feedUrl}/cover/${encodeURIComponent(book.id)}`);
-  return `<img src="${src}" alt="封面" width="120" style="max-width:120px;height:auto" /><br />\n${text}`;
+  if (book.hasCover) {
+    const src = htmlText(`${feedUrl}/cover/${encodeURIComponent(book.id)}`);
+    lines.push(`<img src="${src}" alt="封面" width="120" style="max-width:120px;height:auto" />`);
+  }
+  return lines.join("<br />\n");
 }
 
 export function renderFeed(books: Book[], feedUrl: string): string {
