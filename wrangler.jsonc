@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "book-express-rss",
+  "account_id": "9d43af5ca1b5b8bdf48701c030ed2d52",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-13",
+  "workers_dev": true,
+  "cache": {
+    "enabled": true
+  },
+  "secrets": {
+    "required": ["NOTION_TOKEN"]
+  },
+  "keep_vars": true,
+  "vars": {
+    "NOTION_DATA_SOURCE_ID": "102a59ab-8748-4725-a2f4-48d5ceeef1b6"
+  }
+}
