@@ -10,6 +10,7 @@ const page: NotionPage = {
     "书名": { type: "title", title: [{ plain_text: "甲 & 乙" }] },
     "简介": { type: "rich_text", rich_text: [{ plain_text: "一部 <书>" }] },
     "作者": { type: "rich_text", rich_text: [{ plain_text: "张三" }] },
+    "作者介绍": { type: "rich_text", rich_text: [{ plain_text: "写过 & 小说" }] },
     "豆瓣 / 亚马逊": { type: "url", url: "https://book.douban.com/subject/123/?a=1&b=2" },
     "封面": { type: "files", files: [{ name: "cover.jpg", type: "file", file: { url: "https://files.example/cover.jpg?X-Amz-Signature=abc" } }] },
     "出版社 / 品牌": { type: "rich_text", rich_text: [{ plain_text: "三联 & 书店" }] },
@@ -22,7 +23,10 @@ test("RSS item has exactly the requested fields and escapes XML", () => {
   const feed = renderFeed([book], "https://example.workers.dev/book-express-rss");
   assert.match(feed, /<link>\s*<!\[CDATA\[https:\/\/book\.douban\.com\/subject\/123\/\?a=1&b=2\]\]>/);
   assert.match(feed, /<title>\s*<!\[CDATA\[甲 & 乙\]\]>/);
-  assert.match(feed, /<!\[CDATA\[作者：张三<br \/>\n简介：一部 &lt;书&gt;<br \/>\n出版社：三联 &amp; 书店<br \/>\n<img src="https:\/\/example\.workers\.dev\/book-express-rss\/cover\/book-1" alt="封面" \/>\]\]>/);
+  assert.match(feed, /<!\[CDATA\[作者：张三 \| 写过 &amp; 小说<br \/>\n简介：一部 &lt;书&gt;<br \/>\n出版社：三联 &amp; 书店<br \/>\n<img src="https:\/\/example\.workers\.dev\/book-express-rss\/cover\/book-1" alt="封面" \/>\]\]>/);
+  const withoutIntro = bookFromPage({ ...page, properties: { ...page.properties, "作者介绍": { type: "rich_text", rich_text: [] } } });
+  assert.match(renderFeed(withoutIntro ? [withoutIntro] : [], "https://example.workers.dev/book-express-rss"), /作者：张三<br \/>/);
+  assert.doesNotMatch(renderFeed(withoutIntro ? [withoutIntro] : [], "https://example.workers.dev/book-express-rss"), /作者：张三 \|/);
   assert.doesNotMatch(feed, /书名：|width=|style=|<category>|files\.example|来源：/);
   assert.match(feed, /<guid isPermaLink="false">notion:book-1<\/guid>/);
   assert.match(feed, /<atom:link href="https:\/\/example\.workers\.dev\/book-express-rss" rel="self" type="application\/rss\+xml"\/>/);

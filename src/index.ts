@@ -52,6 +52,7 @@ export type Book = {
   id: string;
   title: string;
   author: string;
+  authorIntro: string;
   summary: string;
   link: string;
   hasCover: boolean;
@@ -116,6 +117,7 @@ export function bookFromPage(page: NotionPage): Book | null {
     id: page.id,
     title,
     author: textProperty(properties, "作者"),
+    authorIntro: textProperty(properties, "作者介绍"),
     summary: textProperty(properties, "简介"),
     link,
     hasCover: coverFileUrl(page) !== null,
@@ -127,8 +129,9 @@ export function bookFromPage(page: NotionPage): Book | null {
 }
 
 function itemDescription(book: Book, feedUrl: string): string {
+  const author = [book.author, book.authorIntro].filter(Boolean).map(htmlText).join(" | ");
   const lines = [
-    `作者：${htmlText(book.author)}`,
+    `作者：${author}`,
     `简介：${htmlText(book.summary)}`,
   ];
   if (book.publisher) lines.push(`出版社：${htmlText(book.publisher)}`);
