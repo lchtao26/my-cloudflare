@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import worker, { bookFromPage, renderFeed, type NotionPage } from "../src/index.ts";
+import { parseRssFeed } from "feedsmith";
+import worker, { bookFromPage, excerptFromPage, renderExcerptFeed, renderFeed, type NotionPage } from "../src/index.ts";
 
 const page: NotionPage = {
   id: "book-1",
@@ -149,4 +150,127 @@ test("missing configuration and Notion failures return explicit errors", async (
   const response = await worker.fetch(request, { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source" });
   assert.equal(response.status, 502);
   assert.equal(await response.text(), "Feed temporarily unavailable");
+});
+
+test("excerpt feed filters translations, paginates, and links to Notion pages", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const excerpt = {
+    id: "407e75a1-639c-81ca-8919-f4bff2a57884",
+    url: "https://www.notion.so/excerpt-1",
+    last_edited_time: "2026-10-13T10:00:00.000Z",
+    properties: {
+      "标题": { type: "title", title: [{ plain_text: "Original & title" }] },
+      "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "第一节 & 开始" }] },
+      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "一行 <文字>\n" }, { plain_text: "第二行 & 更多" }] },
+      "出处": { type: "rich_text", rich_text: [{ plain_text: "甲 & 乙" }] },
+      "内容类型": { type: "select", select: { name: "书籍" } },
+      "作者": { type: "rich_text", rich_text: [{ plain_text: "张三" }] },
+      "出版方": { type: "rich_text", rich_text: [{ plain_text: "某出版社" }] },
+      "章节": { type: "rich_text", rich_text: [{ plain_text: "第一章" }] },
+      "原文语言": { type: "select", select: { name: "英文" } },
+      "发布日期": { type: "date", date: { start: "2025-06-12" } },
+      "原文链接": { type: "url", url: "https://example.com/original?a=1&b=2" },
+    },
+  };
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+    return Response.json(requests.length === 1
+      ? { results: [excerpt, { ...excerpt, id: "empty", properties: { ...excerpt.properties, "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "  " }] } } }], has_more: true, next_cursor: "next" }
+      : { results: [{ ...excerpt, id: "407e75a1-639c-81ca-8919-f4bff2a57885", url: "https://www.notion.so/excerpt-2" }], has_more: false });
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+
+  const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" };
+  const response = await worker.fetch(new Request("https://example.workers.dev/book-excerpts-rss"), env);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("Content-Type") ?? "", /application\/rss\+xml/);
+  const feed = await response.text();
+  const parsed = parseRssFeed(feed);
+  assert.equal(parsed.title, "阅读节选");
+  assert.equal(parsed.items?.length, 2);
+  const item = parsed.items?.[0];
+  assert.equal(item?.title, "第一节 & 开始");
+  assert.equal(item?.link, "https://www.notion.so/excerpt-1");
+  assert.equal(item?.guid?.value, "notion:407e75a1-639c-81ca-8919-f4bff2a57884");
+  assert.equal(item?.description, [
+    "<p><cite>甲 &amp; 乙</cite> · 作者：张三</p>",
+    "<p>一行 &lt;文字&gt;<br />\n第二行 &amp; 更多</p>",
+    "<hr />",
+    "<p>原标题：Original &amp; title<br />\n内容类型：书籍<br />\n出版方：某出版社<br />\n章节：第一章<br />\n原文语言：英文<br />\n原文发布日期：2025-06-12</p>",
+    '<p><a href="https://example.com/original?a=1&amp;b=2">阅读原文</a> · <a href="https://www.notion.so/excerpt-1">在 Notion 中查看</a></p>',
+  ].join("\n"));
+  assert.equal(requests[0]?.url, "https://api.notion.com/v1/data_sources/excerpt-source/query");
+  assert.deepEqual(requests[0]?.body.filter, { property: "正文翻译", rich_text: { is_not_empty: true } });
+  assert.equal(requests[1]?.body.start_cursor, "next");
+  assert.equal((await worker.fetch(new Request("https://example.workers.dev/book-excerpts-rss"), { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "book-source" })).status, 503);
+});
+test("excerpt titles fall back to the original and missing source fields are omitted", () => {
+  const excerpt = excerptFromPage({
+    id: "1", url: "https://www.notion.so/1", properties: {
+      "标题": { type: "title", title: [{ plain_text: "节" }] },
+      "标题翻译": { type: "rich_text", rich_text: [{ plain_text: " \n " }] },
+      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
+      "出处": { type: "rich_text", rich_text: [{ plain_text: "书" }] },
+      "原文链接": { type: "url", url: "javascript:alert(1)" },
+    },
+  });
+  assert.ok(excerpt);
+  const feed = renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss");
+  const item = parseRssFeed(feed).items?.[0];
+  assert.equal(item?.title, "节");
+  assert.match(item?.description ?? "", /<p><cite>书<\/cite><\/p>\n<p>正文<\/p>/);
+  assert.doesNotMatch(feed, /作者：|出版方：|章节：|原标题：|内容类型：|阅读原文|javascript:/);
+});
+
+test("translations preserve paragraphs from newlines and stored br tags while escaping other HTML", () => {
+  for (const separator of ["\n\n", "\r\n \r\n", "\r\r", "<br /><br />", "<BR><br/>"]) {
+    const excerpt = excerptFromPage({
+      id: "paragraphs", url: "https://www.notion.so/paragraphs", properties: {
+        "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "中文标题" }] },
+        "正文翻译": { type: "rich_text", rich_text: [{ plain_text: `第一段${separator}第二段\n段内换行<script>alert(1)</script><br onmouseover="alert(1)"> & ]]>` }] },
+      },
+    });
+    assert.ok(excerpt);
+    const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
+    assert.equal(item?.title, "中文标题");
+    assert.match(item?.description ?? "", /<p>第一段<\/p>\n<p>第二段<br \/>\n段内换行&lt;script&gt;alert\(1\)&lt;\/script&gt;&lt;br onmouseover=&quot;alert\(1\)&quot;&gt; &amp; \]\]&gt;<\/p>/);
+    assert.doesNotMatch(item?.description ?? "", /<script|<br onmouseover|&lt;br\s*\/?&gt;/);
+  }
+});
+
+test("magazine and web excerpts use neutral source labels and keep stable Notion links", () => {
+  for (const contentType of ["杂志", "网页文章"]) {
+    const excerpt = excerptFromPage({
+      id: "article", url: "https://www.notion.so/article", properties: {
+        "标题": { type: "title", title: [{ plain_text: "Article" }] },
+        "标题翻译": { type: "rich_text", rich_text: [{ text: { content: "文章" } }] },
+        "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "译文" }] },
+        "内容类型": { type: "select", select: { name: contentType } },
+        "出处": { type: "rich_text", rich_text: [{ plain_text: "专题" }] },
+        "出版方": { type: "rich_text", rich_text: [{ plain_text: "媒体" }] },
+        "原文链接": { type: "url", url: "https://example.com/article" },
+      },
+    });
+    assert.ok(excerpt);
+    const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
+    assert.equal(item?.link, "https://www.notion.so/article");
+    assert.equal(item?.guid?.value, "notion:article");
+    assert.match(item?.description ?? "", new RegExp(`内容类型：${contentType}`));
+    assert.match(item?.description ?? "", /出版方：媒体/);
+    assert.doesNotMatch(item?.description ?? "", /书名：|出版社：/);
+  }
+});
+
+test("excerpts without translated content, identity, or a valid Notion link are excluded", () => {
+  const translated: NotionPage = {
+    id: "1", url: "https://www.notion.so/1", properties: {
+      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
+    },
+  };
+  assert.equal(excerptFromPage(translated)?.title, "无标题");
+  assert.equal(excerptFromPage({ ...translated, id: undefined }), null);
+  assert.equal(excerptFromPage({ ...translated, url: "javascript:alert(1)" }), null);
+  assert.equal(excerptFromPage({ ...translated, properties: {} }), null);
+  assert.equal(excerptFromPage({ ...translated, properties: { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "\n  " }] } } }), null);
 });

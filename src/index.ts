@@ -5,6 +5,7 @@ const FEED_TITLE = "书籍推荐";
 const FEED_DESCRIPTION = "来自 Notion「书籍推荐」的书目 RSS";
 const NOTION_PAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FEED_PATH = "/book-express-rss";
+const EXCERPT_FEED_PATH = "/book-excerpts-rss";
 
 type RichText = { plain_text?: string; text?: { content?: string } };
 
@@ -22,11 +23,13 @@ type NotionProperty = {
   url?: string | null;
   files?: NotionFile[];
   select?: { name?: string } | null;
+  date?: { start?: string } | null;
 };
 
 type WorkerBindings = {
   NOTION_TOKEN?: string;
   NOTION_DATA_SOURCE_ID?: string;
+  NOTION_EXCERPTS_DATA_SOURCE_ID?: string;
 };
 
 type ConfiguredBindings = {
@@ -46,6 +49,24 @@ type NotionQuery = {
   results?: NotionPage[];
   has_more?: boolean;
   next_cursor?: string | null;
+  request_status?: { type?: string };
+};
+
+type Excerpt = {
+  id: string;
+  title: string;
+  originalTitle: string;
+  translation: string;
+  sourceTitle: string;
+  contentType: string;
+  author: string;
+  chapter: string;
+  publisher: string;
+  originalLanguage: string;
+  originalUrl: string | null;
+  publishedDate: string;
+  link: string;
+  pubDate: Date | null;
 };
 
 export type Book = {
@@ -171,8 +192,87 @@ export function renderFeed(books: Book[], feedUrl: string): string {
   });
 }
 
-async function fetchBooks(env: ConfiguredBindings): Promise<Book[]> {
-  const books: Book[] = [];
+export function excerptFromPage(page: NotionPage): Excerpt | null {
+  const properties = page.properties;
+  const translation = textProperty(properties, "正文翻译");
+  const link = externalUrl(page.url);
+  if (!translation || !link || !page.id) return null;
+  const originalTitle = textProperty(properties, "标题");
+  const originalLink = properties?.["原文链接"];
+  const published = properties?.["发布日期"];
+  const date = new Date(page.last_edited_time ?? page.created_time ?? "");
+  return {
+    id: page.id,
+    title: textProperty(properties, "标题翻译") || originalTitle || "无标题",
+    originalTitle,
+    translation,
+    sourceTitle: textProperty(properties, "出处"),
+    contentType: selectProperty(properties, "内容类型"),
+    author: textProperty(properties, "作者"),
+    chapter: textProperty(properties, "章节"),
+    publisher: textProperty(properties, "出版方"),
+    originalLanguage: selectProperty(properties, "原文语言"),
+    originalUrl: externalUrl(originalLink?.type === "url" ? originalLink.url : null),
+    publishedDate: published?.type === "date" ? published.date?.start?.slice(0, 10) ?? "" : "",
+    link,
+    pubDate: Number.isNaN(date.getTime()) ? null : date,
+  };
+}
+
+export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string {
+  return generateRssFeed({
+    title: "阅读节选",
+    link: feedUrl,
+    description: "来自 Notion「阅读节选」的书籍、杂志与网页译文 RSS",
+    language: "zh-CN",
+    atom: { links: [{ href: feedUrl, rel: "self", type: "application/rss+xml" }] },
+    items: excerpts.map((excerpt) => ({
+      title: excerpt.title,
+      link: excerpt.link,
+      description: excerptDescription(excerpt),
+      guid: { value: `notion:${excerpt.id}`, isPermaLink: false },
+      ...(excerpt.pubDate ? { pubDate: excerpt.pubDate } : {}),
+    })),
+  });
+}
+
+function excerptDescription(excerpt: Excerpt): string {
+  const source = [
+    excerpt.sourceTitle ? `<cite>${htmlText(excerpt.sourceTitle)}</cite>` : "",
+    excerpt.author ? `作者：${htmlText(excerpt.author)}` : "",
+  ].filter(Boolean).join(" · ");
+  const details = [
+    ["原标题", excerpt.originalTitle !== excerpt.title ? excerpt.originalTitle : ""],
+    ["内容类型", excerpt.contentType],
+    ["出版方", excerpt.publisher],
+    ["章节", excerpt.chapter],
+    ["原文语言", excerpt.originalLanguage],
+    ["原文发布日期", excerpt.publishedDate],
+  ].filter(([, value]) => value).map(([label, value]) => `${label}：${htmlText(value)}`);
+  const links = [
+    excerpt.originalUrl ? `<a href="${htmlText(excerpt.originalUrl)}">阅读原文</a>` : "",
+    `<a href="${htmlText(excerpt.link)}">在 Notion 中查看</a>`,
+  ].filter(Boolean).join(" · ");
+  return [
+    ...(source ? [`<p>${source}</p>`] : []),
+    translationParagraphs(excerpt.translation),
+    "<hr />",
+    ...(details.length ? [`<p>${details.join("<br />\n")}</p>`] : []),
+    `<p>${links}</p>`,
+  ].join("\n");
+}
+
+function translationParagraphs(translation: string): string {
+  // Existing translations contain literal <br /> separators. Interpret only
+  // attribute-free line breaks; all other markup remains escaped text.
+  return translation.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim()
+    .split(/\n(?:[^\S\n]*\n)+/)
+    .map((paragraph) => `<p>${htmlText(paragraph).replaceAll("\n", "<br />\n")}</p>`)
+    .join("\n");
+}
+
+async function fetchPages(env: ConfiguredBindings, filter?: object): Promise<NotionPage[]> {
+  const pages: NotionPage[] = [];
   let cursor: string | null | undefined;
 
   do {
@@ -186,6 +286,7 @@ async function fetchBooks(env: ConfiguredBindings): Promise<Book[]> {
       body: JSON.stringify({
         page_size: 100,
         sorts: [{ timestamp: "last_edited_time", direction: "descending" }],
+        ...(filter ? { filter } : {}),
         ...(cursor ? { start_cursor: cursor } : {}),
       }),
     });
@@ -195,15 +296,13 @@ async function fetchBooks(env: ConfiguredBindings): Promise<Book[]> {
     }
 
     const data = await response.json() as NotionQuery;
-    for (const page of data.results ?? []) {
-      const book = bookFromPage(page);
-      if (book) books.push(book);
-    }
+    if (data.request_status?.type === "incomplete") throw new Error("Notion query result is incomplete");
+    pages.push(...data.results ?? []);
     cursor = data.has_more ? data.next_cursor : null;
     if (data.has_more && !cursor) throw new Error("Notion returned an incomplete page without a cursor");
   } while (cursor);
 
-  return books;
+  return pages;
 }
 
 function coverIdFromPath(pathname: string): string | null {
@@ -240,14 +339,15 @@ const worker = {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
     const coverId = coverIdFromPath(url.pathname);
-    if (url.pathname !== FEED_PATH && !coverId) {
+    const isExcerptFeed = url.pathname === EXCERPT_FEED_PATH;
+    if (url.pathname !== FEED_PATH && !isExcerptFeed && !coverId) {
       return new Response("Not found", { status: 404 });
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
     }
     const notionToken = env.NOTION_TOKEN;
-    const dataSourceId = env.NOTION_DATA_SOURCE_ID;
+    const dataSourceId = isExcerptFeed ? env.NOTION_EXCERPTS_DATA_SOURCE_ID : env.NOTION_DATA_SOURCE_ID;
     if (!notionToken || !dataSourceId) {
       return new Response("Feed is not configured", { status: 503 });
     }
@@ -260,9 +360,14 @@ const worker = {
         return request.method === "HEAD" ? new Response(null, { status: cover.status, headers: cover.headers }) : cover;
       }
 
-      const books = await fetchBooks(configured);
+      const pages = await fetchPages(configured, isExcerptFeed
+        ? { property: "正文翻译", rich_text: { is_not_empty: true } }
+        : undefined);
       const feedUrl = `${url.origin}${url.pathname}`;
-      return new Response(request.method === "HEAD" ? null : renderFeed(books, feedUrl), {
+      const feed = isExcerptFeed
+        ? renderExcerptFeed(pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null), feedUrl)
+        : renderFeed(pages.map(bookFromPage).filter((item): item is Book => item !== null), feedUrl);
+      return new Response(request.method === "HEAD" ? null : feed, {
         headers: {
           "Content-Type": "application/rss+xml; charset=utf-8",
           "Cache-Control": "public, max-age=300",
