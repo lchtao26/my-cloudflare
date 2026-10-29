@@ -1,4 +1,5 @@
 import { generateRssFeed, type RssFeed } from "feedsmith";
+import pangu from "pangu";
 
 const NOTION_VERSION = "2026-03-11";
 const FEED_TITLE = "书籍推荐";
@@ -92,6 +93,10 @@ function htmlText(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
+function displayText(value: string): string {
+  return htmlText(pangu.spaceText(value));
+}
+
 function textProperty(properties: NotionPage["properties"], name: string): string {
   const property = properties?.[name];
   if (property?.type !== "title" && property?.type !== "rich_text") return "";
@@ -151,14 +156,14 @@ export function bookFromPage(page: NotionPage): Book | null {
 }
 
 function itemDescription(book: Book, feedUrl: string): string {
-  const author = [book.author, book.authorIntro].filter(Boolean).map(htmlText).join(" | ");
+  const author = [book.author, book.authorIntro].filter(Boolean).map(displayText).join(" | ");
   const lines = [
     `作者：${author}`,
-    `简介：${htmlText(book.summary)}`,
+    `简介：${displayText(book.summary)}`,
   ];
-  if (book.publisher) lines.push(`出版社：${htmlText(book.publisher)}`);
+  if (book.publisher) lines.push(`出版社：${displayText(book.publisher)}`);
   if (book.sourceName) {
-    const name = htmlText(book.sourceName);
+    const name = displayText(book.sourceName);
     const source = book.sourceUrl ? `<a href="${htmlText(book.sourceUrl)}">${name}</a>` : name;
     lines.push(`来源：${source}`);
   }
@@ -172,7 +177,7 @@ function itemDescription(book: Book, feedUrl: string): string {
 export function renderFeed(books: Book[], feedUrl: string): string {
   const items: Array<RssFeed.Item<Date>> = books.map((book) => {
     const item: RssFeed.Item<Date> = {
-      title: book.title,
+      title: pangu.spaceText(book.title),
       link: book.link,
       description: itemDescription(book, feedUrl),
       guid: { value: `notion:${book.id}`, isPermaLink: false },
@@ -182,9 +187,9 @@ export function renderFeed(books: Book[], feedUrl: string): string {
   });
 
   return generateRssFeed({
-    title: FEED_TITLE,
+    title: pangu.spaceText(FEED_TITLE),
     link: feedUrl,
-    description: FEED_DESCRIPTION,
+    description: pangu.spaceText(FEED_DESCRIPTION),
     language: "zh-CN",
     atom: {
       links: [{ href: feedUrl, rel: "self", type: "application/rss+xml" }],
@@ -222,13 +227,13 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
 
 export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string {
   return generateRssFeed({
-    title: "阅读节选",
+    title: pangu.spaceText("阅读节选"),
     link: feedUrl,
-    description: "来自 Notion「阅读节选」的书籍、杂志与网页译文 RSS",
+    description: pangu.spaceText("来自 Notion「阅读节选」的书籍、杂志与网页译文 RSS"),
     language: "zh-CN",
     atom: { links: [{ href: feedUrl, rel: "self", type: "application/rss+xml" }] },
     items: excerpts.map((excerpt) => ({
-      title: excerpt.title,
+      title: pangu.spaceText(excerpt.title),
       link: excerpt.link,
       description: excerptDescription(excerpt, feedUrl),
       guid: { value: `notion:${excerpt.id}`, isPermaLink: false },
@@ -239,8 +244,8 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
 
 function excerptDescription(excerpt: Excerpt, feedUrl: string): string {
   const source = [
-    excerpt.sourceTitle ? `<cite>${htmlText(excerpt.sourceTitle)}</cite>` : "",
-    excerpt.author ? `作者：${htmlText(excerpt.author)}` : "",
+    excerpt.sourceTitle ? `<cite>${displayText(excerpt.sourceTitle)}</cite>` : "",
+    excerpt.author ? `作者：${displayText(excerpt.author)}` : "",
   ].filter(Boolean).join(" · ");
   const details = [
     ["原标题", excerpt.originalTitle !== excerpt.title ? excerpt.originalTitle : ""],
@@ -249,7 +254,7 @@ function excerptDescription(excerpt: Excerpt, feedUrl: string): string {
     ["章节", excerpt.chapter],
     ["原文语言", excerpt.originalLanguage],
     ["原文发布日期", excerpt.publishedDate],
-  ].filter(([, value]) => value).map(([label, value]) => `${label}：${htmlText(value)}`);
+  ].filter(([, value]) => value).map(([label, value]) => `${label}：${displayText(value)}`);
   const links = [
     excerpt.originalUrl ? `<a href="${htmlText(excerpt.originalUrl)}">阅读原文</a>` : "",
     `<a href="${htmlText(excerpt.link)}">在 Notion 中查看</a>`,
@@ -277,11 +282,11 @@ function translationParagraphs(translation: string, pageId: string, feedUrl: str
         const blockId = match[1];
         const fileId = match[2];
         if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
-        output += htmlText(paragraph.slice(offset, match.index)).replaceAll("\n", "<br />\n");
+        output += displayText(paragraph.slice(offset, match.index)).replaceAll("\n", "<br />\n");
         output += `<img src="${htmlText(`${feedUrl}/image/${pageId}/${blockId}`)}" alt="正文图片" />`;
         offset = match.index + match[0].length;
       }
-      return `<p>${output}${htmlText(paragraph.slice(offset)).replaceAll("\n", "<br />\n")}</p>`;
+      return `<p>${output}${displayText(paragraph.slice(offset)).replaceAll("\n", "<br />\n")}</p>`;
     })
     .join("\n");
 }

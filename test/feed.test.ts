@@ -234,7 +234,7 @@ test("translations preserve paragraphs from newlines and stored br tags while es
     assert.ok(excerpt);
     const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
     assert.equal(item?.title, "中文标题");
-    assert.match(item?.description ?? "", /<p>第一段<\/p>\n<p>第二段<br \/>\n段内换行&lt;script&gt;alert\(1\)&lt;\/script&gt;&lt;br onmouseover=&quot;alert\(1\)&quot;&gt; &amp; \]\]&gt;<\/p>/);
+    assert.match(item?.description ?? "", /<p>第一段<\/p>\n<p>第二段<br \/>\n段内换行&lt;script&gt;alert \(1\)&lt;\/script&gt;&lt;br onmouseover=&quot;alert\(1\)&quot;&gt; &amp; \]\]&gt;<\/p>/);
     assert.doesNotMatch(item?.description ?? "", /<script|<br onmouseover|&lt;br\s*\/?&gt;/);
   }
 });
@@ -287,6 +287,24 @@ test("excerpt image tags become proxied images while unrelated HTML stays escape
   assert.match(description, /前文<\/p>\n<p><img/);
   assert.match(description, /<p>后文 &lt;script&gt;x&lt;\/script&gt;<\/p>/);
   assert.doesNotMatch(description, /notion-file-block/);
+});
+
+test("Pangu formats RSS titles and visible content without changing links or HTML attributes", () => {
+  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+  const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
+  const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
+  const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: {
+    "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "AI时代的RSS" }] },
+    "正文翻译": { type: "rich_text", rich_text: [{ plain_text: `使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}" />` }] },
+    "出处": { type: "rich_text", rich_text: [{ plain_text: "Cloudflare Workers" }] },
+  } });
+  assert.ok(excerpt);
+  const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
+  assert.equal(item?.title, "AI 时代的 RSS");
+  assert.match(item?.description ?? "", /<cite>Cloudflare Workers<\/cite>/);
+  assert.match(item?.description ?? "", /使用 API 处理 2026 年数据/);
+  assert.match(item?.description ?? "", new RegExp(`<img src="https://example.com/book-excerpts-rss/image/${pageId}/${blockId}" alt="正文图片" \/>`));
+  assert.doesNotMatch(item?.description ?? "", /https:\/\/example\.com \/book/);
 });
 
 test("excerpt image proxy serves only images referenced by translated pages in the configured data source", async (context) => {
