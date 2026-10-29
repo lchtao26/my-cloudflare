@@ -39,6 +39,7 @@ type ConfiguredBindings = {
 
 export type NotionPage = {
   id?: string;
+  parent?: { type?: string; data_source_id?: string };
   url?: string | null;
   last_edited_time?: string;
   created_time?: string;
@@ -229,14 +230,14 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
     items: excerpts.map((excerpt) => ({
       title: excerpt.title,
       link: excerpt.link,
-      description: excerptDescription(excerpt),
+      description: excerptDescription(excerpt, feedUrl),
       guid: { value: `notion:${excerpt.id}`, isPermaLink: false },
       ...(excerpt.pubDate ? { pubDate: excerpt.pubDate } : {}),
     })),
   });
 }
 
-function excerptDescription(excerpt: Excerpt): string {
+function excerptDescription(excerpt: Excerpt, feedUrl: string): string {
   const source = [
     excerpt.sourceTitle ? `<cite>${htmlText(excerpt.sourceTitle)}</cite>` : "",
     excerpt.author ? `作者：${htmlText(excerpt.author)}` : "",
@@ -255,19 +256,33 @@ function excerptDescription(excerpt: Excerpt): string {
   ].filter(Boolean).join(" · ");
   return [
     ...(source ? [`<p>${source}</p>`] : []),
-    translationParagraphs(excerpt.translation),
+    translationParagraphs(excerpt.translation, excerpt.id, feedUrl),
     "<hr />",
     ...(details.length ? [`<p>${details.join("<br />\n")}</p>`] : []),
     `<p>${links}</p>`,
   ].join("\n");
 }
 
-function translationParagraphs(translation: string): string {
+const IMAGE_TAG = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\?[^"<>]*)?"\s*\/>/gi;
+
+function translationParagraphs(translation: string, pageId: string, feedUrl: string): string {
   // Existing translations contain literal <br /> separators. Interpret only
   // attribute-free line breaks; all other markup remains escaped text.
   return translation.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim()
     .split(/\n(?:[^\S\n]*\n)+/)
-    .map((paragraph) => `<p>${htmlText(paragraph).replaceAll("\n", "<br />\n")}</p>`)
+    .map((paragraph) => {
+      let output = "";
+      let offset = 0;
+      for (const match of paragraph.matchAll(IMAGE_TAG)) {
+        const blockId = match[1];
+        const fileId = match[2];
+        if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
+        output += htmlText(paragraph.slice(offset, match.index)).replaceAll("\n", "<br />\n");
+        output += `<img src="${htmlText(`${feedUrl}/image/${pageId}/${blockId}`)}" alt="正文图片" />`;
+        offset = match.index + match[0].length;
+      }
+      return `<p>${output}${htmlText(paragraph.slice(offset)).replaceAll("\n", "<br />\n")}</p>`;
+    })
     .join("\n");
 }
 
@@ -322,6 +337,10 @@ async function fetchCover(env: ConfiguredBindings, pageId: string): Promise<Resp
 
   const imageUrl = coverFileUrl(await response.json() as NotionPage);
   if (!imageUrl) return null;
+  return fetchImage(imageUrl);
+}
+
+async function fetchImage(imageUrl: string): Promise<Response> {
   const image = await fetch(imageUrl);
   if (!image.ok) throw new Error(`Cover image returned ${image.status}`);
   const contentType = image.headers.get("Content-Type") ?? "";
@@ -335,25 +354,55 @@ async function fetchCover(env: ConfiguredBindings, pageId: string): Promise<Resp
   });
 }
 
+async function fetchExcerptImage(env: ConfiguredBindings, pageId: string, blockId: string): Promise<Response | null> {
+  const headers = { Authorization: `Bearer ${env.NOTION_TOKEN}`, "Notion-Version": NOTION_VERSION };
+  const pageResponse = await fetch(`https://api.notion.com/v1/pages/${pageId}`, { headers });
+  if (pageResponse.status === 404) return null;
+  if (!pageResponse.ok) throw new Error(`Notion API returned ${pageResponse.status}`);
+  const page = await pageResponse.json() as NotionPage;
+  if (page.parent?.type !== "data_source_id" || page.parent.data_source_id !== env.NOTION_DATA_SOURCE_ID) return null;
+  const translation = textProperty(page.properties, "正文翻译");
+  const referenced = Array.from(translation.matchAll(IMAGE_TAG)).some((match) =>
+    match[1]?.toLowerCase() === blockId.toLowerCase() && NOTION_PAGE_ID.test(match[2] ?? ""));
+  if (!referenced) return null;
+  const blockResponse = await fetch(`https://api.notion.com/v1/blocks/${blockId}`, { headers });
+  if (blockResponse.status === 404) return null;
+  if (!blockResponse.ok) throw new Error(`Notion API returned ${blockResponse.status}`);
+  const block = await blockResponse.json() as {
+    type?: string; parent?: { type?: string; page_id?: string };
+    image?: { type?: string; file?: { url?: string } };
+  };
+  if (block.type !== "image" || block.parent?.type !== "page_id" || block.parent.page_id !== pageId || block.image?.type !== "file") return null;
+  const imageUrl = externalUrl(block.image.file?.url);
+  return imageUrl ? fetchImage(imageUrl) : null;
+}
+
 const worker = {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
     const coverId = coverIdFromPath(url.pathname);
     const isExcerptFeed = url.pathname === EXCERPT_FEED_PATH;
-    if (url.pathname !== FEED_PATH && !isExcerptFeed && !coverId) {
+    const imageMatch = url.pathname.match(/^\/book-excerpts-rss\/image\/([^/]+)\/([^/]+)$/);
+    const imageIds = imageMatch && NOTION_PAGE_ID.test(imageMatch[1] ?? "") && NOTION_PAGE_ID.test(imageMatch[2] ?? "") ? [imageMatch[1]!, imageMatch[2]!] : null;
+    if (url.pathname !== FEED_PATH && !isExcerptFeed && !coverId && !imageIds) {
       return new Response("Not found", { status: 404 });
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
     }
     const notionToken = env.NOTION_TOKEN;
-    const dataSourceId = isExcerptFeed ? env.NOTION_EXCERPTS_DATA_SOURCE_ID : env.NOTION_DATA_SOURCE_ID;
+    const dataSourceId = isExcerptFeed || imageIds ? env.NOTION_EXCERPTS_DATA_SOURCE_ID : env.NOTION_DATA_SOURCE_ID;
     if (!notionToken || !dataSourceId) {
       return new Response("Feed is not configured", { status: 503 });
     }
     const configured = { NOTION_TOKEN: notionToken, NOTION_DATA_SOURCE_ID: dataSourceId };
 
     try {
+      if (imageIds) {
+        const image = await fetchExcerptImage(configured, imageIds[0]!, imageIds[1]!);
+        if (!image) return new Response("Not found", { status: 404 });
+        return request.method === "HEAD" ? new Response(null, { status: image.status, headers: image.headers }) : image;
+      }
       if (coverId) {
         const cover = await fetchCover(configured, coverId);
         if (!cover) return new Response("Not found", { status: 404 });
@@ -375,8 +424,8 @@ const worker = {
         },
       });
     } catch (error) {
-      console.error(coverId ? "Failed to load book cover" : "Failed to build book RSS", error);
-      return new Response(coverId ? "Cover temporarily unavailable" : "Feed temporarily unavailable", { status: 502 });
+      console.error(coverId || imageIds ? "Failed to load image" : "Failed to build book RSS", error);
+      return new Response(coverId || imageIds ? "Image temporarily unavailable" : "Feed temporarily unavailable", { status: 502 });
     }
   },
 };

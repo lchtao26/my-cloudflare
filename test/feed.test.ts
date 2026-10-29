@@ -274,3 +274,45 @@ test("excerpts without translated content, identity, or a valid Notion link are 
   assert.equal(excerptFromPage({ ...translated, properties: {} }), null);
   assert.equal(excerptFromPage({ ...translated, properties: { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "\n  " }] } } }), null);
 });
+
+test("excerpt image tags become proxied images while unrelated HTML stays escaped", () => {
+  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+  const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
+  const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
+  const translation = `前文<br /><br /><image source="notion-file-block://${blockId}/${fileId}?name=photo.jpg" /><br /><br />后文 <script>x</script>`;
+  const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: translation }] } } });
+  assert.ok(excerpt);
+  const description = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0]?.description ?? "";
+  assert.match(description, new RegExp(`<img src="https://example.com/book-excerpts-rss/image/${pageId}/${blockId}" alt="正文图片" />`));
+  assert.match(description, /前文<\/p>\n<p><img/);
+  assert.match(description, /<p>后文 &lt;script&gt;x&lt;\/script&gt;<\/p>/);
+  assert.doesNotMatch(description, /notion-file-block/);
+});
+
+test("excerpt image proxy serves only images referenced by translated pages in the configured data source", async (context) => {
+  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+  const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
+  const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
+  const token = globalThis.fetch;
+  let referenced = true;
+  let correctParent = true;
+  globalThis.fetch = (async (url: RequestInfo | URL) => {
+    if (String(url).includes("/pages/")) return Response.json({ parent: { type: "data_source_id", data_source_id: correctParent ? "source" : "other" }, properties: { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: referenced ? `<image source="notion-file-block://${blockId}/${fileId}" />` : "无图片" }] } } });
+    if (String(url).includes("/blocks/")) return Response.json({ type: "image", parent: { type: "page_id", page_id: pageId }, image: { type: "file", file: { url: "https://files.example/image.jpg" } } });
+    return new Response("image bytes", { headers: { "Content-Type": "image/jpeg" } });
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = token; });
+  const url = `https://example.com/book-excerpts-rss/image/${pageId}/${blockId}`;
+  const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "source" };
+  const response = await worker.fetch(new Request(url), env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Content-Type"), "image/jpeg");
+  assert.equal(await response.text(), "image bytes");
+  assert.equal((await worker.fetch(new Request(url, { method: "HEAD" }), env)).status, 200);
+  referenced = false;
+  assert.equal((await worker.fetch(new Request(url), env)).status, 404);
+  referenced = true;
+  correctParent = false;
+  assert.equal((await worker.fetch(new Request(url), env)).status, 404);
+  assert.equal((await worker.fetch(new Request("https://example.com/book-excerpts-rss/image/invalid/invalid"), env)).status, 404);
+});
