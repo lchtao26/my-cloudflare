@@ -59,12 +59,11 @@ type Excerpt = {
   title: string;
   originalTitle: string;
   translation: string;
+  terms: string;
   sourceTitle: string;
-  contentType: string;
   author: string;
   chapter: string;
   publisher: string;
-  originalLanguage: string;
   originalUrl: string | null;
   publishedDate: string;
   link: string;
@@ -198,11 +197,12 @@ export function renderFeed(books: Book[], feedUrl: string): string {
   });
 }
 
-export function excerptFromPage(page: NotionPage): Excerpt | null {
+export function excerptFromPage(page: NotionPage, options?: { untranslated?: boolean }): Excerpt | null {
   const properties = page.properties;
   const translation = textProperty(properties, "正文翻译");
   const link = externalUrl(page.url);
-  if (!translation || !link || !page.id) return null;
+  if (!link || !page.id) return null;
+  if (options?.untranslated ? translation : !translation) return null;
   const originalTitle = textProperty(properties, "标题");
   const originalLink = properties?.["原文链接"];
   const published = properties?.["发布日期"];
@@ -212,12 +212,11 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
     title: textProperty(properties, "标题翻译") || originalTitle || "无标题",
     originalTitle,
     translation,
+    terms: textProperty(properties, "专有名词与术语"),
     sourceTitle: textProperty(properties, "出处"),
-    contentType: selectProperty(properties, "内容类型"),
     author: textProperty(properties, "作者"),
     chapter: textProperty(properties, "章节"),
     publisher: textProperty(properties, "出版方"),
-    originalLanguage: selectProperty(properties, "原文语言"),
     originalUrl: externalUrl(originalLink?.type === "url" ? originalLink.url : null),
     publishedDate: published?.type === "date" ? published.date?.start?.slice(0, 10) ?? "" : "",
     link,
@@ -225,17 +224,20 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
   };
 }
 
-export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string {
+export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string, options?: { untranslated?: boolean }): string {
+  const imageBaseUrl = feedUrl.replace(/\?.*$/, "");
   return generateRssFeed({
-    title: pangu.spaceText("阅读节选"),
+    title: pangu.spaceText(options?.untranslated ? "阅读节选 · 待翻译" : "阅读节选"),
     link: feedUrl,
-    description: pangu.spaceText("来自 Notion「阅读节选」的书籍、杂志与网页译文 RSS"),
+    description: pangu.spaceText(options?.untranslated
+      ? "来自 Notion「阅读节选」尚未翻译的条目"
+      : "来自 Notion「阅读节选」的书籍、杂志与网页译文 RSS"),
     language: "zh-CN",
     atom: { links: [{ href: feedUrl, rel: "self", type: "application/rss+xml" }] },
     items: excerpts.map((excerpt) => ({
       title: pangu.spaceText(excerpt.title),
       link: excerpt.link,
-      description: excerptDescription(excerpt, feedUrl),
+      description: excerptDescription(excerpt, imageBaseUrl),
       guid: { value: `notion:${excerpt.id}`, isPermaLink: false },
       ...(excerpt.pubDate ? { pubDate: excerpt.pubDate } : {}),
     })),
@@ -249,26 +251,34 @@ function excerptDescription(excerpt: Excerpt, feedUrl: string): string {
   ].filter(Boolean).join(" · ");
   const details = [
     ["原标题", excerpt.originalTitle !== excerpt.title ? excerpt.originalTitle : ""],
-    ["内容类型", excerpt.contentType],
     ["出版方", excerpt.publisher],
     ["章节", excerpt.chapter],
-    ["原文语言", excerpt.originalLanguage],
-    ["原文发布日期", excerpt.publishedDate],
+    ["发布日期", excerpt.publishedDate],
   ].filter(([, value]) => value).map(([label, value]) => `${label}：${displayText(value)}`);
   const links = [
     excerpt.originalUrl ? `<a href="${htmlText(excerpt.originalUrl)}">阅读原文</a>` : "",
     `<a href="${htmlText(excerpt.link)}">在 Notion 中查看</a>`,
   ].filter(Boolean).join(" · ");
+  const body = excerpt.translation ? translationParagraphs(excerpt.translation, excerpt.id, feedUrl) : "";
+  const terms = excerpt.terms ? translationParagraphs(excerpt.terms, excerpt.id, feedUrl) : "";
   return [
     ...(source ? [`<p>${source}</p>`] : []),
-    translationParagraphs(excerpt.translation, excerpt.id, feedUrl),
+    ...(body ? [body] : []),
     "<hr />",
     ...(details.length ? [`<p>${details.join("<br />\n")}</p>`] : []),
     `<p>${links}</p>`,
+    ...(terms ? ["<hr />", `<p>${displayText("专有名词与术语")}</p>`, terms] : []),
   ].join("\n");
 }
 
-const IMAGE_TAG = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\?[^"<>]*)?"\s*\/>/gi;
+function isTruthyParam(value: string | null): boolean {
+  if (value === null) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "" || normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+// Self-closing tags and captioned <image>...</image> wrappers both count.
+const IMAGE_TAG = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\?[^"<>]*)?"\s*(?:\/>|>([\s\S]*?)<\/image>)/gi;
 
 function translationParagraphs(translation: string, pageId: string, feedUrl: string): string {
   // Existing translations contain literal <br /> separators. Interpret only
@@ -282,8 +292,11 @@ function translationParagraphs(translation: string, pageId: string, feedUrl: str
         const blockId = match[1];
         const fileId = match[2];
         if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
+        const caption = (match[3] ?? "").replace(/<br\s*\/?\s*>/gi, "\n").trim();
+        const alt = caption ? displayText(caption.replaceAll("\n", " ")) : "正文图片";
         output += displayText(paragraph.slice(offset, match.index)).replaceAll("\n", "<br />\n");
-        output += `<img src="${htmlText(`${feedUrl}/image/${pageId}/${blockId}`)}" alt="正文图片" />`;
+        output += `<img src="${htmlText(`${feedUrl}/image/${pageId}/${blockId}`)}" alt="${alt}" />`;
+        if (caption) output += `<br />\n${displayText(caption).replaceAll("\n", "<br />\n")}`;
         offset = match.index + match[0].length;
       }
       return `<p>${output}${displayText(paragraph.slice(offset)).replaceAll("\n", "<br />\n")}</p>`;
@@ -414,12 +427,19 @@ const worker = {
         return request.method === "HEAD" ? new Response(null, { status: cover.status, headers: cover.headers }) : cover;
       }
 
+      const untranslatedOnly = isExcerptFeed && isTruthyParam(url.searchParams.get("untranslated"));
       const pages = await fetchPages(configured, isExcerptFeed
-        ? { property: "正文翻译", rich_text: { is_not_empty: true } }
+        ? { property: "正文翻译", rich_text: untranslatedOnly ? { is_empty: true } : { is_not_empty: true } }
         : undefined);
-      const feedUrl = `${url.origin}${url.pathname}`;
+      const feedUrl = untranslatedOnly
+        ? `${url.origin}${url.pathname}?untranslated=1`
+        : `${url.origin}${url.pathname}`;
       const feed = isExcerptFeed
-        ? renderExcerptFeed(pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null), feedUrl)
+        ? renderExcerptFeed(
+          pages.map((page) => excerptFromPage(page, { untranslated: untranslatedOnly })).filter((item): item is Excerpt => item !== null),
+          feedUrl,
+          { untranslated: untranslatedOnly },
+        )
         : renderFeed(pages.map(bookFromPage).filter((item): item is Book => item !== null), feedUrl);
       return new Response(request.method === "HEAD" ? null : feed, {
         headers: {
