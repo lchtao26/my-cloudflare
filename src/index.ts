@@ -7,13 +7,6 @@ const FEED_DESCRIPTION = "来自 Notion「书籍推荐」的书目 RSS";
 const NOTION_PAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FEED_PATH = "/book-express-rss";
 const EXCERPT_FEED_PATH = "/book-excerpts-rss";
-const KINDLE_PATH = "/book-excerpts-kindle";
-const EXCERPT_QUERY_FILTER = {
-  or: [
-    { property: "正文翻译", rich_text: { is_not_empty: true } },
-    { property: "原文语言", select: { equals: "中文" } },
-  ],
-};
 
 type RichText = { plain_text?: string; text?: { content?: string } };
 
@@ -368,100 +361,6 @@ async function excerptsFromPages(env: ConfiguredBindings, pages: NotionPage[]): 
   return excerpts;
 }
 
-async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promise<Excerpt | null> {
-  const response = await fetch(`https://api.notion.com/v1/pages/${encodeURIComponent(pageId)}`, {
-    headers: {
-      Authorization: `Bearer ${env.NOTION_TOKEN}`,
-      "Notion-Version": NOTION_VERSION,
-    },
-  });
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
-  const page = await response.json() as NotionPage;
-  if (page.parent?.type !== "data_source_id" || page.parent.data_source_id !== env.NOTION_DATA_SOURCE_ID) return null;
-  const excerpt = excerptFromPage(page);
-  if (!excerpt) return null;
-  if (excerpt.chinese) excerpt.body = await fetchPageBody(env, excerpt.id);
-  return excerpt;
-}
-
-const KINDLE_STYLE = [
-  "body{font-family:serif;font-size:1.25em;line-height:1.7;color:#000;background:#fff;margin:1em;}",
-  "a{color:#000;}",
-  "h1{font-size:1.35em;line-height:1.4;margin:0 0 0.75em;}",
-  "p,li{margin:0.75em 0;}",
-  "ul{padding-left:1.25em;}",
-  "img{max-width:100%;height:auto;}",
-  "hr{border:0;border-top:1px solid #000;margin:1.25em 0;}",
-  ".meta{font-size:0.9em;}",
-  ".nav{margin:1.25em 0;}",
-].join("");
-
-function kindleDocument(title: string, body: string): string {
-  return [
-    "<!DOCTYPE html>",
-    '<html lang="zh-CN">',
-    "<head>",
-    '<meta charset="utf-8" />',
-    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
-    `<title>${displayText(title)}</title>`,
-    `<style>${KINDLE_STYLE}</style>`,
-    "</head>",
-    `<body>\n${body}\n</body>`,
-    "</html>",
-  ].join("\n");
-}
-
-export function renderKindleList(excerpts: Excerpt[], listPath: string): string {
-  const items = excerpts.map((excerpt) => {
-    const href = htmlText(`${listPath}/${excerpt.id}`);
-    const meta = [
-      excerpt.sourceTitle ? displayText(excerpt.sourceTitle) : "",
-      excerpt.author ? `作者：${displayText(excerpt.author)}` : "",
-    ].filter(Boolean).join(" · ");
-    return [
-      "<li>",
-      `<a href="${href}">${displayText(excerpt.title)}</a>`,
-      ...(meta ? [`<br /><span class="meta">${meta}</span>`] : []),
-      "</li>",
-    ].join("");
-  }).join("\n");
-  return kindleDocument("阅读节选", [
-    `<h1>${displayText("阅读节选")}</h1>`,
-    items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
-  ].join("\n"));
-}
-
-export function renderKindleDetail(excerpt: Excerpt, listPath: string, imageBaseUrl: string): string {
-  const source = [
-    excerpt.sourceTitle ? `<cite>${displayText(excerpt.sourceTitle)}</cite>` : "",
-    excerpt.author ? `作者：${displayText(excerpt.author)}` : "",
-  ].filter(Boolean).join(" · ");
-  const details = [
-    ["原标题", excerpt.originalTitle !== excerpt.title ? excerpt.originalTitle : ""],
-    ["出版方", excerpt.publisher],
-    ["章节", excerpt.chapter],
-    ["发布日期", excerpt.publishedDate],
-  ].filter(([, value]) => value).map(([label, value]) => `${label}：${displayText(value)}`);
-  const links = [
-    excerpt.originalUrl ? `<a href="${htmlText(excerpt.originalUrl)}">阅读原文</a>` : "",
-  ].filter(Boolean).join(" · ");
-  const body = excerpt.body ? translationParagraphs(excerpt.body, excerpt.id, imageBaseUrl) : "";
-  const terms = excerpt.terms ? translationParagraphs(excerpt.terms, excerpt.id, imageBaseUrl) : "";
-  const back = `<p class="nav"><a href="${htmlText(listPath)}">${displayText("返回列表")}</a></p>`;
-  return kindleDocument(excerpt.title, [
-    back,
-    `<h1>${displayText(excerpt.title)}</h1>`,
-    ...(source ? [`<p class="meta">${source}</p>`] : []),
-    ...(body ? [body] : []),
-    "<hr />",
-    ...(details.length ? [`<p class="meta">${details.join("<br />\n")}</p>`] : []),
-    ...(links ? [`<p>${links}</p>`] : []),
-    ...(terms ? ["<hr />", `<p>${displayText("专有名词与术语")}</p>`, terms] : []),
-    back,
-  ].join("\n"));
-}
-
 // Self-closing tags and captioned <image>...</image> wrappers both count.
 const IMAGE_TAG = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\?[^"<>]*)?"\s*(?:\/>|>([\s\S]*?)<\/image>)/gi;
 
@@ -586,20 +485,16 @@ const worker = {
     const url = new URL(request.url);
     const coverId = coverIdFromPath(url.pathname);
     const isExcerptFeed = url.pathname === EXCERPT_FEED_PATH;
-    const isKindleList = url.pathname === KINDLE_PATH;
-    const kindleDetailMatch = url.pathname.match(/^\/book-excerpts-kindle\/([^/]+)$/);
-    const kindleDetailId = kindleDetailMatch?.[1] && NOTION_PAGE_ID.test(kindleDetailMatch[1]) ? kindleDetailMatch[1] : null;
     const imageMatch = url.pathname.match(/^\/book-excerpts-rss\/image\/([^/]+)\/([^/]+)$/);
     const imageIds = imageMatch && NOTION_PAGE_ID.test(imageMatch[1] ?? "") && NOTION_PAGE_ID.test(imageMatch[2] ?? "") ? [imageMatch[1]!, imageMatch[2]!] : null;
-    const usesExcerpts = isExcerptFeed || isKindleList || Boolean(kindleDetailId) || Boolean(imageIds);
-    if (url.pathname !== FEED_PATH && !usesExcerpts && !coverId) {
+    if (url.pathname !== FEED_PATH && !isExcerptFeed && !coverId && !imageIds) {
       return new Response("Not found", { status: 404 });
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
     }
     const notionToken = env.NOTION_TOKEN;
-    const dataSourceId = usesExcerpts ? env.NOTION_EXCERPTS_DATA_SOURCE_ID : env.NOTION_DATA_SOURCE_ID;
+    const dataSourceId = isExcerptFeed || imageIds ? env.NOTION_EXCERPTS_DATA_SOURCE_ID : env.NOTION_DATA_SOURCE_ID;
     if (!notionToken || !dataSourceId) {
       return new Response("Feed is not configured", { status: 503 });
     }
@@ -617,32 +512,14 @@ const worker = {
         return request.method === "HEAD" ? new Response(null, { status: cover.status, headers: cover.headers }) : cover;
       }
 
-      if (kindleDetailId) {
-        const excerpt = await fetchExcerptById(configured, kindleDetailId);
-        if (!excerpt) return new Response("Not found", { status: 404 });
-        const html = renderKindleDetail(excerpt, KINDLE_PATH, `${url.origin}${EXCERPT_FEED_PATH}`);
-        return new Response(request.method === "HEAD" ? null : html, {
-          headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "public, max-age=300",
-            "X-Content-Type-Options": "nosniff",
-          },
-        });
-      }
-
-      if (isKindleList) {
-        const pages = await fetchPages(configured, EXCERPT_QUERY_FILTER);
-        const html = renderKindleList(await excerptsFromPages(configured, pages), KINDLE_PATH);
-        return new Response(request.method === "HEAD" ? null : html, {
-          headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "public, max-age=300",
-            "X-Content-Type-Options": "nosniff",
-          },
-        });
-      }
-
-      const pages = await fetchPages(configured, isExcerptFeed ? EXCERPT_QUERY_FILTER : undefined);
+      const pages = await fetchPages(configured, isExcerptFeed
+        ? {
+          or: [
+            { property: "正文翻译", rich_text: { is_not_empty: true } },
+            { property: "原文语言", select: { equals: "中文" } },
+          ],
+        }
+        : undefined);
       const feedUrl = `${url.origin}${url.pathname}`;
       const feed = isExcerptFeed
         ? renderExcerptFeed(await excerptsFromPages(configured, pages), feedUrl)
