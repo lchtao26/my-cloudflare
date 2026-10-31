@@ -211,8 +211,9 @@ export function renderFeed(books: Book[], feedUrl: string): string {
 
 export function excerptFromPage(page: NotionPage): Excerpt | null {
   const properties = page.properties;
-  const body = textProperty(properties, "正文");
   const chinese = selectProperty(properties, "原文语言") === "中文";
+  // Chinese posts use the original title/body; other languages use the translations.
+  const body = chinese ? textProperty(properties, "正文") : textProperty(properties, "正文翻译");
   const link = externalUrl(page.url);
   if (!link || !page.id || !body) return null;
   const originalTitle = textProperty(properties, "标题");
@@ -222,7 +223,7 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
   return {
     id: page.id,
     title: chinese
-      ? originalTitle || textProperty(properties, "标题翻译") || "无标题"
+      ? originalTitle || "无标题"
       : textProperty(properties, "标题翻译") || originalTitle || "无标题",
     originalTitle,
     body,
@@ -448,7 +449,8 @@ async function fetchExcerptImage(env: ConfiguredBindings, pageId: string, blockI
   if (!pageResponse.ok) throw new Error(`Notion API returned ${pageResponse.status}`);
   const page = await pageResponse.json() as NotionPage;
   if (page.parent?.type !== "data_source_id" || page.parent.data_source_id !== env.NOTION_DATA_SOURCE_ID) return null;
-  const body = textProperty(page.properties, "正文");
+  const chinese = selectProperty(page.properties, "原文语言") === "中文";
+  const body = chinese ? textProperty(page.properties, "正文") : textProperty(page.properties, "正文翻译");
   const referenced = Array.from(body.matchAll(IMAGE_TAG)).some((match) =>
     match[1]?.toLowerCase() === blockId.toLowerCase() && NOTION_PAGE_ID.test(match[2] ?? ""));
   if (!referenced) return null;
