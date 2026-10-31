@@ -152,9 +152,16 @@ test("missing configuration and Notion failures return explicit errors", async (
   assert.equal(await response.text(), "Feed temporarily unavailable");
 });
 
-test("excerpt feed filters translations, paginates, and links to Notion pages", async (context) => {
+test("excerpt feed uses the Notion RSS view filter, paginates, and links to Notion pages", async (context) => {
   const originalFetch = globalThis.fetch;
-  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const requests: Array<{ method?: string; url: string; body?: Record<string, unknown> }> = [];
+  const viewId = "40ae75a1-639c-81f8-b7fe-000c40372432";
+  const viewFilter = {
+    or: [
+      { property: "正文翻译", rich_text: { is_not_empty: true } },
+      { property: "原文语言", select: { equals: "中文" } },
+    ],
+  };
   const excerpt = {
     id: "407e75a1-639c-81ca-8919-f4bff2a57884",
     url: "https://www.notion.so/excerpt-1",
@@ -175,14 +182,37 @@ test("excerpt feed filters translations, paginates, and links to Notion pages", 
     },
   };
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
-    requests.push({ url: String(url), body: JSON.parse(String(init?.body)) });
-    return Response.json(requests.length === 1
-      ? { results: [excerpt, { ...excerpt, id: "empty", properties: { ...excerpt.properties, "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "  " }] } } }], has_more: true, next_cursor: "next" }
-      : { results: [{ ...excerpt, id: "407e75a1-639c-81ca-8919-f4bff2a57885", url: "https://www.notion.so/excerpt-2" }], has_more: false });
+    const href = String(url);
+    const method = init?.method ?? "GET";
+    requests.push({
+      method,
+      url: href,
+      ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
+    });
+    if (method === "GET" && href.includes(`/views/${viewId}`)) {
+      return Response.json({
+        object: "view",
+        id: viewId,
+        name: "RSS",
+        data_source_id: "excerpt-source",
+        filter: viewFilter,
+        sorts: [],
+      });
+    }
+    if (method === "POST" && href.includes("/data_sources/excerpt-source/query")) {
+      return Response.json(requests.filter((request) => request.url.includes("/data_sources/excerpt-source/query")).length === 1
+        ? { results: [excerpt, { ...excerpt, id: "empty", properties: { ...excerpt.properties, "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "  " }] } } }], has_more: true, next_cursor: "next" }
+        : { results: [{ ...excerpt, id: "407e75a1-639c-81ca-8919-f4bff2a57885", url: "https://www.notion.so/excerpt-2" }], has_more: false });
+    }
+    throw new Error(`Unexpected fetch: ${method} ${href}`);
   }) as typeof fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
 
-  const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" };
+  const env = {
+    NOTION_TOKEN: "test",
+    NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
+    NOTION_EXCERPTS_VIEW_ID: viewId,
+  };
   const response = await worker.fetch(new Request("https://example.workers.dev/book-excerpts-rss"), env);
   assert.equal(response.status, 200);
   assert.match(response.headers.get("Content-Type") ?? "", /application\/rss\+xml/);
@@ -205,15 +235,14 @@ test("excerpt feed filters translations, paginates, and links to Notion pages", 
     "<p>Term A<br />\n释义 A</p>\n<p>Term B<br />\n释义 B</p>",
   ].join("\n"));
   assert.doesNotMatch(item?.description ?? "", /内容类型：|原文语言：|原文发布日期：/);
-  assert.equal(requests[0]?.url, "https://api.notion.com/v1/data_sources/excerpt-source/query");
-  assert.deepEqual(requests[0]?.body.filter, {
-    or: [
-      { property: "正文翻译", rich_text: { is_not_empty: true } },
-      { property: "原文语言", select: { equals: "中文" } },
-    ],
-  });
-  assert.equal(requests[1]?.body.start_cursor, "next");
-  assert.equal((await worker.fetch(new Request("https://example.workers.dev/book-excerpts-rss"), { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "book-source" })).status, 503);
+  assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
+  assert.deepEqual(requests[1]?.body?.filter, viewFilter);
+  assert.deepEqual(requests[1]?.body?.sorts, [{ timestamp: "last_edited_time", direction: "descending" }]);
+  assert.equal(requests[2]?.body?.start_cursor, "next");
+  assert.equal((await worker.fetch(new Request("https://example.workers.dev/book-excerpts-rss"), {
+    NOTION_TOKEN: "test",
+    NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
+  })).status, 503);
 });
 
 test("excerpt titles fall back to the original and missing source fields are omitted", () => {
@@ -353,11 +382,22 @@ test("page body blocks become RSS paragraphs and proxied images", () => {
 test("Chinese excerpt feed loads page body instead of translation", async (context) => {
   const originalFetch = globalThis.fetch;
   const pageId = "407e75a1-639c-81ca-8919-f4bff2a57886";
+  const viewId = "40ae75a1-639c-81f8-b7fe-000c40372432";
   const requests: string[] = [];
-  globalThis.fetch = (async (url: RequestInfo | URL) => {
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     const href = String(url);
-    requests.push(href);
-    if (href.includes("/data_sources/")) {
+    const method = init?.method ?? "GET";
+    requests.push(`${method} ${href}`);
+    if (method === "GET" && href.includes(`/views/${viewId}`)) {
+      return Response.json({
+        object: "view",
+        id: viewId,
+        data_source_id: "excerpt-source",
+        filter: { property: "原文语言", select: { equals: "中文" } },
+        sorts: [],
+      });
+    }
+    if (method === "POST" && href.includes("/data_sources/excerpt-source/query")) {
       return Response.json({
         results: [{
           id: pageId,
@@ -382,13 +422,17 @@ test("Chinese excerpt feed loads page body instead of translation", async (conte
         has_more: false,
       });
     }
-    throw new Error(`Unexpected fetch: ${href}`);
+    throw new Error(`Unexpected fetch: ${method} ${href}`);
   }) as typeof fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
 
   const response = await worker.fetch(
     new Request("https://example.workers.dev/book-excerpts-rss"),
-    { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
+    {
+      NOTION_TOKEN: "test",
+      NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
+      NOTION_EXCERPTS_VIEW_ID: viewId,
+    },
   );
   assert.equal(response.status, 200);
   const feed = await response.text();

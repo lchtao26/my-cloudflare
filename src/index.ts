@@ -31,11 +31,21 @@ type WorkerBindings = {
   NOTION_TOKEN?: string;
   NOTION_DATA_SOURCE_ID?: string;
   NOTION_EXCERPTS_DATA_SOURCE_ID?: string;
+  NOTION_EXCERPTS_VIEW_ID?: string;
 };
 
 type ConfiguredBindings = {
   NOTION_TOKEN: string;
   NOTION_DATA_SOURCE_ID: string;
+};
+
+type NotionView = {
+  object?: string;
+  id?: string;
+  name?: string;
+  data_source_id?: string;
+  filter?: object | null;
+  sorts?: object[] | null;
 };
 
 export type NotionPage = {
@@ -422,6 +432,57 @@ async function fetchPages(env: ConfiguredBindings, filter?: object): Promise<Not
   return pages;
 }
 
+async function fetchNotionJson(url: string, init: RequestInit): Promise<Response> {
+  let attempt = 0;
+  while (true) {
+    const response = await fetch(url, init);
+    if (response.status !== 429 || attempt >= 4) return response;
+    const retryAfter = Number(response.headers.get("Retry-After") ?? "");
+    const delayMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** attempt;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    attempt += 1;
+  }
+}
+
+async function fetchExcerptPages(env: ConfiguredBindings, viewId: string): Promise<NotionPage[]> {
+  // Read the saved view filter/sort, then query the data source for full pages.
+  // This stays linked to the Notion RSS view without N+1 page fetches (which hit rate limits).
+  const headers = {
+    Authorization: `Bearer ${env.NOTION_TOKEN}`,
+    "Notion-Version": NOTION_VERSION,
+  };
+  const viewResponse = await fetchNotionJson(`https://api.notion.com/v1/views/${encodeURIComponent(viewId)}`, { headers });
+  if (!viewResponse.ok) throw new Error(`Notion API returned ${viewResponse.status}`);
+  const view = await viewResponse.json() as NotionView;
+  const dataSourceId = view.data_source_id ?? env.NOTION_DATA_SOURCE_ID;
+  if (!dataSourceId) throw new Error("Notion view is missing a data source");
+
+  const pages: NotionPage[] = [];
+  let cursor: string | null | undefined;
+  do {
+    const response = await fetchNotionJson(`https://api.notion.com/v1/data_sources/${encodeURIComponent(dataSourceId)}/query`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        page_size: 100,
+        sorts: view.sorts?.length
+          ? view.sorts
+          : [{ timestamp: "last_edited_time", direction: "descending" }],
+        ...(view.filter ? { filter: view.filter } : {}),
+        ...(cursor ? { start_cursor: cursor } : {}),
+      }),
+    });
+    if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
+    const data = await response.json() as NotionQuery;
+    if (data.request_status?.type === "incomplete") throw new Error("Notion query result is incomplete");
+    pages.push(...data.results ?? []);
+    cursor = data.has_more ? data.next_cursor : null;
+    if (data.has_more && !cursor) throw new Error("Notion returned an incomplete page without a cursor");
+  } while (cursor);
+
+  return pages;
+}
+
 function coverIdFromPath(pathname: string): string | null {
   const match = pathname.match(/^\/book-express-rss\/cover\/([^/]+)$/);
   return match?.[1] && NOTION_PAGE_ID.test(match[1]) ? match[1] : null;
@@ -495,7 +556,8 @@ const worker = {
     }
     const notionToken = env.NOTION_TOKEN;
     const dataSourceId = isExcerptFeed || imageIds ? env.NOTION_EXCERPTS_DATA_SOURCE_ID : env.NOTION_DATA_SOURCE_ID;
-    if (!notionToken || !dataSourceId) {
+    const excerptsViewId = env.NOTION_EXCERPTS_VIEW_ID;
+    if (!notionToken || !dataSourceId || (isExcerptFeed && !excerptsViewId)) {
       return new Response("Feed is not configured", { status: 503 });
     }
     const configured = { NOTION_TOKEN: notionToken, NOTION_DATA_SOURCE_ID: dataSourceId };
@@ -512,18 +574,16 @@ const worker = {
         return request.method === "HEAD" ? new Response(null, { status: cover.status, headers: cover.headers }) : cover;
       }
 
-      const pages = await fetchPages(configured, isExcerptFeed
-        ? {
-          or: [
-            { property: "正文翻译", rich_text: { is_not_empty: true } },
-            { property: "原文语言", select: { equals: "中文" } },
-          ],
-        }
-        : undefined);
       const feedUrl = `${url.origin}${url.pathname}`;
       const feed = isExcerptFeed
-        ? renderExcerptFeed(await excerptsFromPages(configured, pages), feedUrl)
-        : renderFeed(pages.map(bookFromPage).filter((item): item is Book => item !== null), feedUrl);
+        ? renderExcerptFeed(
+          await excerptsFromPages(configured, await fetchExcerptPages(configured, excerptsViewId!)),
+          feedUrl,
+        )
+        : renderFeed(
+          (await fetchPages(configured)).map(bookFromPage).filter((item): item is Book => item !== null),
+          feedUrl,
+        );
       return new Response(request.method === "HEAD" ? null : feed, {
         headers: {
           "Content-Type": "application/rss+xml; charset=utf-8",

@@ -14,6 +14,7 @@
   "keep_vars": true,
   "vars": {
     "NOTION_DATA_SOURCE_ID": "102a59ab-8748-4725-a2f4-48d5ceeef1b6",
-    "NOTION_EXCERPTS_DATA_SOURCE_ID": "e800dfdd-d92c-444a-9f28-455e3eae15f6"
+    "NOTION_EXCERPTS_DATA_SOURCE_ID": "e800dfdd-d92c-444a-9f28-455e3eae15f6",
+    "NOTION_EXCERPTS_VIEW_ID": "40ae75a1-639c-81f8-b7fe-000c40372432"
   }
 }
