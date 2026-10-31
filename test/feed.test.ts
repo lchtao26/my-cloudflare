@@ -477,21 +477,20 @@ test("excerpt image tags become proxied images while unrelated HTML stays escape
   assert.doesNotMatch(description, /notion-file-block/);
 });
 
-test("captioned notion image wrappers become proxied images with visible captions", () => {
+test("captioned notion image wrappers become proxied images and ignore caption text", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const blockId = "1a52e0b5-2ddd-4438-8257-9e6c5a426940";
   const fileId = "69d14bc7-c973-4ee7-9123-bde234614e89";
   const translation = [
     `<image source="notion-file-block://${blockId}/${fileId}?space_id=e9cde029-df5b-4155-b1ef-e48feea5c573&name=bunshun-93076-img1.jpg">`,
-    "小堀鸥一郎　摄影：三宅史郎（文艺春秋）",
+    "©文藝春秋",
     "</image>",
   ].join("\n");
   const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: translation }] } } });
   assert.ok(excerpt);
   const description = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0]?.description ?? "";
-  assert.match(description, new RegExp(`<img src="https://example.com/book-excerpts-rss/image/${pageId}/${blockId}" alt="小堀鸥一郎　摄影：三宅史郎（文艺春秋）" />`));
-  assert.match(description, /<img [^>]+ \/><br \/>\n小堀鸥一郎　摄影：三宅史郎（文艺春秋）/);
-  assert.doesNotMatch(description, /notion-file-block|<image|<\/image>/);
+  assert.match(description, new RegExp(`<img src="https://example.com/book-excerpts-rss/image/${pageId}/${blockId}" alt="正文图片" />`));
+  assert.doesNotMatch(description, /©文藝春秋|notion-file-block|<image|<\/image>/);
 });
 
 test("Pangu formats RSS titles and visible content without changing links or HTML attributes", () => {

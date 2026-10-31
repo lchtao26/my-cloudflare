@@ -299,11 +299,9 @@ function translationParagraphs(translation: string, pageId: string, feedUrl: str
         const blockId = match[1];
         const fileId = match[2];
         if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
-        const caption = (match[3] ?? "").replace(/<br\s*\/?\s*>/gi, "\n").trim();
-        const alt = caption ? displayText(caption.replaceAll("\n", " ")) : "正文图片";
+        // Caption text inside <image>...</image> is ignored; only the file reference is used.
         output += displayText(paragraph.slice(offset, match.index)).replaceAll("\n", "<br />\n");
-        output += `<img src="${htmlText(`${feedUrl}/image/${pageId}/${blockId}`)}" alt="${alt}" />`;
-        if (caption) output += `<br />\n${displayText(caption).replaceAll("\n", "<br />\n")}`;
+        output += `<img src="${htmlText(`${feedUrl}/image/${pageId}/${blockId}`)}" alt="正文图片" />`;
         offset = match.index + match[0].length;
       }
       return `<p>${output}${displayText(paragraph.slice(offset)).replaceAll("\n", "<br />\n")}</p>`;
