@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseRssFeed } from "feedsmith";
-import worker, { bookFromPage, excerptFromPage, pageBodyFromBlocks, renderExcerptFeed, renderFeed, type NotionPage } from "../src/index.ts";
+import worker, { bookFromPage, excerptFromPage, pageBodyFromBlocks, renderExcerptFeed, renderFeed, viewQueryFilter, type NotionPage } from "../src/index.ts";
 
 const page: NotionPage = {
   id: "book-1",
@@ -196,6 +196,10 @@ test("excerpt feed uses the Notion RSS view filter, paginates, and links to Noti
         name: "RSS",
         data_source_id: "excerpt-source",
         filter: viewFilter,
+        quick_filters: {
+          "FiF=": { select: { equals: "日文" } },
+          txoA: { rich_text: { contains: "文" } },
+        },
         sorts: [],
       });
     }
@@ -236,13 +240,66 @@ test("excerpt feed uses the Notion RSS view filter, paginates, and links to Noti
   ].join("\n"));
   assert.doesNotMatch(item?.description ?? "", /内容类型：|原文语言：|原文发布日期：/);
   assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
-  assert.deepEqual(requests[1]?.body?.filter, viewFilter);
-  assert.deepEqual(requests[1]?.body?.sorts, [{ timestamp: "last_edited_time", direction: "descending" }]);
+  assert.deepEqual(requests[1]?.body?.filter, {
+    and: [
+      viewFilter,
+      { select: { equals: "日文" }, property: "FiF=" },
+      { rich_text: { contains: "文" }, property: "txoA" },
+    ],
+  });
+  assert.equal(requests[1]?.body?.sorts, undefined);
   assert.equal(requests[2]?.body?.start_cursor, "next");
   assert.equal((await worker.fetch(new Request("https://example.workers.dev/book-excerpts-rss"), {
     NOTION_TOKEN: "test",
     NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
   })).status, 503);
+});
+
+test("view query filter ANDs the saved filter with each quick filter", () => {
+  const saved = { or: [{ property: "正文翻译", rich_text: { is_not_empty: true } }] };
+  assert.equal(viewQueryFilter({}), undefined);
+  assert.deepEqual(viewQueryFilter({ filter: saved, quick_filters: {} }), saved);
+  assert.deepEqual(viewQueryFilter({ filter: saved, quick_filters: { txoA: {}, FiF: { select: { equals: "中文" } } } }), {
+    and: [saved, { select: { equals: "中文" }, property: "FiF" }],
+  });
+  assert.deepEqual(viewQueryFilter({ quick_filters: { FiF: { select: { equals: "日文" } } } }), {
+    select: { equals: "日文" },
+    property: "FiF",
+  });
+  assert.deepEqual(viewQueryFilter({
+    filter: saved,
+    quick_filters: { FiF: { select: { equals: "日文" } }, txoA: { rich_text: { contains: "文" } } },
+  }), {
+    and: [
+      saved,
+      { select: { equals: "日文" }, property: "FiF" },
+      { rich_text: { contains: "文" }, property: "txoA" },
+    ],
+  });
+});
+
+test("excerpt feed forwards a saved view sort and omits the fallback", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const bodies: Array<Record<string, unknown>> = [];
+  const viewId = "40ae75a1-639c-81f8-b7fe-000c40372432";
+  const savedSort = [{ property: "title", direction: "ascending" }];
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const href = String(url);
+    if ((init?.method ?? "GET") === "GET" && href.includes(`/views/${viewId}`)) {
+      return Response.json({ data_source_id: "excerpt-source", sorts: savedSort });
+    }
+    bodies.push(JSON.parse(String(init?.body)));
+    return Response.json({ results: [], has_more: false });
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+
+  const response = await worker.fetch(new Request("https://example.workers.dev/book-excerpts-rss"), {
+    NOTION_TOKEN: "test",
+    NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
+    NOTION_EXCERPTS_VIEW_ID: viewId,
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(bodies[0]?.sorts, savedSort);
 });
 
 test("excerpt titles fall back to the original and missing source fields are omitted", () => {

@@ -46,6 +46,7 @@ type NotionView = {
   data_source_id?: string;
   filter?: object | null;
   sorts?: object[] | null;
+  quick_filters?: Record<string, object> | null;
 };
 
 export type NotionPage = {
@@ -444,8 +445,20 @@ async function fetchNotionJson(url: string, init: RequestInit): Promise<Response
   }
 }
 
+export function viewQueryFilter(view: NotionView): object | undefined {
+  // Notion ANDs the saved filter with each column quick filter. One clause stays unwrapped.
+  const quick = Object.entries(view.quick_filters ?? {}).flatMap(([property, condition]) => {
+    if (!condition || typeof condition !== "object" || Array.isArray(condition)) return [];
+    if (Object.keys(condition).length === 0) return [];
+    return [{ ...(condition as Record<string, unknown>), property }];
+  });
+  const parts = [...(view.filter ? [view.filter] : []), ...quick];
+  if (parts.length <= 1) return parts[0];
+  return { and: parts };
+}
+
 async function fetchExcerptPages(env: ConfiguredBindings, viewId: string): Promise<NotionPage[]> {
-  // Read the saved view filter/sort, then query the data source for full pages.
+  // Read the saved view filter, quick filters, and sort, then query the data source for full pages.
   // This stays linked to the Notion RSS view without N+1 page fetches (which hit rate limits).
   const headers = {
     Authorization: `Bearer ${env.NOTION_TOKEN}`,
@@ -458,6 +471,7 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string): Promi
   if (!dataSourceId) throw new Error("Notion view is missing a data source");
 
   const pages: NotionPage[] = [];
+  const filter = viewQueryFilter(view);
   let cursor: string | null | undefined;
   do {
     const response = await fetchNotionJson(`https://api.notion.com/v1/data_sources/${encodeURIComponent(dataSourceId)}/query`, {
@@ -465,10 +479,9 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string): Promi
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
         page_size: 100,
-        sorts: view.sorts?.length
-          ? view.sorts
-          : [{ timestamp: "last_edited_time", direction: "descending" }],
-        ...(view.filter ? { filter: view.filter } : {}),
+        // No saved sort means the table's own order. Don't replace it with last_edited_time.
+        ...(view.sorts?.length ? { sorts: view.sorts } : {}),
+        ...(filter ? { filter } : {}),
         ...(cursor ? { start_cursor: cursor } : {}),
       }),
     });
