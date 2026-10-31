@@ -27,3 +27,7 @@ Cloudflare Worker 从 Notion「书籍推荐」数据库读取全部书目，在 
 译文中的 `notion-file-block` 图片引用，以及中文页面正文中的图片块，会转换为 RSS 图片，并由 Worker 转发，避免使用会过期的文件地址。同时支持自闭合标签与带说明文字的 `<image>...</image>` 写法；说明文字会写入 `alt` 并显示在图片下方。图片块需属于对应节选页面；非中文条目还需仍被译文引用。无法解析的其他图片引用会保留为文字。
 
 `NOTION_EXCERPTS_DATA_SOURCE_ID` 已在 `wrangler.jsonc` 中配置。请在「阅读节选」数据库的“连接”中添加与书籍推荐相同的 Notion 集成，并确保其有读取权限。部署后订阅地址为 `https://my-cloudflare.lichcode.workers.dev/book-excerpts-rss`。RSS 地址无需登录即可读取内容；打开 Notion 页面仍需相应的页面访问权限。
+
+## Kindle 阅读页
+
+`/book-excerpts-kindle` 提供面向 Kindle 浏览器的极简 HTML 列表；点击条目进入 `/book-excerpts-kindle/{pageId}` 详情页。内容范围、标题与正文规则与阅读节选 RSS 一致。页面为服务端渲染、无 JavaScript，使用大字号与高对比样式；图片仍走 `/book-excerpts-rss/image/...` 代理。详情页在文末展示非空的「专有名词与术语」，并提供返回列表链接。部署后列表地址为 `https://my-cloudflare.lichcode.workers.dev/book-excerpts-kindle`。
