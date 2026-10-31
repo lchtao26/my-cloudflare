@@ -82,35 +82,6 @@ type Excerpt = {
   pubDate: Date | null;
 };
 
-type NotionBlock = {
-  id?: string;
-  type?: string;
-  paragraph?: { rich_text?: RichText[] };
-  heading_1?: { rich_text?: RichText[] };
-  heading_2?: { rich_text?: RichText[] };
-  heading_3?: { rich_text?: RichText[] };
-  quote?: { rich_text?: RichText[] };
-  bulleted_list_item?: { rich_text?: RichText[] };
-  numbered_list_item?: { rich_text?: RichText[] };
-  code?: { rich_text?: RichText[] };
-  image?: {
-    type?: string;
-    file?: { url?: string };
-    caption?: RichText[];
-  };
-};
-
-const TEXT_BLOCK_TYPES = [
-  "paragraph",
-  "heading_1",
-  "heading_2",
-  "heading_3",
-  "quote",
-  "bulleted_list_item",
-  "numbered_list_item",
-  "code",
-] as const;
-
 export type Book = {
   id: string;
   title: string;
@@ -240,10 +211,10 @@ export function renderFeed(books: Book[], feedUrl: string): string {
 
 export function excerptFromPage(page: NotionPage): Excerpt | null {
   const properties = page.properties;
-  const translation = textProperty(properties, "正文翻译");
+  const body = textProperty(properties, "正文");
   const chinese = selectProperty(properties, "原文语言") === "中文";
   const link = externalUrl(page.url);
-  if (!link || !page.id || (!translation && !chinese)) return null;
+  if (!link || !page.id || !body) return null;
   const originalTitle = textProperty(properties, "标题");
   const originalLink = properties?.["原文链接"];
   const published = properties?.["发布日期"];
@@ -254,8 +225,7 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
       ? originalTitle || textProperty(properties, "标题翻译") || "无标题"
       : textProperty(properties, "标题翻译") || originalTitle || "无标题",
     originalTitle,
-    // Chinese body comes from the Notion page content, never from 正文翻译.
-    body: chinese ? "" : translation,
+    body,
     chinese,
     terms: textProperty(properties, "专有名词与术语"),
     sourceTitle: textProperty(properties, "出处"),
@@ -311,65 +281,6 @@ function excerptDescription(excerpt: Excerpt, feedUrl: string): string {
     `<p>${links}</p>`,
     ...(terms ? ["<hr />", `<p>${displayText("专有名词与术语")}</p>`, terms] : []),
   ].join("\n");
-}
-
-function richTextValue(parts?: RichText[]): string {
-  return (parts ?? []).map((part) => part.plain_text ?? part.text?.content ?? "").join("").trim();
-}
-
-export function pageBodyFromBlocks(blocks: NotionBlock[]): string {
-  const parts: string[] = [];
-  for (const block of blocks) {
-    if (!block.id || !block.type) continue;
-    if (block.type === "image") {
-      if (block.image?.type !== "file" || !NOTION_PAGE_ID.test(block.id)) continue;
-      const caption = richTextValue(block.image.caption);
-      // Proxy only needs the block ID; reuse it as the file-id slot for IMAGE_TAG.
-      parts.push(caption
-        ? `<image source="notion-file-block://${block.id}/${block.id}">${caption}</image>`
-        : `<image source="notion-file-block://${block.id}/${block.id}" />`);
-      continue;
-    }
-    if (!(TEXT_BLOCK_TYPES as readonly string[]).includes(block.type)) continue;
-    const text = richTextValue(block[block.type as typeof TEXT_BLOCK_TYPES[number]]?.rich_text);
-    if (text) parts.push(text);
-  }
-  return parts.join("\n\n");
-}
-
-async function fetchPageBody(env: ConfiguredBindings, pageId: string): Promise<string> {
-  const blocks: NotionBlock[] = [];
-  let cursor: string | null | undefined;
-  do {
-    const url = new URL(`https://api.notion.com/v1/blocks/${encodeURIComponent(pageId)}/children`);
-    url.searchParams.set("page_size", "100");
-    if (cursor) url.searchParams.set("start_cursor", cursor);
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${env.NOTION_TOKEN}`,
-        "Notion-Version": NOTION_VERSION,
-      },
-    });
-    if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
-    const data = await response.json() as {
-      results?: NotionBlock[];
-      has_more?: boolean;
-      next_cursor?: string | null;
-    };
-    blocks.push(...data.results ?? []);
-    cursor = data.has_more ? data.next_cursor : null;
-    if (data.has_more && !cursor) throw new Error("Notion returned an incomplete page without a cursor");
-  } while (cursor);
-  return pageBodyFromBlocks(blocks);
-}
-
-async function excerptsFromPages(env: ConfiguredBindings, pages: NotionPage[]): Promise<Excerpt[]> {
-  const excerpts = pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null);
-  await Promise.all(excerpts.map(async (excerpt) => {
-    if (!excerpt.chinese) return;
-    excerpt.body = await fetchPageBody(env, excerpt.id);
-  }));
-  return excerpts;
 }
 
 // Self-closing tags and captioned <image>...</image> wrappers both count.
@@ -537,9 +448,8 @@ async function fetchExcerptImage(env: ConfiguredBindings, pageId: string, blockI
   if (!pageResponse.ok) throw new Error(`Notion API returned ${pageResponse.status}`);
   const page = await pageResponse.json() as NotionPage;
   if (page.parent?.type !== "data_source_id" || page.parent.data_source_id !== env.NOTION_DATA_SOURCE_ID) return null;
-  const chinese = selectProperty(page.properties, "原文语言") === "中文";
-  const translation = textProperty(page.properties, "正文翻译");
-  const referenced = chinese || Array.from(translation.matchAll(IMAGE_TAG)).some((match) =>
+  const body = textProperty(page.properties, "正文");
+  const referenced = Array.from(body.matchAll(IMAGE_TAG)).some((match) =>
     match[1]?.toLowerCase() === blockId.toLowerCase() && NOTION_PAGE_ID.test(match[2] ?? ""));
   if (!referenced) return null;
   const blockResponse = await fetch(`https://api.notion.com/v1/blocks/${blockId}`, { headers });
@@ -590,7 +500,7 @@ const worker = {
       const feedUrl = `${url.origin}${url.pathname}`;
       const feed = isExcerptFeed
         ? renderExcerptFeed(
-          await excerptsFromPages(configured, await fetchExcerptPages(configured, excerptsViewId!)),
+          (await fetchExcerptPages(configured, excerptsViewId!)).map(excerptFromPage).filter((item): item is Excerpt => item !== null),
           feedUrl,
         )
         : renderFeed(

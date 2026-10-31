@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseRssFeed } from "feedsmith";
-import worker, { bookFromPage, excerptFromPage, pageBodyFromBlocks, renderExcerptFeed, renderFeed, viewQueryFilter, type NotionPage } from "../src/index.ts";
+import worker, { bookFromPage, excerptFromPage, renderExcerptFeed, renderFeed, viewQueryFilter, type NotionPage } from "../src/index.ts";
 
 const page: NotionPage = {
   id: "book-1",
@@ -169,7 +169,7 @@ test("excerpt feed uses the Notion RSS view filter, paginates, and links to Noti
     properties: {
       "标题": { type: "title", title: [{ plain_text: "Original & title" }] },
       "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "第一节 & 开始" }] },
-      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "一行 <文字>\n" }, { plain_text: "第二行 & 更多" }] },
+      "正文": { type: "rich_text", rich_text: [{ plain_text: "一行 <文字>\n" }, { plain_text: "第二行 & 更多" }] },
       "出处": { type: "rich_text", rich_text: [{ plain_text: "甲 & 乙" }] },
       "内容类型": { type: "select", select: { name: "书籍" } },
       "作者": { type: "rich_text", rich_text: [{ plain_text: "张三" }] },
@@ -205,7 +205,7 @@ test("excerpt feed uses the Notion RSS view filter, paginates, and links to Noti
     }
     if (method === "POST" && href.includes("/data_sources/excerpt-source/query")) {
       return Response.json(requests.filter((request) => request.url.includes("/data_sources/excerpt-source/query")).length === 1
-        ? { results: [excerpt, { ...excerpt, id: "empty", properties: { ...excerpt.properties, "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "  " }] } } }], has_more: true, next_cursor: "next" }
+        ? { results: [excerpt, { ...excerpt, id: "empty", properties: { ...excerpt.properties, "正文": { type: "rich_text", rich_text: [{ plain_text: "  " }] } } }], has_more: true, next_cursor: "next" }
         : { results: [{ ...excerpt, id: "407e75a1-639c-81ca-8919-f4bff2a57885", url: "https://www.notion.so/excerpt-2" }], has_more: false });
     }
     throw new Error(`Unexpected fetch: ${method} ${href}`);
@@ -307,7 +307,7 @@ test("excerpt titles fall back to the original and missing source fields are omi
     id: "1", url: "https://www.notion.so/1", properties: {
       "标题": { type: "title", title: [{ plain_text: "节" }] },
       "标题翻译": { type: "rich_text", rich_text: [{ plain_text: " \n " }] },
-      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
+      "正文": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
       "出处": { type: "rich_text", rich_text: [{ plain_text: "书" }] },
       "原文链接": { type: "url", url: "javascript:alert(1)" },
     },
@@ -325,7 +325,7 @@ test("translations preserve paragraphs from newlines and stored br tags while es
     const excerpt = excerptFromPage({
       id: "paragraphs", url: "https://www.notion.so/paragraphs", properties: {
         "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "中文标题" }] },
-        "正文翻译": { type: "rich_text", rich_text: [{ plain_text: `第一段${separator}第二段\n段内换行<script>alert(1)</script><br onmouseover="alert(1)"> & ]]>` }] },
+        "正文": { type: "rich_text", rich_text: [{ plain_text: `第一段${separator}第二段\n段内换行<script>alert(1)</script><br onmouseover="alert(1)"> & ]]>` }] },
       },
     });
     assert.ok(excerpt);
@@ -342,7 +342,7 @@ test("magazine and web excerpts use neutral source labels and keep stable Notion
       id: "article", url: "https://www.notion.so/article", properties: {
         "标题": { type: "title", title: [{ plain_text: "Article" }] },
         "标题翻译": { type: "rich_text", rich_text: [{ text: { content: "文章" } }] },
-        "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "译文" }] },
+        "正文": { type: "rich_text", rich_text: [{ plain_text: "译文" }] },
         "内容类型": { type: "select", select: { name: contentType } },
         "出处": { type: "rich_text", rich_text: [{ plain_text: "专题" }] },
         "出版方": { type: "rich_text", rich_text: [{ plain_text: "媒体" }] },
@@ -358,24 +358,32 @@ test("magazine and web excerpts use neutral source labels and keep stable Notion
   }
 });
 
-test("excerpts without translated content, identity, or a valid Notion link are excluded", () => {
-  const translated: NotionPage = {
+test("excerpts without body content, identity, or a valid Notion link are excluded", () => {
+  const withBody: NotionPage = {
     id: "1", url: "https://www.notion.so/1", properties: {
-      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
+      "正文": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
     },
   };
-  assert.equal(excerptFromPage(translated)?.title, "无标题");
-  assert.equal(excerptFromPage({ ...translated, id: undefined }), null);
-  assert.equal(excerptFromPage({ ...translated, url: "javascript:alert(1)" }), null);
-  assert.equal(excerptFromPage({ ...translated, properties: {} }), null);
-  assert.equal(excerptFromPage({ ...translated, properties: { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "\n  " }] } } }), null);
+  assert.equal(excerptFromPage(withBody)?.title, "无标题");
+  assert.equal(excerptFromPage({ ...withBody, id: undefined }), null);
+  assert.equal(excerptFromPage({ ...withBody, url: "javascript:alert(1)" }), null);
+  assert.equal(excerptFromPage({ ...withBody, properties: {} }), null);
+  assert.equal(excerptFromPage({ ...withBody, properties: { "正文": { type: "rich_text", rich_text: [{ plain_text: "\n  " }] } } }), null);
+  assert.equal(excerptFromPage({
+    ...withBody,
+    properties: {
+      "原文语言": { type: "select", select: { name: "中文" } },
+      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "旧译文" }] },
+    },
+  }), null);
 });
 
-test("Chinese excerpts prefer the original title and ignore body translations", () => {
+test("Chinese excerpts prefer the original title and use the body property", () => {
   const chinese: NotionPage = {
     id: "zh", url: "https://www.notion.so/zh", properties: {
       "标题": { type: "title", title: [{ plain_text: "中文标题" }] },
       "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "不应使用" }] },
+      "正文": { type: "rich_text", rich_text: [{ plain_text: "中文正文" }] },
       "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "不应输出的译文" }] },
       "原文语言": { type: "select", select: { name: "中文" } },
       "出处": { type: "rich_text", rich_text: [{ plain_text: "某刊" }] },
@@ -385,58 +393,14 @@ test("Chinese excerpts prefer the original title and ignore body translations", 
   const excerpt = excerptFromPage(chinese);
   assert.ok(excerpt);
   assert.equal(excerpt.title, "中文标题");
-  assert.equal(excerpt.body, "");
+  assert.equal(excerpt.body, "中文正文");
   assert.equal(excerpt.chinese, true);
-  assert.equal(excerptFromPage({
-    ...chinese,
-    properties: { ...chinese.properties, "原文语言": { type: "select", select: { name: "日文" } }, "正文翻译": { type: "rich_text", rich_text: [] } },
-  }), null);
+  const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
+  assert.match(item?.description ?? "", /中文正文/);
+  assert.doesNotMatch(item?.description ?? "", /不应输出的译文/);
 });
 
-test("page body blocks become RSS paragraphs and proxied images", () => {
-  const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
-  const body = pageBodyFromBlocks([
-    { id: "p1", type: "paragraph", paragraph: { rich_text: [{ plain_text: "第一段" }] } },
-    { id: "p2", type: "heading_2", heading_2: { rich_text: [{ plain_text: "小标题" }] } },
-    { id: blockId, type: "image", image: { type: "file", file: { url: "https://files.example/a.jpg" }, caption: [{ plain_text: "配图说明" }] } },
-    { id: "p3", type: "quote", quote: { rich_text: [{ plain_text: "引用" }] } },
-    { id: "skip", type: "divider" },
-  ]);
-  assert.equal(body, [
-    "第一段",
-    "小标题",
-    `<image source="notion-file-block://${blockId}/${blockId}">配图说明</image>`,
-    "引用",
-  ].join("\n\n"));
-  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
-  const item = parseRssFeed(renderExcerptFeed([{
-    id: pageId,
-    title: "中文标题",
-    originalTitle: "中文标题",
-    body,
-    chinese: true,
-    terms: "",
-    sourceTitle: "某刊",
-    author: "",
-    chapter: "",
-    publisher: "",
-    originalUrl: "https://example.com/zh",
-    publishedDate: "",
-    link: "https://www.notion.so/zh",
-    pubDate: null,
-  }], "https://example.com/book-excerpts-rss")).items?.[0];
-  assert.equal(item?.description, [
-    "<p><cite>某刊</cite></p>",
-    "<p>第一段</p>",
-    "<p>小标题</p>",
-    `<p><img src="https://example.com/book-excerpts-rss/image/${pageId}/${blockId}" alt="配图说明" /><br />\n配图说明</p>`,
-    "<p>引用</p>",
-    "<hr />",
-    '<p><a href="https://example.com/zh">阅读原文</a> · <a href="https://www.notion.so/zh">在 Notion 中查看</a></p>',
-  ].join("\n"));
-});
-
-test("Chinese excerpt feed loads page body instead of translation", async (context) => {
+test("Chinese excerpt feed uses the body property without fetching page blocks", async (context) => {
   const originalFetch = globalThis.fetch;
   const pageId = "407e75a1-639c-81ca-8919-f4bff2a57886";
   const viewId = "40ae75a1-639c-81f8-b7fe-000c40372432";
@@ -462,20 +426,12 @@ test("Chinese excerpt feed loads page body instead of translation", async (conte
           last_edited_time: "2026-10-14T10:00:00.000Z",
           properties: {
             "标题": { type: "title", title: [{ plain_text: "中文节选" }] },
+            "正文": { type: "rich_text", rich_text: [{ plain_text: "属性正文第一段\n\n属性正文第二段" }] },
             "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "忽略译文" }] },
             "原文语言": { type: "select", select: { name: "中文" } },
             "出处": { type: "rich_text", rich_text: [{ plain_text: "日报" }] },
           },
         }],
-        has_more: false,
-      });
-    }
-    if (href.includes(`/blocks/${pageId}/children`)) {
-      return Response.json({
-        results: [
-          { id: "b1", type: "paragraph", paragraph: { rich_text: [{ plain_text: "页面正文第一段" }] } },
-          { id: "b2", type: "paragraph", paragraph: { rich_text: [{ plain_text: "页面正文第二段" }] } },
-        ],
         has_more: false,
       });
     }
@@ -495,18 +451,18 @@ test("Chinese excerpt feed loads page body instead of translation", async (conte
   const feed = await response.text();
   const item = parseRssFeed(feed).items?.[0];
   assert.equal(item?.title, "中文节选");
-  assert.match(item?.description ?? "", /页面正文第一段/);
-  assert.match(item?.description ?? "", /页面正文第二段/);
+  assert.match(item?.description ?? "", /属性正文第一段/);
+  assert.match(item?.description ?? "", /属性正文第二段/);
   assert.doesNotMatch(item?.description ?? "", /忽略译文/);
-  assert.ok(requests.some((href) => href.includes(`/blocks/${pageId}/children`)));
+  assert.equal(requests.some((href) => href.includes("/blocks/")), false);
 });
 
 test("excerpt image tags become proxied images while unrelated HTML stays escaped", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
   const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
-  const translation = `前文<br /><br /><image source="notion-file-block://${blockId}/${fileId}?name=photo.jpg" /><br /><br />后文 <script>x</script>`;
-  const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: translation }] } } });
+  const body = `前文<br /><br /><image source="notion-file-block://${blockId}/${fileId}?name=photo.jpg" /><br /><br />后文 <script>x</script>`;
+  const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: { "正文": { type: "rich_text", rich_text: [{ plain_text: body }] } } });
   assert.ok(excerpt);
   const description = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0]?.description ?? "";
   assert.match(description, new RegExp(`<img src="https://example.com/book-excerpts-rss/image/${pageId}/${blockId}" alt="正文图片" />`));
@@ -519,12 +475,12 @@ test("captioned notion image wrappers become proxied images with visible caption
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const blockId = "1a52e0b5-2ddd-4438-8257-9e6c5a426940";
   const fileId = "69d14bc7-c973-4ee7-9123-bde234614e89";
-  const translation = [
+  const body = [
     `<image source="notion-file-block://${blockId}/${fileId}?space_id=e9cde029-df5b-4155-b1ef-e48feea5c573&name=bunshun-93076-img1.jpg">`,
     "小堀鸥一郎　摄影：三宅史郎（文艺春秋）",
     "</image>",
   ].join("\n");
-  const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: translation }] } } });
+  const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: { "正文": { type: "rich_text", rich_text: [{ plain_text: body }] } } });
   assert.ok(excerpt);
   const description = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0]?.description ?? "";
   assert.match(description, new RegExp(`<img src="https://example.com/book-excerpts-rss/image/${pageId}/${blockId}" alt="小堀鸥一郎　摄影：三宅史郎（文艺春秋）" />`));
@@ -538,7 +494,7 @@ test("Pangu formats RSS titles and visible content without changing links or HTM
   const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
   const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: {
     "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "AI时代的RSS" }] },
-    "正文翻译": { type: "rich_text", rich_text: [{ plain_text: `使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}" />` }] },
+    "正文": { type: "rich_text", rich_text: [{ plain_text: `使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}" />` }] },
     "出处": { type: "rich_text", rich_text: [{ plain_text: "Cloudflare Workers" }] },
   } });
   assert.ok(excerpt);
@@ -550,7 +506,7 @@ test("Pangu formats RSS titles and visible content without changing links or HTM
   assert.doesNotMatch(item?.description ?? "", /https:\/\/example\.com \/book/);
 });
 
-test("excerpt image proxy serves only images referenced by translated pages in the configured data source", async (context) => {
+test("excerpt image proxy serves only images referenced by body pages in the configured data source", async (context) => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
   const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
@@ -558,7 +514,7 @@ test("excerpt image proxy serves only images referenced by translated pages in t
   let referenced = true;
   let correctParent = true;
   globalThis.fetch = (async (url: RequestInfo | URL) => {
-    if (String(url).includes("/pages/")) return Response.json({ parent: { type: "data_source_id", data_source_id: correctParent ? "source" : "other" }, properties: { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: referenced ? `<image source="notion-file-block://${blockId}/${fileId}" />` : "无图片" }] } } });
+    if (String(url).includes("/pages/")) return Response.json({ parent: { type: "data_source_id", data_source_id: correctParent ? "source" : "other" }, properties: { "正文": { type: "rich_text", rich_text: [{ plain_text: referenced ? `<image source="notion-file-block://${blockId}/${fileId}" />` : "无图片" }] } } });
     if (String(url).includes("/blocks/")) return Response.json({ type: "image", parent: { type: "page_id", page_id: pageId }, image: { type: "file", file: { url: "https://files.example/image.jpg" } } });
     return new Response("image bytes", { headers: { "Content-Type": "image/jpeg" } });
   }) as typeof fetch;
