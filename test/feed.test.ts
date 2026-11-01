@@ -409,6 +409,38 @@ test("Chinese excerpts use the original title and body, not translations", () =>
   }), null);
 });
 
+test("Comic excerpts use the original title and body, not translations", () => {
+  const comic: NotionPage = {
+    id: "comic", url: "https://www.notion.so/comic", properties: {
+      "标题": { type: "title", title: [{ plain_text: "《漫画》第189話" }] },
+      "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "不应使用" }] },
+      "正文": { type: "rich_text", rich_text: [{ plain_text: "漫画正文图片" }] },
+      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "不应输出的译文" }] },
+      "原文语言": { type: "select", select: { name: "日文" } },
+      "内容形态": { type: "select", select: { name: "漫画" } },
+      "出处": { type: "rich_text", rich_text: [{ plain_text: "週刊文春" }] },
+      "原文链接": { type: "url", url: "https://example.com/comic" },
+    },
+  };
+  const excerpt = excerptFromPage(comic);
+  assert.ok(excerpt);
+  assert.equal(excerpt.title, "《漫画》第189話");
+  assert.equal(excerpt.body, "漫画正文图片");
+  assert.equal(excerpt.chinese, false);
+  const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
+  assert.equal(item?.title, "《漫画》第 189 話");
+  assert.match(item?.description ?? "", /漫画正文图片/);
+  assert.doesNotMatch(item?.description ?? "", /不应使用|不应输出的译文/);
+  assert.equal(excerptFromPage({
+    ...comic,
+    properties: {
+      ...comic.properties,
+      "内容形态": { type: "select", select: { name: "书籍节选" } },
+      "正文翻译": { type: "rich_text", rich_text: [] },
+    },
+  }), null);
+});
+
 test("Chinese excerpt feed uses the body property without fetching page blocks", async (context) => {
   const originalFetch = globalThis.fetch;
   const pageId = "407e75a1-639c-81ca-8919-f4bff2a57886";
@@ -522,14 +554,16 @@ test("excerpt image proxy serves only images referenced by the language body fie
   const token = globalThis.fetch;
   let referenced = true;
   let correctParent = true;
-  let chinese = false;
+  let mode: "translated" | "chinese" | "comic" = "translated";
   globalThis.fetch = (async (url: RequestInfo | URL) => {
     if (String(url).includes("/pages/")) {
-      const field = chinese ? "正文" : "正文翻译";
+      const useOriginal = mode !== "translated";
+      const field = useOriginal ? "正文" : "正文翻译";
       return Response.json({
         parent: { type: "data_source_id", data_source_id: correctParent ? "source" : "other" },
         properties: {
-          "原文语言": { type: "select", select: chinese ? { name: "中文" } : { name: "日文" } },
+          "原文语言": { type: "select", select: { name: mode === "chinese" ? "中文" : "日文" } },
+          ...(mode === "comic" ? { "内容形态": { type: "select", select: { name: "漫画" } } } : {}),
           [field]: { type: "rich_text", rich_text: [{ plain_text: referenced ? `<image source="notion-file-block://${blockId}/${fileId}" />` : "无图片" }] },
         },
       });
@@ -548,7 +582,9 @@ test("excerpt image proxy serves only images referenced by the language body fie
   referenced = false;
   assert.equal((await worker.fetch(new Request(url), env)).status, 404);
   referenced = true;
-  chinese = true;
+  mode = "chinese";
+  assert.equal((await worker.fetch(new Request(url), env)).status, 200);
+  mode = "comic";
   assert.equal((await worker.fetch(new Request(url), env)).status, 200);
   correctParent = false;
   assert.equal((await worker.fetch(new Request(url), env)).status, 404);

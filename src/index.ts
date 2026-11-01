@@ -121,6 +121,12 @@ function selectProperty(properties: NotionPage["properties"], name: string): str
   return property.select?.name?.trim() ?? "";
 }
 
+/** Chinese posts and comics use the original title/body; other entries use translations. */
+function usesOriginalContent(properties: NotionPage["properties"]): boolean {
+  return selectProperty(properties, "原文语言") === "中文"
+    || selectProperty(properties, "内容形态") === "漫画";
+}
+
 function externalUrl(value: string | null | undefined): string | null {
   if (!value) return null;
   try {
@@ -212,8 +218,8 @@ export function renderFeed(books: Book[], feedUrl: string): string {
 export function excerptFromPage(page: NotionPage): Excerpt | null {
   const properties = page.properties;
   const chinese = selectProperty(properties, "原文语言") === "中文";
-  // Chinese posts use the original title/body; other languages use the translations.
-  const body = chinese ? textProperty(properties, "正文") : textProperty(properties, "正文翻译");
+  const useOriginal = usesOriginalContent(properties);
+  const body = useOriginal ? textProperty(properties, "正文") : textProperty(properties, "正文翻译");
   const link = externalUrl(page.url);
   if (!link || !page.id || !body) return null;
   const originalTitle = textProperty(properties, "标题");
@@ -222,7 +228,7 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
   const date = new Date(page.created_time ?? page.last_edited_time ?? "");
   return {
     id: page.id,
-    title: chinese
+    title: useOriginal
       ? originalTitle || "无标题"
       : textProperty(properties, "标题翻译") || originalTitle || "无标题",
     originalTitle,
@@ -447,8 +453,9 @@ async function fetchExcerptImage(env: ConfiguredBindings, pageId: string, blockI
   if (!pageResponse.ok) throw new Error(`Notion API returned ${pageResponse.status}`);
   const page = await pageResponse.json() as NotionPage;
   if (page.parent?.type !== "data_source_id" || page.parent.data_source_id !== env.NOTION_DATA_SOURCE_ID) return null;
-  const chinese = selectProperty(page.properties, "原文语言") === "中文";
-  const body = chinese ? textProperty(page.properties, "正文") : textProperty(page.properties, "正文翻译");
+  const body = usesOriginalContent(page.properties)
+    ? textProperty(page.properties, "正文")
+    : textProperty(page.properties, "正文翻译");
   const referenced = Array.from(body.matchAll(IMAGE_TAG)).some((match) =>
     match[1]?.toLowerCase() === blockId.toLowerCase() && NOTION_PAGE_ID.test(match[2] ?? ""));
   if (!referenced) return null;
