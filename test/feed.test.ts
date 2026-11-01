@@ -6,6 +6,7 @@ import worker, { bookFromPage, excerptFromPage, renderExcerptFeed, renderFeed, v
 const page: NotionPage = {
   id: "book-1",
   url: "https://www.notion.so/book-1",
+  created_time: "2026-10-01T08:00:00.000Z",
   last_edited_time: "2026-10-13T10:00:00.000Z",
   properties: {
     "书名": { type: "title", title: [{ plain_text: "甲 & 乙" }] },
@@ -21,6 +22,7 @@ const page: NotionPage = {
 test("RSS item has exactly the requested fields and escapes XML", () => {
   const book = bookFromPage(page);
   assert.ok(book);
+  assert.equal(book.pubDate?.toISOString(), "2026-10-01T08:00:00.000Z");
   const feed = renderFeed([book], "https://example.workers.dev/book-express-rss");
   assert.match(feed, /<link>\s*<!\[CDATA\[https:\/\/book\.douban\.com\/subject\/123\/\?a=1&b=2\]\]>/);
   assert.match(feed, /<title>\s*<!\[CDATA\[甲 & 乙\]\]>/);
@@ -165,6 +167,7 @@ test("excerpt feed uses the Notion RSS view filter, paginates, and links to Noti
   const excerpt = {
     id: "407e75a1-639c-81ca-8919-f4bff2a57884",
     url: "https://www.notion.so/excerpt-1",
+    created_time: "2026-10-01T08:00:00.000Z",
     last_edited_time: "2026-10-13T10:00:00.000Z",
     properties: {
       "标题": { type: "title", title: [{ plain_text: "Original & title" }] },
@@ -429,6 +432,7 @@ test("Chinese excerpt feed uses the body property without fetching page blocks",
         results: [{
           id: pageId,
           url: "https://www.notion.so/zh-page",
+          created_time: "2026-10-02T08:00:00.000Z",
           last_edited_time: "2026-10-14T10:00:00.000Z",
           properties: {
             "标题": { type: "title", title: [{ plain_text: "中文节选" }] },

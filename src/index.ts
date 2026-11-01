@@ -150,7 +150,7 @@ export function bookFromPage(page: NotionPage): Book | null {
   if (!title || !link || !page.id) return null;
 
   const recommendation = properties["推荐来源"];
-  const date = new Date(page.last_edited_time ?? page.created_time ?? "");
+  const date = new Date(page.created_time ?? page.last_edited_time ?? "");
   return {
     id: page.id,
     title,
@@ -219,7 +219,7 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
   const originalTitle = textProperty(properties, "标题");
   const originalLink = properties?.["原文链接"];
   const published = properties?.["发布日期"];
-  const date = new Date(page.last_edited_time ?? page.created_time ?? "");
+  const date = new Date(page.created_time ?? page.last_edited_time ?? "");
   return {
     id: page.id,
     title: chinese
