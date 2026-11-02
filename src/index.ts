@@ -324,10 +324,15 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string): string {
 const EINK_STYLE = [
   "*,*::before,*::after{box-sizing:border-box;animation:none!important;transition:none!important;}",
   "html{-webkit-text-size-adjust:100%;}",
-  "body{margin:0;padding:1.25rem 1rem 2.5rem;font-family:Georgia,'Times New Roman',serif;font-size:1.125rem;line-height:1.75;color:#000;background:#fff;}",
-  "main{max-width:68ch;margin:0 auto;}",
+  // vw side padding: Kindles often ignore CSS min(); keep declarations simple.
+  "body{margin:0;padding:1.25rem 14vw 2.5rem;font-family:Georgia,'Times New Roman',serif;font-size:1.125rem;line-height:1.75;color:#000;background:#fff;}",
+  "body.detail{font-weight:600;}",
+  // 6\" Kindle: 365px column + wider gutters. Scribe (≥720px): 36rem + larger type.
+  "main{max-width:365px;margin:0 auto;}",
+  "@media (min-width:720px){body{padding:1.25rem 8vw 2.5rem;font-size:1.25rem;}h1{font-size:1.65rem;}.meta{font-size:1.0625rem;}main{max-width:36rem;}}",
   "h1{font-size:1.5rem;line-height:1.35;font-weight:700;margin:0 0 1rem;}",
-  "p,li{margin:0.85rem 0;}",
+  "p{margin:0.85rem 0;text-align:justify;text-justify:inter-ideograph;}",
+  "li{margin:0.85rem 0;}",
   "ul{list-style:none;margin:0;padding:0;}",
   "li{border-top:2px solid #000;padding:1rem 0;}",
   "li:last-child{border-bottom:2px solid #000;}",
@@ -353,7 +358,8 @@ const EINK_STYLE = [
   ".progress-bar{display:block;height:100%;width:0;background:#000;}",
 ].join("");
 
-function einkDocument(title: string, body: string, panguedTitle = false, afterMain = ""): string {
+function einkDocument(title: string, body: string, panguedTitle = false, afterMain = "", bodyClass = ""): string {
+  const bodyAttrs = bodyClass ? ` class="${bodyClass}"` : "";
   return [
     "<!DOCTYPE html>",
     '<html lang="zh-CN">',
@@ -363,7 +369,7 @@ function einkDocument(title: string, body: string, panguedTitle = false, afterMa
     `<title>${panguedTitle ? einkText(title) : displayText(title)}</title>`,
     `<style>${EINK_STYLE}</style>`,
     "</head>",
-    `<body>\n<main>\n${body}\n</main>${afterMain ? `\n${afterMain}` : ""}\n</body>`,
+    `<body${bodyAttrs}>\n<main>\n${body}\n</main>${afterMain ? `\n${afterMain}` : ""}\n</body>`,
     "</html>",
   ].join("\n");
 }
@@ -493,7 +499,7 @@ export function renderEinkDetail(
     excerptDetailBody(excerpt, imageBaseUrl),
     ...(showExternalActions ? [einkActionButtons(excerpt)] : []),
     nav,
-  ].join("\n"), true, EINK_DETAIL_CHROME);
+  ].join("\n"), true, EINK_DETAIL_CHROME, "detail");
 }
 
 async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promise<Excerpt | null> {
