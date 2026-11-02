@@ -75,7 +75,7 @@ test("missing or invalid external links fall back to the Notion page", () => {
   assert.equal(bookFromPage({ ...page, properties: { ...page.properties, "书名": { type: "title", title: [] } } }), null);
 });
 
-test("worker fetches all Notion pages and exposes only the feed path", async (context) => {
+test("worker paginates Notion results and exposes only the feed path", async (context) => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ sorts?: unknown; start_cursor?: string }> = [];
   globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
@@ -92,7 +92,7 @@ test("worker fetches all Notion pages and exposes only the feed path", async (co
   const response = await worker.fetch(new Request("https://example.workers.dev/book-express-rss"), env);
   assert.equal(response.status, 200);
   assert.match(response.headers.get("Content-Type") ?? "", /application\/rss\+xml/);
-  assert.equal(response.headers.get("Cache-Control"), "public, max-age=300");
+  assert.equal(response.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
   assert.equal((await response.text()).match(/<item>/g)?.length, 2);
   assert.deepEqual(requests[0]?.sorts, [{ timestamp: "last_edited_time", direction: "descending" }]);
   assert.equal(requests[1]?.start_cursor, "next");
@@ -103,6 +103,66 @@ test("worker fetches all Notion pages and exposes only the feed path", async (co
   const method = await worker.fetch(new Request("https://example.workers.dev/book-express-rss", { method: "POST" }), env);
   assert.equal(method.status, 405);
   assert.equal(method.headers.get("Allow"), "GET, HEAD");
+});
+
+test("both feeds query and render only the first 30 records, preserving their order", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  const env = { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
+  for (const path of ["/book-express-rss", "/book-excerpts-rss"]) {
+    const requests: Array<{ page_size: number; start_cursor?: string }> = [];
+    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).includes("/views/")) return Response.json({ data_source_id: "source" });
+      const body = JSON.parse(String(init?.body));
+      requests.push(body);
+      // A partial first batch still needs pagination, but stop once 30 are collected.
+      const offset = requests.length === 1 ? 0 : 13;
+      const count = requests.length === 1 ? 13 : body.page_size;
+      return Response.json({
+        results: Array.from({ length: count }, (_, index) => ({
+          ...page,
+          id: `item-${offset + index}`,
+          properties: { ...page.properties, "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] } },
+        })),
+        has_more: true,
+        next_cursor: "next",
+      });
+    }) as typeof fetch;
+    const response = await worker.fetch(new Request(`https://example.workers.dev${path}`), env);
+    assert.equal(response.status, 200);
+    const feed = parseRssFeed(await response.text());
+    assert.deepEqual(requests.map((request) => request.page_size), [30, 17]);
+    assert.equal(requests[1]?.start_cursor, "next");
+    assert.deepEqual(feed.items?.map((item) => item.guid?.value), Array.from({ length: 30 }, (_, index) => `notion:item-${index}`));
+  }
+});
+
+test("both feeds revalidate and rebuild when Notion content changes", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  let revision = 1;
+  globalThis.fetch = (async (url: RequestInfo | URL) => {
+    if (String(url).includes("/views/")) return Response.json({ data_source_id: "source" });
+    return Response.json({ results: [{ ...page, properties: {
+      ...page.properties,
+      "简介": { type: "rich_text", rich_text: [{ plain_text: `正文版本 ${revision}` }] },
+      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: `正文版本 ${revision}` }] },
+    } }], has_more: false });
+  }) as typeof fetch;
+  const env = { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
+  for (const path of ["/book-express-rss", "/book-excerpts-rss"]) {
+    const request = new Request(`https://example.workers.dev${path}`);
+    revision = 1;
+    const first = await worker.fetch(request, env);
+    assert.equal(first.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
+    assert.match(await first.text(), /正文版本 1/);
+    revision = 2;
+    const second = await worker.fetch(request, env);
+    assert.match(await second.text(), /正文版本 2/);
+    const head = await worker.fetch(new Request(request.url, { method: "HEAD" }), env);
+    assert.equal(head.headers.get("Cache-Control"), first.headers.get("Cache-Control"));
+    assert.equal(await head.text(), "");
+  }
 });
 
 test("cover image is loaded from the Notion page and proxied", async (context) => {
@@ -151,6 +211,7 @@ test("missing configuration and Notion failures return explicit errors", async (
 
   const response = await worker.fetch(request, { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source" });
   assert.equal(response.status, 502);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
   assert.equal(await response.text(), "Feed temporarily unavailable");
 });
 
@@ -334,7 +395,7 @@ test("translations preserve paragraphs from newlines and stored br tags while es
     assert.ok(excerpt);
     const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
     assert.equal(item?.title, "中文标题");
-    assert.match(item?.description ?? "", /<p>第一段<\/p>\n<p>第二段<br \/>\n段内换行&lt;script&gt;alert \(1\)&lt;\/script&gt;&lt;br onmouseover=&quot;alert\(1\)&quot;&gt; &amp; \]\]&gt;<\/p>/);
+    assert.match(item?.description ?? "", /<p>第一段<\/p>\n<p>第二段<br \/>\n段内换行&lt;script&gt;alert\(1\)&lt;\/script&gt;&lt;br onmouseover=&quot;alert\(1\)&quot;&gt; &amp; \]\]&gt;<\/p>/);
     assert.doesNotMatch(item?.description ?? "", /<script|<br onmouseover|&lt;br\s*\/?&gt;/);
   }
 });
@@ -428,7 +489,7 @@ test("Comic excerpts use the original title and body, not translations", () => {
   assert.equal(excerpt.body, "漫画正文图片");
   assert.equal(excerpt.chinese, false);
   const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
-  assert.equal(item?.title, "《漫画》第 189 話");
+  assert.equal(item?.title, "《漫画》第189話");
   assert.match(item?.description ?? "", /漫画正文图片/);
   assert.doesNotMatch(item?.description ?? "", /不应使用|不应输出的译文/);
   assert.equal(excerptFromPage({
@@ -529,7 +590,7 @@ test("captioned notion image wrappers become proxied images and ignore caption t
   assert.doesNotMatch(description, /©文藝春秋|notion-file-block|<image|<\/image>/);
 });
 
-test("Pangu formats RSS titles and visible content without changing links or HTML attributes", () => {
+test("RSS preserves original text spacing while escaping content and keeping image links", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
   const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
@@ -540,11 +601,20 @@ test("Pangu formats RSS titles and visible content without changing links or HTM
   } });
   assert.ok(excerpt);
   const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
-  assert.equal(item?.title, "AI 时代的 RSS");
+  assert.equal(item?.title, "AI时代的RSS");
   assert.match(item?.description ?? "", /<cite>Cloudflare Workers<\/cite>/);
-  assert.match(item?.description ?? "", /使用 API 处理 2026 年数据/);
+  assert.match(item?.description ?? "", /使用API处理2026年数据/);
   assert.match(item?.description ?? "", new RegExp(`<img src="https://example.com/book-excerpts-rss/image/${pageId}/${blockId}" alt="正文图片" \/>`));
   assert.doesNotMatch(item?.description ?? "", /https:\/\/example\.com \/book/);
+  const book = bookFromPage({ ...page, properties: {
+    ...page.properties,
+    "书名": { type: "title", title: [{ plain_text: "AI时代的RSS" }] },
+    "简介": { type: "rich_text", rich_text: [{ plain_text: "保留API与2026年之间的原始排版 & <文字>" }] },
+  } });
+  assert.ok(book);
+  const bookItem = parseRssFeed(renderFeed([book], "https://example.com/book-express-rss")).items?.[0];
+  assert.equal(bookItem?.title, "AI时代的RSS");
+  assert.match(bookItem?.description ?? "", /保留API与2026年之间的原始排版 &amp; &lt;文字&gt;/);
 });
 
 test("excerpt image proxy serves only images referenced by the language body field", async (context) => {

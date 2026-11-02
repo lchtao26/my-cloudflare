@@ -1,5 +1,4 @@
 import { generateRssFeed, type RssFeed } from "feedsmith";
-import pangu from "pangu";
 
 const NOTION_VERSION = "2026-03-11";
 const FEED_TITLE = "书籍推荐";
@@ -7,6 +6,7 @@ const FEED_DESCRIPTION = "来自 Notion「书籍推荐」的书目 RSS";
 const NOTION_PAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FEED_PATH = "/book-express-rss";
 const EXCERPT_FEED_PATH = "/book-excerpts-rss";
+const FEED_ITEM_LIMIT = 30;
 
 type RichText = { plain_text?: string; text?: { content?: string } };
 
@@ -105,7 +105,7 @@ function htmlText(value: string): string {
 }
 
 function displayText(value: string): string {
-  return htmlText(pangu.spaceText(value));
+  return htmlText(value);
 }
 
 function textProperty(properties: NotionPage["properties"], name: string): string {
@@ -194,7 +194,7 @@ function itemDescription(book: Book, feedUrl: string): string {
 export function renderFeed(books: Book[], feedUrl: string): string {
   const items: Array<RssFeed.Item<Date>> = books.map((book) => {
     const item: RssFeed.Item<Date> = {
-      title: pangu.spaceText(book.title),
+      title: book.title,
       link: book.link,
       description: itemDescription(book, feedUrl),
       guid: { value: `notion:${book.id}`, isPermaLink: false },
@@ -204,9 +204,9 @@ export function renderFeed(books: Book[], feedUrl: string): string {
   });
 
   return generateRssFeed({
-    title: pangu.spaceText(FEED_TITLE),
+    title: FEED_TITLE,
     link: feedUrl,
-    description: pangu.spaceText(FEED_DESCRIPTION),
+    description: FEED_DESCRIPTION,
     language: "zh-CN",
     atom: {
       links: [{ href: feedUrl, rel: "self", type: "application/rss+xml" }],
@@ -248,13 +248,13 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
 
 export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string {
   return generateRssFeed({
-    title: pangu.spaceText("阅读节选"),
+    title: "阅读节选",
     link: feedUrl,
-    description: pangu.spaceText("来自 Notion「阅读节选」的书籍、杂志与网页译文及中文原文 RSS"),
+    description: "来自 Notion「阅读节选」的书籍、杂志与网页译文及中文原文 RSS",
     language: "zh-CN",
     atom: { links: [{ href: feedUrl, rel: "self", type: "application/rss+xml" }] },
     items: excerpts.map((excerpt) => ({
-      title: pangu.spaceText(excerpt.title),
+      title: excerpt.title,
       link: excerpt.link,
       description: excerptDescription(excerpt, feedUrl),
       guid: { value: `notion:${excerpt.id}`, isPermaLink: false },
@@ -328,7 +328,7 @@ async function fetchPages(env: ConfiguredBindings, filter?: object): Promise<Not
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        page_size: 100,
+        page_size: FEED_ITEM_LIMIT - pages.length,
         sorts: [{ timestamp: "last_edited_time", direction: "descending" }],
         ...(filter ? { filter } : {}),
         ...(cursor ? { start_cursor: cursor } : {}),
@@ -344,9 +344,9 @@ async function fetchPages(env: ConfiguredBindings, filter?: object): Promise<Not
     pages.push(...data.results ?? []);
     cursor = data.has_more ? data.next_cursor : null;
     if (data.has_more && !cursor) throw new Error("Notion returned an incomplete page without a cursor");
-  } while (cursor);
+  } while (cursor && pages.length < FEED_ITEM_LIMIT);
 
-  return pages;
+  return pages.slice(0, FEED_ITEM_LIMIT);
 }
 
 async function fetchNotionJson(url: string, init: RequestInit): Promise<Response> {
@@ -394,7 +394,7 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string): Promi
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
-        page_size: 100,
+        page_size: FEED_ITEM_LIMIT - pages.length,
         // No saved sort means the table's own order. Don't replace it with last_edited_time.
         ...(view.sorts?.length ? { sorts: view.sorts } : {}),
         ...(filter ? { filter } : {}),
@@ -407,9 +407,9 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string): Promi
     pages.push(...data.results ?? []);
     cursor = data.has_more ? data.next_cursor : null;
     if (data.has_more && !cursor) throw new Error("Notion returned an incomplete page without a cursor");
-  } while (cursor);
+  } while (cursor && pages.length < FEED_ITEM_LIMIT);
 
-  return pages;
+  return pages.slice(0, FEED_ITEM_LIMIT);
 }
 
 function coverIdFromPath(pathname: string): string | null {
@@ -517,13 +517,17 @@ const worker = {
       return new Response(request.method === "HEAD" ? null : feed, {
         headers: {
           "Content-Type": "application/rss+xml; charset=utf-8",
-          "Cache-Control": "public, max-age=300",
+          // Cache for five minutes, but never serve an expired feed if Notion fails.
+          "Cache-Control": "public, max-age=300, must-revalidate",
           "X-Content-Type-Options": "nosniff",
         },
       });
     } catch (error) {
       console.error(coverId || imageIds ? "Failed to load image" : "Failed to build book RSS", error);
-      return new Response(coverId || imageIds ? "Image temporarily unavailable" : "Feed temporarily unavailable", { status: 502 });
+      return new Response(coverId || imageIds ? "Image temporarily unavailable" : "Feed temporarily unavailable", {
+        status: 502,
+        headers: { "Cache-Control": "no-store" },
+      });
     }
   },
 };
