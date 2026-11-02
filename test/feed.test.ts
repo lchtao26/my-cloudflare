@@ -300,7 +300,7 @@ test("excerpt feed uses the Notion RSS view filter, paginates, and links to e-in
   assert.match(response.headers.get("Content-Type") ?? "", /application\/rss\+xml/);
   const feed = await response.text();
   const parsed = parseRssFeed(feed);
-  assert.equal(parsed.title, "阅读片段");
+  assert.equal(parsed.title, "阅读节选");
   assert.equal(parsed.items?.length, 2);
   const item = parsed.items?.[0];
   assert.equal(item?.title, "第一节 & 开始");
@@ -625,6 +625,34 @@ test("RSS preserves original title spacing; book feed still escapes description 
   assert.match(bookItem?.description ?? "", /保留API与2026年之间的原始排版 &amp; &lt;文字&gt;/);
 });
 
+test("RSS description includes only the first body image when present", () => {
+  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+  const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
+  const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
+  const secondBlock = "1a52e0b5-2ddd-4438-8257-9e6c5a426940";
+  const secondFile = "69d14bc7-c973-4ee7-9123-bde234614e89";
+  const excerpt = excerptFromPage({
+    id: pageId,
+    url: "https://notion.so/page",
+    properties: {
+      "正文翻译": {
+        type: "rich_text",
+        rich_text: [{
+          plain_text: [
+            "前文",
+            `<image source="notion-file-block://${blockId}/${fileId}?name=photo.jpg" />`,
+            `<image source="notion-file-block://${secondBlock}/${secondFile}">说明</image>`,
+          ].join("<br /><br />"),
+        }],
+      },
+    },
+  });
+  assert.ok(excerpt);
+  const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0];
+  assert.equal(item?.description, `<img src="https://example.com/read/p/${pageId}/${blockId}" alt="正文图片" />`);
+  assert.doesNotMatch(item?.description ?? "", new RegExp(secondBlock));
+});
+
 test("e-ink list uses the RSS view and links to detail pages", async (context) => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
@@ -671,7 +699,7 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
   assert.equal(response.status, 200);
   assert.match(response.headers.get("Content-Type") ?? "", /text\/html/);
   const html = await response.text();
-  assert.match(html, /<title>阅读片段<\/title>/);
+  assert.match(html, /<title>阅读节选<\/title>/);
   assert.match(html, new RegExp(`href="/read/d/${pageId}"`));
   assert.match(html, /第一节/);
   assert.match(html, /某书 · 作者：张三/);

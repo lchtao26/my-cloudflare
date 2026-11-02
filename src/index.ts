@@ -260,19 +260,41 @@ function excerptDetailUrl(feedUrl: string, excerptId: string): string {
   return `${new URL(feedUrl).origin}${READ_DETAIL_PREFIX}/${excerptId}`;
 }
 
+// Self-closing tags and captioned <image>...</image> wrappers both count.
+const IMAGE_TAG = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\?[^"<>]*)?"\s*(?:\/>|>([\s\S]*?)<\/image>)/gi;
+// RSS only needs the first source ids; skip matching the rest of the tag or caption body.
+const IMAGE_SOURCE = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})/gi;
+
+function excerptDescription(excerpt: Excerpt, feedUrl: string): string | undefined {
+  if (!NOTION_PAGE_ID.test(excerpt.id)) return undefined;
+  for (const match of excerpt.body.matchAll(IMAGE_SOURCE)) {
+    const blockId = match[1]!;
+    const fileId = match[2]!;
+    if (!NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
+    const src = htmlText(`${new URL(feedUrl).origin}${READ_ASSET_PREFIX}/${excerpt.id}/${blockId}`);
+    return `<img src="${src}" alt="正文图片" />`;
+  }
+  return undefined;
+}
+
 export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string {
   return generateRssFeed({
-    title: "阅读片段",
+    title: "阅读节选",
     link: feedUrl,
     description: "来自 Notion「阅读节选」的书籍、杂志与网页译文及中文原文 RSS",
     language: "zh-CN",
     atom: { links: [{ href: feedUrl, rel: "self", type: "application/rss+xml" }] },
-    items: excerpts.map((excerpt) => ({
-      title: excerpt.title,
-      link: excerptDetailUrl(feedUrl, excerpt.id),
-      guid: { value: `notion:${excerpt.id}`, isPermaLink: false },
-      ...(excerpt.pubDate ? { pubDate: excerpt.pubDate } : {}),
-    })),
+    items: excerpts.map((excerpt) => {
+      const item: RssFeed.Item<Date> = {
+        title: excerpt.title,
+        link: excerptDetailUrl(feedUrl, excerpt.id),
+        guid: { value: `notion:${excerpt.id}`, isPermaLink: false },
+      };
+      const description = excerptDescription(excerpt, feedUrl);
+      if (description) item.description = description;
+      if (excerpt.pubDate) item.pubDate = excerpt.pubDate;
+      return item;
+    }),
   });
 }
 
@@ -351,8 +373,8 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
       "</li>",
     ].join("");
   }).join("\n");
-  return einkDocument("阅读片段", [
-    `<h1>${displayText("阅读片段")}</h1>`,
+  return einkDocument("阅读节选", [
+    `<h1>${displayText("阅读节选")}</h1>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
   ].join("\n"));
 }
@@ -391,9 +413,6 @@ async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promis
   if (page.parent?.type !== "data_source_id" || page.parent.data_source_id !== env.NOTION_DATA_SOURCE_ID) return null;
   return excerptFromPage(page);
 }
-
-// Self-closing tags and captioned <image>...</image> wrappers both count.
-const IMAGE_TAG = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\?[^"<>]*)?"\s*(?:\/>|>([\s\S]*?)<\/image>)/gi;
 
 function einkParagraphs(translation: string, pageId: string, imageBaseUrl: string): string {
   // Existing translations contain literal <br /> separators. Interpret only
