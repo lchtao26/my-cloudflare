@@ -324,7 +324,7 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string): string {
 const EINK_STYLE = [
   "*,*::before,*::after{box-sizing:border-box;animation:none!important;transition:none!important;}",
   "html{-webkit-text-size-adjust:100%;}",
-  "body{margin:0;padding:1.25rem 1rem 2.5rem;font-family:Georgia,'Times New Roman',serif;font-size:1.125rem;line-height:1.75;color:#000;background:#fff;}",
+  "body{margin:0;padding:1.25rem 1rem 5rem;font-family:Georgia,'Times New Roman',serif;font-size:1.125rem;line-height:1.75;color:#000;background:#fff;}",
   "main{max-width:68ch;margin:0 auto;}",
   "h1{font-size:1.5rem;line-height:1.35;font-weight:700;margin:0 0 1rem;}",
   "p,li{margin:0.85rem 0;}",
@@ -342,9 +342,14 @@ const EINK_STYLE = [
   "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
   "hr{border:0;border-top:2px solid #000;margin:1.5rem 0;}",
   "cite{font-style:normal;font-weight:700;}",
+  // Fixed pager is an e-ink experiment; leave room so the last lines stay readable.
+  ".pager{position:fixed;left:0;right:0;bottom:0;display:flex;height:3.5rem;border-top:2px solid #000;background:#fff;z-index:1;}",
+  ".pager-btn{flex:1;display:flex;align-items:center;justify-content:center;height:100%;padding:0;text-decoration:none;font-weight:700;color:#000;border-right:2px solid #000;}",
+  ".pager-btn:last-child{border-right:0;}",
+  ".pager-btn:focus-visible{outline:3px solid #000;outline-offset:-3px;}",
 ].join("");
 
-function einkDocument(title: string, body: string, panguedTitle = false): string {
+function einkDocument(title: string, body: string, panguedTitle = false, afterMain = ""): string {
   return [
     "<!DOCTYPE html>",
     '<html lang="zh-CN">',
@@ -354,7 +359,7 @@ function einkDocument(title: string, body: string, panguedTitle = false): string
     `<title>${panguedTitle ? einkText(title) : displayText(title)}</title>`,
     `<style>${EINK_STYLE}</style>`,
     "</head>",
-    `<body>\n<main>\n${body}\n</main>\n</body>`,
+    `<body>\n<main>\n${body}\n</main>${afterMain ? `\n${afterMain}` : ""}\n</body>`,
     "</html>",
   ].join("\n");
 }
@@ -389,6 +394,30 @@ function einkActionButtons(excerpt: Excerpt): string {
   return buttons.length ? `<div class="actions">\n${buttons.join("\n")}\n</div>` : "";
 }
 
+// Scroll by one viewport minus the fixed pager so content isn't hidden under it.
+const EINK_PAGER_SCRIPT = [
+  "<script>",
+  "(function(){",
+  "function step(){var p=document.querySelector('.pager');return Math.max(80,window.innerHeight-(p?p.offsetHeight:0));}",
+  "function go(dir){window.scrollBy(0,dir*step());}",
+  "var prev=document.getElementById('pager-prev');",
+  "var next=document.getElementById('pager-next');",
+  "if(prev)prev.onclick=function(e){if(e&&e.preventDefault)e.preventDefault();go(-1);return false;};",
+  "if(next)next.onclick=function(e){if(e&&e.preventDefault)e.preventDefault();go(1);return false;};",
+  "})();",
+  "</script>",
+].join("");
+
+function einkPager(): string {
+  return [
+    `<nav class="pager" aria-label="${htmlText("翻页")}">`,
+    `<a class="pager-btn" id="pager-prev" href="#">${einkText("向上")}</a>`,
+    `<a class="pager-btn" id="pager-next" href="#">${einkText("向下")}</a>`,
+    "</nav>",
+    EINK_PAGER_SCRIPT,
+  ].join("\n");
+}
+
 export function renderEinkDetail(excerpt: Excerpt, listPath: string, imageBaseUrl: string): string {
   const back = `<p class="nav"><a href="${htmlText(listPath)}">${einkText("返回列表")}</a></p>`;
   return einkDocument(excerpt.title, [
@@ -397,7 +426,7 @@ export function renderEinkDetail(excerpt: Excerpt, listPath: string, imageBaseUr
     excerptDetailBody(excerpt, imageBaseUrl),
     einkActionButtons(excerpt),
     back,
-  ].join("\n"), true);
+  ].join("\n"), true, einkPager());
 }
 
 async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promise<Excerpt | null> {
