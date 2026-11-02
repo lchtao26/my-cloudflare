@@ -780,6 +780,33 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
   assert.doesNotMatch(detail, /阅读原文|在 Notion 中查看|专有名词与术语|原标题：/);
 });
 
+test("e-ink detail uses pangu spacing without changing image proxy URLs", () => {
+  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+  const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
+  const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
+  const html = renderEinkDetail({
+    id: pageId,
+    title: "AI时代的RSS",
+    originalTitle: "AI时代的RSS",
+    body: `使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}" />`,
+    chinese: false,
+    terms: "",
+    sourceTitle: "Cloudflare Workers",
+    author: "",
+    chapter: "",
+    publisher: "",
+    originalUrl: null,
+    publishedDate: "",
+    link: "https://www.notion.so/1",
+    pubDate: null,
+  }, "/book-excerpts-eink", "https://example.com/book-excerpts-rss");
+  assert.match(html, /<title>AI 时代的 RSS<\/title>/);
+  assert.match(html, /<h1>AI 时代的 RSS<\/h1>/);
+  assert.match(html, /使用 API 处理 2026 年数据/);
+  assert.match(html, new RegExp(`src="https://example\\.com/book-excerpts-rss/image/${pageId}/${blockId}"`));
+  assert.doesNotMatch(html, /https:\/\/example\.com \/book/);
+});
+
 test("excerpt image proxy serves only images referenced by the language body field", async (context) => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";

@@ -1,4 +1,5 @@
 import { generateRssFeed, type RssFeed } from "feedsmith";
+import pangu from "pangu";
 
 const NOTION_VERSION = "2026-03-11";
 const FEED_TITLE = "书籍推荐";
@@ -105,9 +106,13 @@ function htmlText(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
-function displayText(value: string): string {
-  return htmlText(value);
+type TextFormat = (value: string) => string;
+
+function displayText(value: string, format: TextFormat = (text) => text): string {
+  return htmlText(format(value));
 }
+
+const einkTextFormat: TextFormat = (value) => pangu.spaceText(value);
 
 function textProperty(properties: NotionPage["properties"], name: string): string {
   const property = properties?.[name];
@@ -174,7 +179,7 @@ export function bookFromPage(page: NotionPage): Book | null {
 }
 
 function itemDescription(book: Book, feedUrl: string): string {
-  const author = [book.author, book.authorIntro].filter(Boolean).map(displayText).join(" | ");
+  const author = [book.author, book.authorIntro].filter(Boolean).map((value) => displayText(value)).join(" | ");
   const lines = [
     `作者：${author}`,
     `简介：${displayText(book.summary)}`,
@@ -264,31 +269,36 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
   });
 }
 
-function excerptDescription(excerpt: Excerpt, feedUrl: string, options?: { includeLinks?: boolean }): string {
+function excerptDescription(
+  excerpt: Excerpt,
+  feedUrl: string,
+  options?: { includeLinks?: boolean; format?: TextFormat },
+): string {
   const includeLinks = options?.includeLinks !== false;
+  const format = options?.format ?? ((text) => text);
   const source = [
-    excerpt.sourceTitle ? `<cite>${displayText(excerpt.sourceTitle)}</cite>` : "",
-    excerpt.author ? `作者：${displayText(excerpt.author)}` : "",
+    excerpt.sourceTitle ? `<cite>${displayText(excerpt.sourceTitle, format)}</cite>` : "",
+    excerpt.author ? `作者：${displayText(excerpt.author, format)}` : "",
   ].filter(Boolean).join(" · ");
   const details = [
     ["原标题", excerpt.originalTitle !== excerpt.title ? excerpt.originalTitle : ""],
     ["出版方", excerpt.publisher],
     ["章节", excerpt.chapter],
     ["发布日期", excerpt.publishedDate],
-  ].filter(([, value]) => value).map(([label, value]) => `${label}：${displayText(value)}`);
+  ].filter(([, value]) => value).map(([label, value]) => `${label}：${displayText(value, format)}`);
   const links = [
     excerpt.originalUrl ? `<a href="${htmlText(excerpt.originalUrl)}">阅读原文</a>` : "",
     `<a href="${htmlText(excerpt.link)}">在 Notion 中查看</a>`,
   ].filter(Boolean).join(" · ");
-  const body = excerpt.body ? translationParagraphs(excerpt.body, excerpt.id, feedUrl) : "";
-  const terms = excerpt.terms ? translationParagraphs(excerpt.terms, excerpt.id, feedUrl) : "";
+  const body = excerpt.body ? translationParagraphs(excerpt.body, excerpt.id, feedUrl, format) : "";
+  const terms = excerpt.terms ? translationParagraphs(excerpt.terms, excerpt.id, feedUrl, format) : "";
   return [
     ...(source ? [`<p>${source}</p>`] : []),
     ...(body ? [body] : []),
     "<hr />",
     ...(details.length ? [`<p>${details.join("<br />\n")}</p>`] : []),
     ...(includeLinks ? [`<p>${links}</p>`] : []),
-    ...(terms ? ["<hr />", `<p>${displayText("专有名词与术语")}</p>`, terms] : []),
+    ...(terms ? ["<hr />", `<p>${displayText("专有名词与术语", format)}</p>`, terms] : []),
   ].join("\n");
 }
 
@@ -313,14 +323,14 @@ const EINK_STYLE = [
   "cite{font-style:normal;font-weight:700;}",
 ].join("");
 
-function einkDocument(title: string, body: string): string {
+function einkDocument(title: string, body: string, format: TextFormat = (text) => text): string {
   return [
     "<!DOCTYPE html>",
     '<html lang="zh-CN">',
     "<head>",
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
-    `<title>${displayText(title)}</title>`,
+    `<title>${displayText(title, format)}</title>`,
     `<style>${EINK_STYLE}</style>`,
     "</head>",
     `<body>\n<main>\n${body}\n</main>\n</body>`,
@@ -349,13 +359,14 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
 }
 
 export function renderEinkDetail(excerpt: Excerpt, listPath: string, imageBaseUrl: string): string {
-  const back = `<p class="nav"><a href="${htmlText(listPath)}">${displayText("返回列表")}</a></p>`;
+  const format = einkTextFormat;
+  const back = `<p class="nav"><a href="${htmlText(listPath)}">${displayText("返回列表", format)}</a></p>`;
   return einkDocument(excerpt.title, [
     back,
-    `<h1>${displayText(excerpt.title)}</h1>`,
-    excerptDescription(excerpt, imageBaseUrl, { includeLinks: false }),
+    `<h1>${displayText(excerpt.title, format)}</h1>`,
+    excerptDescription(excerpt, imageBaseUrl, { includeLinks: false, format }),
     back,
-  ].join("\n"));
+  ].join("\n"), format);
 }
 
 async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promise<Excerpt | null> {
@@ -375,7 +386,12 @@ async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promis
 // Self-closing tags and captioned <image>...</image> wrappers both count.
 const IMAGE_TAG = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\?[^"<>]*)?"\s*(?:\/>|>([\s\S]*?)<\/image>)/gi;
 
-function translationParagraphs(translation: string, pageId: string, feedUrl: string): string {
+function translationParagraphs(
+  translation: string,
+  pageId: string,
+  feedUrl: string,
+  format: TextFormat = (text) => text,
+): string {
   // Existing translations contain literal <br /> separators. Interpret only
   // attribute-free line breaks; all other markup remains escaped text.
   return translation.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim()
@@ -388,11 +404,11 @@ function translationParagraphs(translation: string, pageId: string, feedUrl: str
         const fileId = match[2];
         if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
         // Caption text inside <image>...</image> is ignored; only the file reference is used.
-        output += displayText(paragraph.slice(offset, match.index)).replaceAll("\n", "<br />\n");
+        output += displayText(paragraph.slice(offset, match.index), format).replaceAll("\n", "<br />\n");
         output += `<img src="${htmlText(`${feedUrl}/image/${pageId}/${blockId}`)}" alt="正文图片" />`;
         offset = match.index + match[0].length;
       }
-      return `<p>${output}${displayText(paragraph.slice(offset)).replaceAll("\n", "<br />\n")}</p>`;
+      return `<p>${output}${displayText(paragraph.slice(offset), format).replaceAll("\n", "<br />\n")}</p>`;
     })
     .join("\n");
 }

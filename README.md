@@ -32,4 +32,4 @@ Cloudflare Worker 从 Notion「书籍推荐」数据库读取最近编辑的前 
 
 ## 阅读节选水墨屏页面
 
-`/book-excerpts-eink` 与 `/book-excerpts-eink/{pageId}` 为水墨屏设备提供极简 HTML 阅读页。列表范围与 RSS 视图一致；详情正文格式与 RSS `description` 相同，但不输出“阅读原文”“在 Notion 中查看”等跳转链接。页面使用纯黑白、衬线大字号、固定行宽、实线分隔与大触控目标，无 JavaScript、无动画。图片继续复用 `/book-excerpts-rss/image/...` 代理。缓存 5 分钟。
+`/book-excerpts-eink` 与 `/book-excerpts-eink/{pageId}` 为水墨屏设备提供极简 HTML 阅读页。列表范围与 RSS 视图一致；详情正文格式与 RSS `description` 相同，但不输出“阅读原文”“在 Notion 中查看”等跳转链接。详情页可见文本使用 `pangu` 调整中英文与数字间距，不改动 HTML 标签与图片代理地址；列表页与 RSS 仍保留原文排版。页面使用纯黑白、衬线大字号、固定行宽、实线分隔与大触控目标，无 JavaScript、无动画。图片继续复用 `/book-excerpts-rss/image/...` 代理。缓存 5 分钟。
