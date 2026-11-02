@@ -1,6 +1,6 @@
 # 书籍推荐 RSS
 
-Cloudflare Worker 从 Notion「书籍推荐」数据库读取最近编辑的前 30 条书目，在 `/book-express-rss` 输出 RSS。每条书目的标题是书名。内容依次为“作者、简介”，两项各占一行。作者一行写成“作者：姓名 | 作者介绍”，介绍为空时只保留姓名。有「出版社 / 品牌」时，在来源上一行写出版社。有「来源」时再增加一行，来源名称链接到「推荐来源」。有封面时，图片放在最后一行，不指定尺寸。封面文件由 Worker 转发，避免把 Notion 的临时链接写进订阅源。链接优先取自「详情链接」字段；该字段为空或不是 HTTP(S) 网址时，链接到对应的 Notion 页面。没有书名或可用链接的记录不会进入订阅源。
+Cloudflare Worker 从 Notion「书籍推荐」数据库读取最近编辑的前 30 条书目，在 `/book/rss` 输出 RSS。每条书目的标题是书名。内容依次为“作者、简介”，两项各占一行。作者一行写成“作者：姓名 | 作者介绍”，介绍为空时只保留姓名。有「出版社 / 品牌」时，在来源上一行写出版社。有「来源」时再增加一行，来源名称链接到「推荐来源」。有封面时，图片放在最后一行，不指定尺寸。封面由 Worker 经 `/book/p/{pageId}` 转发，避免把 Notion 的临时链接写进订阅源。链接优先取自「详情链接」字段；该字段为空或不是 HTTP(S) 网址时，链接到对应的 Notion 页面。没有书名或可用链接的记录不会进入订阅源。
 
 ## 配置
 
@@ -16,20 +16,20 @@ Cloudflare Worker 从 Notion「书籍推荐」数据库读取最近编辑的前 
 
 `NOTION_TOKEN` 只保存在 Cloudflare Worker Secret 中。Worker 上还没有这个密钥时，Actions 会拒绝部署；先在本地执行一次 `npx wrangler deploy --secrets-file .dev.vars`。不要再把这个仓库接到 Cloudflare Worker 的 Builds，否则每次推送会部署两次。
 
-部署成功后的订阅地址为 `https://my-cloudflare.lichcode.workers.dev/book-express-rss`。接口返回 RSS 2.0，按 Notion 的最后编辑时间排序，为每本书使用稳定的 Notion 页面 ID 作为 GUID，每次最多输出 30 条。
+部署成功后的订阅地址为 `https://my-cloudflare.lichcode.workers.dev/book/rss`。接口返回 RSS 2.0，按 Notion 的最后编辑时间排序，为每本书使用稳定的 Notion 页面 ID 作为 GUID，每次最多输出 30 条。
 
 所有 RSS 接口在 Cloudflare 边缘和浏览器中缓存 5 分钟。缓存过期后必须重新读取 Notion；刷新失败时明确返回错误，不再继续返回过期内容。RSS 阅读器自身的抓取间隔仍由阅读器决定。图片缓存为 5 分钟。
 
 ## 阅读节选 RSS
 
-`/book-excerpts-rss` 从 Notion「阅读节选」的 **RSS** 视图读取条目：Worker 会读取该视图保存的 filter、列头 quick filter 和 sort。quick filter 与 filter 按 AND 合并后再查询对应 data source，使订阅源与视图列表一致。支持书籍、杂志和网页文章。订阅地址保持不变。中文条目使用「标题」；其他语言优先使用「标题翻译」，为空时回退到「标题」。标题仍为空时显示“无标题”。
+`/read/rss` 从 Notion「阅读节选」的 **RSS** 视图读取条目：Worker 会读取该视图保存的 filter、列头 quick filter 和 sort。quick filter 与 filter 按 AND 合并后再查询对应 data source，使订阅源与视图列表一致。支持书籍、杂志和网页文章。中文条目使用「标题」；其他语言优先使用「标题翻译」，为空时回退到「标题」。标题仍为空时显示“无标题”。
 
-正文先显示「出处」及作者，再显示正文内容：中文条目使用「标题」与「正文」；其他语言使用「标题翻译」与「正文翻译」。原标题（与展示标题不同时）、出版方、章节和发布日期放在文末，缺失字段省略。输出 RSS 时保留 Notion 原有的文本空格和标点，不再自动调整中英文排版。空行或已有的连续 `<br />` 分隔符会转为段落，段内换行保留，其他 HTML 以文字显示。文末提供“阅读原文”（有有效「原文链接」时）和“在 Notion 中查看”入口；若「专有名词与术语」非空，在链接下方再加分割线并展示该部分。RSS 条目仍链接到对应的 Notion 页面，使用稳定的页面 ID 作为 GUID。视图设置了 sort 时按该顺序输出；未设置时保持 Notion 表格本身的顺序，不再改成最后编辑时间倒序。条目的 pubDate 使用页面创建时间。每次只读取视图的前 30 条记录。不满足视图条件、对应正文为空或没有有效链接的记录不会输出。
+RSS 条目只输出标题、指向水墨屏详情页 `/read/d/{pageId}` 的链接，以及稳定的 Notion 页面 ID 作为 GUID，不再附带 `description` 正文。正文、出处、术语等内容只在详情页呈现。中文条目使用「标题」与「正文」；其他语言优先「标题翻译」与「正文翻译」，标题为空时回退到「标题」，仍为空时显示“无标题”。视图设置了 sort 时按该顺序输出；未设置时保持 Notion 表格本身的顺序，不再改成最后编辑时间倒序。条目的 pubDate 使用页面创建时间。每次只读取视图的前 30 条记录。不满足视图条件、对应正文为空或没有有效链接的记录不会输出。
 
-正文字段中的 `notion-file-block` 图片引用会转换为 RSS 图片，并由 Worker 转发，避免使用会过期的文件地址。同时支持自闭合标签与带说明文字的 `<image>...</image>` 写法；标签内的说明文字会被忽略，不写入 `alt`，也不显示在图片下方。图片块需属于对应节选页面，且仍被该条目使用的正文字段引用。无法解析的其他图片引用会保留为文字。
+正文字段中的 `notion-file-block` 图片引用会在详情页转换为图片，并由 Worker 通过 `/read/p/...` 转发，避免使用会过期的文件地址。同时支持自闭合标签与带说明文字的 `<image>...</image>` 写法；标签内的说明文字会被忽略，不写入 `alt`，也不显示在图片下方。图片块需属于对应节选页面，且仍被该条目使用的正文字段引用。无法解析的其他图片引用会保留为文字。
 
-`NOTION_EXCERPTS_DATA_SOURCE_ID` 与 `NOTION_EXCERPTS_VIEW_ID`（RSS 视图）已在 `wrangler.jsonc` 中配置。请在「阅读节选」数据库的“连接”中添加与书籍推荐相同的 Notion 集成，并确保其有读取权限。部署后订阅地址为 `https://my-cloudflare.lichcode.workers.dev/book-excerpts-rss`。RSS 地址无需登录即可读取内容；打开 Notion 页面仍需相应的页面访问权限。
+`NOTION_EXCERPTS_DATA_SOURCE_ID` 与 `NOTION_EXCERPTS_VIEW_ID`（RSS 视图）已在 `wrangler.jsonc` 中配置。请在「阅读节选」数据库的“连接”中添加与书籍推荐相同的 Notion 集成，并确保其有读取权限。部署后订阅地址为 `https://my-cloudflare.lichcode.workers.dev/read/rss`。RSS 地址无需登录即可读取内容；打开 Notion 页面仍需相应的页面访问权限。
 
 ## 阅读节选水墨屏页面
 
-`/book-excerpts-eink` 与 `/book-excerpts-eink/{pageId}` 为水墨屏设备提供极简 HTML 阅读页。列表范围与 RSS 视图一致；详情正文格式与 RSS `description` 相同，但不输出“阅读原文”“在 Notion 中查看”等跳转链接。详情页可见文本使用 `pangu` 调整中英文与数字间距，不改动 HTML 标签与图片代理地址；列表页与 RSS 仍保留原文排版。页面使用纯黑白、衬线大字号、固定行宽、实线分隔与大触控目标，无 JavaScript、无动画。图片继续复用 `/book-excerpts-rss/image/...` 代理。缓存 5 分钟。
+`/read` 与 `/read/d/{pageId}` 为水墨屏设备提供极简 HTML 阅读页。列表范围与 RSS 视图一致；详情页呈现出处、作者、正文、元数据与术语，文末以按钮形式提供“阅读原文”（有有效「原文链接」时）和“在 Notion 中查看”。详情页全部可见文本（标题、出处、作者、正文、元数据、术语、按钮文案）都经 `pangu` 调整中英文与数字间距，不改动 HTML 标签与图片代理地址；列表页与 RSS 仍保留原文排版。页面使用纯黑白、衬线大字号、固定行宽、实线分隔与大触控目标，无 JavaScript、无动画。图片继续复用 `/read/p/...` 代理。缓存 5 分钟。

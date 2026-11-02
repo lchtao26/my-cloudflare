@@ -5,9 +5,12 @@ const NOTION_VERSION = "2026-03-11";
 const FEED_TITLE = "书籍推荐";
 const FEED_DESCRIPTION = "来自 Notion「书籍推荐」的书目 RSS";
 const NOTION_PAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FEED_PATH = "/book-express-rss";
-const EXCERPT_FEED_PATH = "/book-excerpts-rss";
-const EINK_PATH = "/book-excerpts-eink";
+const BOOK_FEED_PATH = "/book/rss";
+const BOOK_ASSET_PREFIX = "/book/p";
+const READ_LIST_PATH = "/read";
+const READ_DETAIL_PREFIX = "/read/d";
+const READ_FEED_PATH = "/read/rss";
+const READ_ASSET_PREFIX = "/read/p";
 const FEED_ITEM_LIMIT = 30;
 
 type RichText = { plain_text?: string; text?: { content?: string } };
@@ -106,13 +109,14 @@ function htmlText(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
-type TextFormat = (value: string) => string;
-
-function displayText(value: string, format: TextFormat = (text) => text): string {
-  return htmlText(format(value));
+function displayText(value: string): string {
+  return htmlText(value);
 }
 
-const einkTextFormat: TextFormat = (value) => pangu.spaceText(value);
+/** Visible e-ink detail copy always goes through pangu, then HTML escaping. */
+function einkText(value: string): string {
+  return htmlText(pangu.spaceText(value));
+}
 
 function textProperty(properties: NotionPage["properties"], name: string): string {
   const property = properties?.[name];
@@ -191,7 +195,7 @@ function itemDescription(book: Book, feedUrl: string): string {
     lines.push(`来源：${source}`);
   }
   if (book.hasCover) {
-    const src = htmlText(`${feedUrl}/cover/${encodeURIComponent(book.id)}`);
+    const src = htmlText(`${new URL(feedUrl).origin}${BOOK_ASSET_PREFIX}/${encodeURIComponent(book.id)}`);
     lines.push(`<img src="${src}" alt="封面" />`);
   }
   return lines.join("<br />\n");
@@ -252,6 +256,10 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
   };
 }
 
+function excerptDetailUrl(feedUrl: string, excerptId: string): string {
+  return `${new URL(feedUrl).origin}${READ_DETAIL_PREFIX}/${excerptId}`;
+}
+
 export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string {
   return generateRssFeed({
     title: "阅读节选",
@@ -261,44 +269,32 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
     atom: { links: [{ href: feedUrl, rel: "self", type: "application/rss+xml" }] },
     items: excerpts.map((excerpt) => ({
       title: excerpt.title,
-      link: excerpt.link,
-      description: excerptDescription(excerpt, feedUrl),
+      link: excerptDetailUrl(feedUrl, excerpt.id),
       guid: { value: `notion:${excerpt.id}`, isPermaLink: false },
       ...(excerpt.pubDate ? { pubDate: excerpt.pubDate } : {}),
     })),
   });
 }
 
-function excerptDescription(
-  excerpt: Excerpt,
-  feedUrl: string,
-  options?: { includeLinks?: boolean; format?: TextFormat },
-): string {
-  const includeLinks = options?.includeLinks !== false;
-  const format = options?.format ?? ((text) => text);
+function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string): string {
   const source = [
-    excerpt.sourceTitle ? `<cite>${displayText(excerpt.sourceTitle, format)}</cite>` : "",
-    excerpt.author ? `作者：${displayText(excerpt.author, format)}` : "",
+    excerpt.sourceTitle ? `<cite>${einkText(excerpt.sourceTitle)}</cite>` : "",
+    excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
   ].filter(Boolean).join(" · ");
   const details = [
     ["原标题", excerpt.originalTitle !== excerpt.title ? excerpt.originalTitle : ""],
     ["出版方", excerpt.publisher],
     ["章节", excerpt.chapter],
     ["发布日期", excerpt.publishedDate],
-  ].filter(([, value]) => value).map(([label, value]) => `${label}：${displayText(value, format)}`);
-  const links = [
-    excerpt.originalUrl ? `<a href="${htmlText(excerpt.originalUrl)}">阅读原文</a>` : "",
-    `<a href="${htmlText(excerpt.link)}">在 Notion 中查看</a>`,
-  ].filter(Boolean).join(" · ");
-  const body = excerpt.body ? translationParagraphs(excerpt.body, excerpt.id, feedUrl, format) : "";
-  const terms = excerpt.terms ? translationParagraphs(excerpt.terms, excerpt.id, feedUrl, format) : "";
+  ].filter(([, value]) => value).map(([label, value]) => einkText(`${label}：${value}`));
+  const body = excerpt.body ? einkParagraphs(excerpt.body, excerpt.id, imageBaseUrl) : "";
+  const terms = excerpt.terms ? einkParagraphs(excerpt.terms, excerpt.id, imageBaseUrl) : "";
   return [
     ...(source ? [`<p>${source}</p>`] : []),
     ...(body ? [body] : []),
     "<hr />",
     ...(details.length ? [`<p>${details.join("<br />\n")}</p>`] : []),
-    ...(includeLinks ? [`<p>${links}</p>`] : []),
-    ...(terms ? ["<hr />", `<p>${displayText("专有名词与术语", format)}</p>`, terms] : []),
+    ...(terms ? ["<hr />", `<p>${einkText("专有名词与术语")}</p>`, terms] : []),
   ].join("\n");
 }
 
@@ -318,19 +314,22 @@ const EINK_STYLE = [
   ".item-link{display:block;min-height:3rem;font-weight:700;}",
   ".meta{font-size:1rem;}",
   ".nav a{display:inline-block;min-height:3rem;padding:0.75rem 0;font-weight:700;}",
+  ".actions{margin:1.5rem 0;}",
+  ".btn{display:block;border:2px solid #000;padding:0.85rem 1rem;margin:0.75rem 0;text-align:center;text-decoration:none;font-weight:700;min-height:3rem;}",
+  ".btn:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
   "hr{border:0;border-top:2px solid #000;margin:1.5rem 0;}",
   "cite{font-style:normal;font-weight:700;}",
 ].join("");
 
-function einkDocument(title: string, body: string, format: TextFormat = (text) => text): string {
+function einkDocument(title: string, body: string, panguedTitle = false): string {
   return [
     "<!DOCTYPE html>",
     '<html lang="zh-CN">',
     "<head>",
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
-    `<title>${displayText(title, format)}</title>`,
+    `<title>${panguedTitle ? einkText(title) : displayText(title)}</title>`,
     `<style>${EINK_STYLE}</style>`,
     "</head>",
     `<body>\n<main>\n${body}\n</main>\n</body>`,
@@ -340,7 +339,7 @@ function einkDocument(title: string, body: string, format: TextFormat = (text) =
 
 export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
   const items = excerpts.map((excerpt) => {
-    const href = htmlText(`${listPath}/${excerpt.id}`);
+    const href = htmlText(`${listPath}/d/${excerpt.id}`);
     const meta = [
       excerpt.sourceTitle ? displayText(excerpt.sourceTitle) : "",
       excerpt.author ? `作者：${displayText(excerpt.author)}` : "",
@@ -358,15 +357,25 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
   ].join("\n"));
 }
 
+function einkActionButtons(excerpt: Excerpt): string {
+  const buttons = [
+    excerpt.originalUrl
+      ? `<a class="btn" href="${htmlText(excerpt.originalUrl)}">${einkText("阅读原文")}</a>`
+      : "",
+    `<a class="btn" href="${htmlText(excerpt.link)}">${einkText("在 Notion 中查看")}</a>`,
+  ].filter(Boolean);
+  return buttons.length ? `<div class="actions">\n${buttons.join("\n")}\n</div>` : "";
+}
+
 export function renderEinkDetail(excerpt: Excerpt, listPath: string, imageBaseUrl: string): string {
-  const format = einkTextFormat;
-  const back = `<p class="nav"><a href="${htmlText(listPath)}">${displayText("返回列表", format)}</a></p>`;
+  const back = `<p class="nav"><a href="${htmlText(listPath)}">${einkText("返回列表")}</a></p>`;
   return einkDocument(excerpt.title, [
     back,
-    `<h1>${displayText(excerpt.title, format)}</h1>`,
-    excerptDescription(excerpt, imageBaseUrl, { includeLinks: false, format }),
+    `<h1>${einkText(excerpt.title)}</h1>`,
+    excerptDetailBody(excerpt, imageBaseUrl),
+    einkActionButtons(excerpt),
     back,
-  ].join("\n"), format);
+  ].join("\n"), true);
 }
 
 async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promise<Excerpt | null> {
@@ -386,14 +395,10 @@ async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promis
 // Self-closing tags and captioned <image>...</image> wrappers both count.
 const IMAGE_TAG = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\?[^"<>]*)?"\s*(?:\/>|>([\s\S]*?)<\/image>)/gi;
 
-function translationParagraphs(
-  translation: string,
-  pageId: string,
-  feedUrl: string,
-  format: TextFormat = (text) => text,
-): string {
+function einkParagraphs(translation: string, pageId: string, imageBaseUrl: string): string {
   // Existing translations contain literal <br /> separators. Interpret only
   // attribute-free line breaks; all other markup remains escaped text.
+  // Visible text is pangued; image proxy URLs stay untouched.
   return translation.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim()
     .split(/\n(?:[^\S\n]*\n)+/)
     .map((paragraph) => {
@@ -404,11 +409,11 @@ function translationParagraphs(
         const fileId = match[2];
         if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
         // Caption text inside <image>...</image> is ignored; only the file reference is used.
-        output += displayText(paragraph.slice(offset, match.index), format).replaceAll("\n", "<br />\n");
-        output += `<img src="${htmlText(`${feedUrl}/image/${pageId}/${blockId}`)}" alt="正文图片" />`;
+        output += einkText(paragraph.slice(offset, match.index)).replaceAll("\n", "<br />\n");
+        output += `<img src="${htmlText(`${imageBaseUrl}/${pageId}/${blockId}`)}" alt="${einkText("正文图片")}" />`;
         offset = match.index + match[0].length;
       }
-      return `<p>${output}${displayText(paragraph.slice(offset), format).replaceAll("\n", "<br />\n")}</p>`;
+      return `<p>${output}${einkText(paragraph.slice(offset)).replaceAll("\n", "<br />\n")}</p>`;
     })
     .join("\n");
 }
@@ -511,7 +516,7 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string): Promi
 }
 
 function coverIdFromPath(pathname: string): string | null {
-  const match = pathname.match(/^\/book-express-rss\/cover\/([^/]+)$/);
+  const match = pathname.match(/^\/book\/p\/([^/]+)$/);
   return match?.[1] && NOTION_PAGE_ID.test(match[1]) ? match[1] : null;
 }
 
@@ -583,14 +588,15 @@ const worker = {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
     const coverId = coverIdFromPath(url.pathname);
-    const isExcerptFeed = url.pathname === EXCERPT_FEED_PATH;
-    const isEinkList = url.pathname === EINK_PATH;
-    const einkDetailMatch = url.pathname.match(/^\/book-excerpts-eink\/([^/]+)$/);
+    const isBookFeed = url.pathname === BOOK_FEED_PATH;
+    const isExcerptFeed = url.pathname === READ_FEED_PATH;
+    const isEinkList = url.pathname === READ_LIST_PATH;
+    const einkDetailMatch = url.pathname.match(/^\/read\/d\/([^/]+)$/);
     const einkDetailId = einkDetailMatch?.[1] && NOTION_PAGE_ID.test(einkDetailMatch[1]) ? einkDetailMatch[1] : null;
-    const imageMatch = url.pathname.match(/^\/book-excerpts-rss\/image\/([^/]+)\/([^/]+)$/);
+    const imageMatch = url.pathname.match(/^\/read\/p\/([^/]+)\/([^/]+)$/);
     const imageIds = imageMatch && NOTION_PAGE_ID.test(imageMatch[1] ?? "") && NOTION_PAGE_ID.test(imageMatch[2] ?? "") ? [imageMatch[1]!, imageMatch[2]!] : null;
     const usesExcerpts = isExcerptFeed || isEinkList || Boolean(einkDetailId) || Boolean(imageIds);
-    if (url.pathname !== FEED_PATH && !usesExcerpts && !coverId) {
+    if (!isBookFeed && !usesExcerpts && !coverId) {
       return new Response("Not found", { status: 404 });
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
@@ -621,7 +627,7 @@ const worker = {
         const excerpt = await fetchExcerptById(configured, einkDetailId);
         if (!excerpt) return new Response("Not found", { status: 404 });
         return htmlResponse(
-          renderEinkDetail(excerpt, EINK_PATH, `${url.origin}${EXCERPT_FEED_PATH}`),
+          renderEinkDetail(excerpt, READ_LIST_PATH, `${url.origin}${READ_ASSET_PREFIX}`),
           request.method,
         );
       }
@@ -630,7 +636,7 @@ const worker = {
         const excerpts = (await fetchExcerptPages(configured, excerptsViewId!))
           .map(excerptFromPage)
           .filter((item): item is Excerpt => item !== null);
-        return htmlResponse(renderEinkList(excerpts, EINK_PATH), request.method);
+        return htmlResponse(renderEinkList(excerpts, READ_LIST_PATH), request.method);
       }
 
       const feedUrl = `${url.origin}${url.pathname}`;

@@ -32,20 +32,20 @@ test("RSS item has exactly the requested fields and escapes XML", () => {
   const book = bookFromPage(page);
   assert.ok(book);
   assert.equal(book.pubDate?.toISOString(), "2026-10-01T08:00:00.000Z");
-  const feed = renderFeed([book], "https://example.workers.dev/book-express-rss");
+  const feed = renderFeed([book], "https://example.workers.dev/book/rss");
   assert.match(feed, /<link>\s*<!\[CDATA\[https:\/\/book\.douban\.com\/subject\/123\/\?a=1&b=2\]\]>/);
   assert.match(feed, /<title>\s*<!\[CDATA\[甲 & 乙\]\]>/);
-  assert.match(feed, /<!\[CDATA\[作者：张三 \| 写过 &amp; 小说<br \/>\n简介：一部 &lt;书&gt;<br \/>\n出版社：三联 &amp; 书店<br \/>\n<img src="https:\/\/example\.workers\.dev\/book-express-rss\/cover\/book-1" alt="封面" \/>\]\]>/);
+  assert.match(feed, /<!\[CDATA\[作者：张三 \| 写过 &amp; 小说<br \/>\n简介：一部 &lt;书&gt;<br \/>\n出版社：三联 &amp; 书店<br \/>\n<img src="https:\/\/example\.workers\.dev\/book\/p\/book-1" alt="封面" \/>\]\]>/);
   const withoutIntro = bookFromPage({ ...page, properties: { ...page.properties, "作者介绍": { type: "rich_text", rich_text: [] } } });
-  assert.match(renderFeed(withoutIntro ? [withoutIntro] : [], "https://example.workers.dev/book-express-rss"), /作者：张三<br \/>/);
-  assert.doesNotMatch(renderFeed(withoutIntro ? [withoutIntro] : [], "https://example.workers.dev/book-express-rss"), /作者：张三 \|/);
+  assert.match(renderFeed(withoutIntro ? [withoutIntro] : [], "https://example.workers.dev/book/rss"), /作者：张三<br \/>/);
+  assert.doesNotMatch(renderFeed(withoutIntro ? [withoutIntro] : [], "https://example.workers.dev/book/rss"), /作者：张三 \|/);
   assert.doesNotMatch(feed, /书名：|width=|style=|<category>|files\.example|来源：/);
   assert.match(feed, /<guid isPermaLink="false">notion:book-1<\/guid>/);
-  assert.match(feed, /<atom:link href="https:\/\/example\.workers\.dev\/book-express-rss" rel="self" type="application\/rss\+xml"\/>/);
+  assert.match(feed, /<atom:link href="https:\/\/example\.workers\.dev\/book\/rss" rel="self" type="application\/rss\+xml"\/>/);
   assert.match(feed, /<language>zh-CN<\/language>/);
   const withoutCover = bookFromPage({ ...page, properties: { ...page.properties, "封面": { type: "files", files: [] } } });
   assert.equal(withoutCover?.hasCover, false);
-  assert.doesNotMatch(renderFeed(withoutCover ? [withoutCover] : [], "https://example.workers.dev/book-express-rss"), /<img /);
+  assert.doesNotMatch(renderFeed(withoutCover ? [withoutCover] : [], "https://example.workers.dev/book/rss"), /<img /);
 });
 
 test("source name links to the recommendation URL", () => {
@@ -58,7 +58,7 @@ test("source name links to the recommendation URL", () => {
     },
   });
   assert.ok(sourced);
-  const feed = renderFeed([sourced], "https://example.workers.dev/book-express-rss");
+  const feed = renderFeed([sourced], "https://example.workers.dev/book/rss");
   assert.match(feed, /简介：一部 &lt;书&gt;<br \/>\n出版社：三联 &amp; 书店<br \/>\n来源：<a href="https:\/\/example\.com\/review\?a=1&amp;b=2">新京报 &amp; 周刊<\/a>/);
 
   const plain = bookFromPage({
@@ -70,7 +70,7 @@ test("source name links to the recommendation URL", () => {
     },
   });
   assert.ok(plain);
-  const plainFeed = renderFeed([plain], "https://example.workers.dev/book-express-rss");
+  const plainFeed = renderFeed([plain], "https://example.workers.dev/book/rss");
   assert.match(plainFeed, /来源：周刊/);
   assert.doesNotMatch(plainFeed, /<a href/);
 });
@@ -98,7 +98,7 @@ test("worker paginates Notion results and exposes only the feed path", async (co
   const env = { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source" };
   const missing = await worker.fetch(new Request("https://example.workers.dev/"), env);
   assert.equal(missing.status, 404);
-  const response = await worker.fetch(new Request("https://example.workers.dev/book-express-rss"), env);
+  const response = await worker.fetch(new Request("https://example.workers.dev/book/rss"), env);
   assert.equal(response.status, 200);
   assert.match(response.headers.get("Content-Type") ?? "", /application\/rss\+xml/);
   assert.equal(response.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
@@ -106,10 +106,10 @@ test("worker paginates Notion results and exposes only the feed path", async (co
   assert.deepEqual(requests[0]?.sorts, [{ timestamp: "last_edited_time", direction: "descending" }]);
   assert.equal(requests[1]?.start_cursor, "next");
 
-  const head = await worker.fetch(new Request("https://example.workers.dev/book-express-rss", { method: "HEAD" }), env);
+  const head = await worker.fetch(new Request("https://example.workers.dev/book/rss", { method: "HEAD" }), env);
   assert.equal(head.status, 200);
   assert.equal(await head.text(), "");
-  const method = await worker.fetch(new Request("https://example.workers.dev/book-express-rss", { method: "POST" }), env);
+  const method = await worker.fetch(new Request("https://example.workers.dev/book/rss", { method: "POST" }), env);
   assert.equal(method.status, 405);
   assert.equal(method.headers.get("Allow"), "GET, HEAD");
 });
@@ -118,7 +118,7 @@ test("both feeds query and render only the first 30 records, preserving their or
   const originalFetch = globalThis.fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
   const env = { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
-  for (const path of ["/book-express-rss", "/book-excerpts-rss"]) {
+  for (const path of ["/book/rss", "/read/rss"]) {
     const requests: Array<{ page_size: number; start_cursor?: string }> = [];
     globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
       if (String(url).includes("/views/")) return Response.json({ data_source_id: "source" });
@@ -155,19 +155,24 @@ test("both feeds revalidate and rebuild when Notion content changes", async (con
     return Response.json({ results: [{ ...page, properties: {
       ...page.properties,
       "简介": { type: "rich_text", rich_text: [{ plain_text: `正文版本 ${revision}` }] },
+      "标题翻译": { type: "rich_text", rich_text: [{ plain_text: `标题版本 ${revision}` }] },
       "正文翻译": { type: "rich_text", rich_text: [{ plain_text: `正文版本 ${revision}` }] },
     } }], has_more: false });
   }) as typeof fetch;
   const env = { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
-  for (const path of ["/book-express-rss", "/book-excerpts-rss"]) {
+  const cases = [
+    { path: "/book/rss", marker: "正文版本" },
+    { path: "/read/rss", marker: "标题版本" },
+  ] as const;
+  for (const { path, marker } of cases) {
     const request = new Request(`https://example.workers.dev${path}`);
     revision = 1;
     const first = await worker.fetch(request, env);
     assert.equal(first.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
-    assert.match(await first.text(), /正文版本 1/);
+    assert.match(await first.text(), new RegExp(`${marker} 1`));
     revision = 2;
     const second = await worker.fetch(request, env);
-    assert.match(await second.text(), /正文版本 2/);
+    assert.match(await second.text(), new RegExp(`${marker} 2`));
     const head = await worker.fetch(new Request(request.url, { method: "HEAD" }), env);
     assert.equal(head.headers.get("Cache-Control"), first.headers.get("Cache-Control"));
     assert.equal(await head.text(), "");
@@ -188,11 +193,11 @@ test("cover image is loaded from the Notion page and proxied", async (context) =
   context.after(() => { globalThis.fetch = originalFetch; });
 
   const env = { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source" };
-  const missing = await worker.fetch(new Request("https://example.workers.dev/book-express-rss/cover/not-a-page"), env);
+  const missing = await worker.fetch(new Request("https://example.workers.dev/book/p/not-a-page"), env);
   assert.equal(missing.status, 404);
   assert.equal(urls.length, 0);
 
-  const response = await worker.fetch(new Request(`https://example.workers.dev/book-express-rss/cover/${pageId}`), env);
+  const response = await worker.fetch(new Request(`https://example.workers.dev/book/p/${pageId}`), env);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Content-Type"), "image/jpeg");
   assert.equal(response.headers.get("Cache-Control"), "public, max-age=300");
@@ -201,12 +206,12 @@ test("cover image is loaded from the Notion page and proxied", async (context) =
   assert.equal(urls[1], "https://files.example/cover.jpg?X-Amz-Signature=abc");
 
   globalThis.fetch = (async () => Response.json({ properties: { "封面": { type: "files", files: [] } } })) as typeof fetch;
-  const empty = await worker.fetch(new Request(`https://example.workers.dev/book-express-rss/cover/${pageId}`), env);
+  const empty = await worker.fetch(new Request(`https://example.workers.dev/book/p/${pageId}`), env);
   assert.equal(empty.status, 404);
 });
 
 test("missing configuration and Notion failures return explicit errors", async (context) => {
-  const request = new Request("https://example.workers.dev/book-express-rss");
+  const request = new Request("https://example.workers.dev/book/rss");
   assert.equal((await worker.fetch(request, {})).status, 503);
 
   const originalFetch = globalThis.fetch;
@@ -224,7 +229,7 @@ test("missing configuration and Notion failures return explicit errors", async (
   assert.equal(await response.text(), "Feed temporarily unavailable");
 });
 
-test("excerpt feed uses the Notion RSS view filter, paginates, and links to Notion pages", async (context) => {
+test("excerpt feed uses the Notion RSS view filter, paginates, and links to e-ink detail pages", async (context) => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ method?: string; url: string; body?: Record<string, unknown> }> = [];
   const viewId = "40ae75a1-639c-81f8-b7fe-000c40372432";
@@ -290,7 +295,7 @@ test("excerpt feed uses the Notion RSS view filter, paginates, and links to Noti
     NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
     NOTION_EXCERPTS_VIEW_ID: viewId,
   };
-  const response = await worker.fetch(new Request("https://example.workers.dev/book-excerpts-rss"), env);
+  const response = await worker.fetch(new Request("https://example.workers.dev/read/rss"), env);
   assert.equal(response.status, 200);
   assert.match(response.headers.get("Content-Type") ?? "", /application\/rss\+xml/);
   const feed = await response.text();
@@ -299,19 +304,10 @@ test("excerpt feed uses the Notion RSS view filter, paginates, and links to Noti
   assert.equal(parsed.items?.length, 2);
   const item = parsed.items?.[0];
   assert.equal(item?.title, "第一节 & 开始");
-  assert.equal(item?.link, "https://www.notion.so/excerpt-1");
+  assert.equal(item?.link, "https://example.workers.dev/read/d/407e75a1-639c-81ca-8919-f4bff2a57884");
   assert.equal(item?.guid?.value, "notion:407e75a1-639c-81ca-8919-f4bff2a57884");
-  assert.equal(item?.description, [
-    "<p><cite>甲 &amp; 乙</cite> · 作者：张三</p>",
-    "<p>一行 &lt;文字&gt;<br />\n第二行 &amp; 更多</p>",
-    "<hr />",
-    "<p>原标题：Original &amp; title<br />\n出版方：某出版社<br />\n章节：第一章<br />\n发布日期：2025-06-12</p>",
-    '<p><a href="https://example.com/original?a=1&amp;b=2">阅读原文</a> · <a href="https://www.notion.so/excerpt-1">在 Notion 中查看</a></p>',
-    "<hr />",
-    "<p>专有名词与术语</p>",
-    "<p>Term A<br />\n释义 A</p>\n<p>Term B<br />\n释义 B</p>",
-  ].join("\n"));
-  assert.doesNotMatch(item?.description ?? "", /内容类型：|原文语言：|原文发布日期：/);
+  assert.equal(item?.description, undefined);
+  assert.doesNotMatch(feed, /<item>[\s\S]*?<description>|一行 &lt;文字&gt;|阅读原文|专有名词与术语/);
   assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
   assert.deepEqual(requests[1]?.body?.filter, {
     and: [
@@ -322,7 +318,7 @@ test("excerpt feed uses the Notion RSS view filter, paginates, and links to Noti
   });
   assert.equal(requests[1]?.body?.sorts, undefined);
   assert.equal(requests[2]?.body?.start_cursor, "next");
-  assert.equal((await worker.fetch(new Request("https://example.workers.dev/book-excerpts-rss"), {
+  assert.equal((await worker.fetch(new Request("https://example.workers.dev/read/rss"), {
     NOTION_TOKEN: "test",
     NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
   })).status, 503);
@@ -366,7 +362,7 @@ test("excerpt feed forwards a saved view sort and omits the fallback", async (co
   }) as typeof fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
 
-  const response = await worker.fetch(new Request("https://example.workers.dev/book-excerpts-rss"), {
+  const response = await worker.fetch(new Request("https://example.workers.dev/read/rss"), {
     NOTION_TOKEN: "test",
     NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
     NOTION_EXCERPTS_VIEW_ID: viewId,
@@ -386,14 +382,16 @@ test("excerpt titles fall back to the original and missing source fields are omi
     },
   });
   assert.ok(excerpt);
-  const feed = renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss");
+  const feed = renderExcerptFeed([excerpt], "https://example.com/read/rss");
   const item = parseRssFeed(feed).items?.[0];
   assert.equal(item?.title, "节");
-  assert.match(item?.description ?? "", /<p><cite>书<\/cite><\/p>\n<p>正文<\/p>/);
-  assert.doesNotMatch(feed, /作者：|出版方：|章节：|原标题：|内容类型：|专有名词与术语|阅读原文|javascript:/);
+  assert.equal(item?.description, undefined);
+  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
+  assert.match(detail, /<p><cite>书<\/cite><\/p>\n<p>正文<\/p>/);
+  assert.doesNotMatch(detail, /作者：|出版方：|章节：|原标题：|内容类型：|专有名词与术语|阅读原文|javascript:/);
 });
 
-test("translations preserve paragraphs from newlines and stored br tags while escaping other HTML", () => {
+test("detail pages preserve paragraphs from newlines and stored br tags while escaping other HTML", () => {
   for (const separator of ["\n\n", "\r\n \r\n", "\r\r", "<br /><br />", "<BR><br/>"]) {
     const excerpt = excerptFromPage({
       id: "paragraphs", url: "https://www.notion.so/paragraphs", properties: {
@@ -402,14 +400,14 @@ test("translations preserve paragraphs from newlines and stored br tags while es
       },
     });
     assert.ok(excerpt);
-    const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
-    assert.equal(item?.title, "中文标题");
-    assert.match(item?.description ?? "", /<p>第一段<\/p>\n<p>第二段<br \/>\n段内换行&lt;script&gt;alert\(1\)&lt;\/script&gt;&lt;br onmouseover=&quot;alert\(1\)&quot;&gt; &amp; \]\]&gt;<\/p>/);
-    assert.doesNotMatch(item?.description ?? "", /<script|<br onmouseover|&lt;br\s*\/?&gt;/);
+    assert.equal(parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0]?.title, "中文标题");
+    const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
+    assert.match(detail, /<p>第一段<\/p>\n<p>第二段<br \/>\n段内换行&lt;script&gt;alert \(1\)&lt;\/script&gt;&lt;br onmouseover=&quot;alert\(1\)&quot;&gt; &amp; \]\]&gt;<\/p>/);
+    assert.doesNotMatch(detail, /<script|<br onmouseover|&lt;br\s*\/?&gt;/);
   }
 });
 
-test("magazine and web excerpts use neutral source labels and keep stable Notion links", () => {
+test("magazine and web excerpts use neutral source labels and link to e-ink detail pages", () => {
   for (const contentType of ["杂志", "网页文章"]) {
     const excerpt = excerptFromPage({
       id: "article", url: "https://www.notion.so/article", properties: {
@@ -423,11 +421,13 @@ test("magazine and web excerpts use neutral source labels and keep stable Notion
       },
     });
     assert.ok(excerpt);
-    const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
-    assert.equal(item?.link, "https://www.notion.so/article");
+    const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0];
+    assert.equal(item?.link, "https://example.com/read/d/article");
     assert.equal(item?.guid?.value, "notion:article");
-    assert.match(item?.description ?? "", /出版方：媒体/);
-    assert.doesNotMatch(item?.description ?? "", /内容类型：|书名：|出版社：/);
+    assert.equal(item?.description, undefined);
+    const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
+    assert.match(detail, /出版方：媒体/);
+    assert.doesNotMatch(detail, /内容类型：|书名：|出版社：/);
   }
 });
 
@@ -469,10 +469,12 @@ test("Chinese excerpts use the original title and body, not translations", () =>
   assert.equal(excerpt.title, "中文标题");
   assert.equal(excerpt.body, "中文正文");
   assert.equal(excerpt.chinese, true);
-  const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
+  const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0];
   assert.equal(item?.title, "中文标题");
-  assert.match(item?.description ?? "", /中文正文/);
-  assert.doesNotMatch(item?.description ?? "", /不应使用|不应输出的译文/);
+  assert.equal(item?.description, undefined);
+  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
+  assert.match(detail, /中文正文/);
+  assert.doesNotMatch(detail, /不应使用|不应输出的译文/);
   assert.equal(excerptFromPage({
     ...chinese,
     properties: { ...chinese.properties, "原文语言": { type: "select", select: { name: "日文" } }, "正文翻译": { type: "rich_text", rich_text: [] } },
@@ -497,10 +499,12 @@ test("Comic excerpts use the original title and body, not translations", () => {
   assert.equal(excerpt.title, "《漫画》第189話");
   assert.equal(excerpt.body, "漫画正文图片");
   assert.equal(excerpt.chinese, false);
-  const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
+  const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0];
   assert.equal(item?.title, "《漫画》第189話");
-  assert.match(item?.description ?? "", /漫画正文图片/);
-  assert.doesNotMatch(item?.description ?? "", /不应使用|不应输出的译文/);
+  assert.equal(item?.description, undefined);
+  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
+  assert.match(detail, /漫画正文图片/);
+  assert.doesNotMatch(detail, /不应使用|不应输出的译文/);
   assert.equal(excerptFromPage({
     ...comic,
     properties: {
@@ -552,7 +556,7 @@ test("Chinese excerpt feed uses the body property without fetching page blocks",
   context.after(() => { globalThis.fetch = originalFetch; });
 
   const response = await worker.fetch(
-    new Request("https://example.workers.dev/book-excerpts-rss"),
+    new Request("https://example.workers.dev/read/rss"),
     {
       NOTION_TOKEN: "test",
       NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
@@ -563,27 +567,26 @@ test("Chinese excerpt feed uses the body property without fetching page blocks",
   const feed = await response.text();
   const item = parseRssFeed(feed).items?.[0];
   assert.equal(item?.title, "中文节选");
-  assert.match(item?.description ?? "", /属性正文第一段/);
-  assert.match(item?.description ?? "", /属性正文第二段/);
-  assert.doesNotMatch(item?.description ?? "", /忽略译文/);
+  assert.equal(item?.description, undefined);
+  assert.equal(item?.link, `https://example.workers.dev/read/d/${pageId}`);
   assert.equal(requests.some((href) => href.includes("/blocks/")), false);
 });
 
-test("excerpt image tags become proxied images while unrelated HTML stays escaped", () => {
+test("detail pages turn excerpt image tags into proxied images while unrelated HTML stays escaped", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
   const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
   const translation = `前文<br /><br /><image source="notion-file-block://${blockId}/${fileId}?name=photo.jpg" /><br /><br />后文 <script>x</script>`;
   const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: translation }] } } });
   assert.ok(excerpt);
-  const description = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0]?.description ?? "";
-  assert.match(description, new RegExp(`<img src="https://example.com/book-excerpts-rss/image/${pageId}/${blockId}" alt="正文图片" />`));
-  assert.match(description, /前文<\/p>\n<p><img/);
-  assert.match(description, /<p>后文 &lt;script&gt;x&lt;\/script&gt;<\/p>/);
-  assert.doesNotMatch(description, /notion-file-block/);
+  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
+  assert.match(detail, new RegExp(`<img src="https://example.com/read/p/${pageId}/${blockId}" alt="正文图片" />`));
+  assert.match(detail, /前文<\/p>\n<p><img/);
+  assert.match(detail, /<p>后文 &lt;script&gt;x&lt;\/script&gt;<\/p>/);
+  assert.doesNotMatch(detail, /notion-file-block/);
 });
 
-test("captioned notion image wrappers become proxied images and ignore caption text", () => {
+test("detail pages turn captioned notion image wrappers into proxied images and ignore caption text", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const blockId = "1a52e0b5-2ddd-4438-8257-9e6c5a426940";
   const fileId = "69d14bc7-c973-4ee7-9123-bde234614e89";
@@ -594,34 +597,30 @@ test("captioned notion image wrappers become proxied images and ignore caption t
   ].join("\n");
   const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: translation }] } } });
   assert.ok(excerpt);
-  const description = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0]?.description ?? "";
-  assert.match(description, new RegExp(`<img src="https://example.com/book-excerpts-rss/image/${pageId}/${blockId}" alt="正文图片" />`));
-  assert.doesNotMatch(description, /©文藝春秋|notion-file-block|<image|<\/image>/);
+  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
+  assert.match(detail, new RegExp(`<img src="https://example.com/read/p/${pageId}/${blockId}" alt="正文图片" />`));
+  assert.doesNotMatch(detail, /©文藝春秋|notion-file-block|<image|<\/image>/);
 });
 
-test("RSS preserves original text spacing while escaping content and keeping image links", () => {
+test("RSS preserves original title spacing; book feed still escapes description content", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
-  const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
-  const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
   const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: {
     "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "AI时代的RSS" }] },
-    "正文翻译": { type: "rich_text", rich_text: [{ plain_text: `使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}" />` }] },
+    "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "使用API处理2026年数据。" }] },
     "出处": { type: "rich_text", rich_text: [{ plain_text: "Cloudflare Workers" }] },
   } });
   assert.ok(excerpt);
-  const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/book-excerpts-rss")).items?.[0];
+  const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0];
   assert.equal(item?.title, "AI时代的RSS");
-  assert.match(item?.description ?? "", /<cite>Cloudflare Workers<\/cite>/);
-  assert.match(item?.description ?? "", /使用API处理2026年数据/);
-  assert.match(item?.description ?? "", new RegExp(`<img src="https://example.com/book-excerpts-rss/image/${pageId}/${blockId}" alt="正文图片" \/>`));
-  assert.doesNotMatch(item?.description ?? "", /https:\/\/example\.com \/book/);
+  assert.equal(item?.description, undefined);
+  assert.equal(item?.link, `https://example.com/read/d/${pageId}`);
   const book = bookFromPage({ ...page, properties: {
     ...page.properties,
     "书名": { type: "title", title: [{ plain_text: "AI时代的RSS" }] },
     "简介": { type: "rich_text", rich_text: [{ plain_text: "保留API与2026年之间的原始排版 & <文字>" }] },
   } });
   assert.ok(book);
-  const bookItem = parseRssFeed(renderFeed([book], "https://example.com/book-express-rss")).items?.[0];
+  const bookItem = parseRssFeed(renderFeed([book], "https://example.com/book/rss")).items?.[0];
   assert.equal(bookItem?.title, "AI时代的RSS");
   assert.match(bookItem?.description ?? "", /保留API与2026年之间的原始排版 &amp; &lt;文字&gt;/);
 });
@@ -662,7 +661,7 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
   context.after(() => { globalThis.fetch = originalFetch; });
 
   const response = await worker.fetch(
-    new Request("https://example.workers.dev/book-excerpts-eink"),
+    new Request("https://example.workers.dev/read"),
     {
       NOTION_TOKEN: "test",
       NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
@@ -673,17 +672,17 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
   assert.match(response.headers.get("Content-Type") ?? "", /text\/html/);
   const html = await response.text();
   assert.match(html, /<title>阅读节选<\/title>/);
-  assert.match(html, new RegExp(`href="/book-excerpts-eink/${pageId}"`));
+  assert.match(html, new RegExp(`href="/read/d/${pageId}"`));
   assert.match(html, /第一节/);
   assert.match(html, /某书 · 作者：张三/);
   assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
-  assert.equal((await worker.fetch(new Request("https://example.workers.dev/book-excerpts-eink"), {
+  assert.equal((await worker.fetch(new Request("https://example.workers.dev/read"), {
     NOTION_TOKEN: "test",
     NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
   })).status, 503);
 });
 
-test("e-ink detail mirrors RSS description without jump links and reuses the image proxy", async (context) => {
+test("e-ink detail renders body metadata, action buttons, and reuses the image proxy", async (context) => {
   const originalFetch = globalThis.fetch;
   const pageId = "407e75a1-639c-81ca-8919-f4bff2a57884";
   const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
@@ -714,13 +713,13 @@ test("e-ink detail mirrors RSS description without jump links and reuses the ima
   context.after(() => { globalThis.fetch = originalFetch; });
 
   const response = await worker.fetch(
-    new Request(`https://example.workers.dev/book-excerpts-eink/${pageId}`),
+    new Request(`https://example.workers.dev/read/d/${pageId}`),
     { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
   );
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /<title>详情标题<\/title>/);
-  assert.match(html, /href="\/book-excerpts-eink"/);
+  assert.match(html, /href="\/read"/);
   assert.match(html, /<p><cite>某书<\/cite> · 作者：张三<\/p>/);
   assert.match(html, /第一段/);
   assert.match(html, /第二段/);
@@ -728,12 +727,15 @@ test("e-ink detail mirrors RSS description without jump links and reuses the ima
   assert.match(html, /出版方：某出版社/);
   assert.match(html, /章节：第一章/);
   assert.match(html, /发布日期：2025-06-12/);
-  assert.match(html, new RegExp(`src="https://example\\.workers\\.dev/book-excerpts-rss/image/${pageId}/${blockId}"`));
+  assert.match(html, new RegExp(`src="https://example\\.workers\\.dev/read/p/${pageId}/${blockId}"`));
   assert.match(html, /专有名词与术语/);
   assert.match(html, /术语 A/);
-  assert.doesNotMatch(html, /阅读原文|在 Notion 中查看|example\.com\/original|notion\.so\/excerpt-1/);
+  assert.match(html, /class="btn"[^>]*href="https:\/\/example\.com\/original"/);
+  assert.match(html, /class="btn"[^>]*href="https:\/\/www\.notion\.so\/excerpt-1"/);
+  assert.match(html, /阅读原文/);
+  assert.match(html, /在 Notion 中查看/);
   assert.equal((await worker.fetch(
-    new Request("https://example.workers.dev/book-excerpts-eink/not-a-page-id"),
+    new Request("https://example.workers.dev/read/d/not-a-page-id"),
     { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
   )).status, 404);
 });
@@ -755,7 +757,7 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     publishedDate: "",
     link: "https://www.notion.so/1",
     pubDate: null,
-  }], "/book-excerpts-eink");
+  }], "/read");
   assert.match(list, /甲 &amp; 乙/);
   assert.doesNotMatch(list, /作者：|class="meta"/);
 
@@ -774,37 +776,49 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     publishedDate: "",
     link: "https://www.notion.so/1",
     pubDate: null,
-  }, "/book-excerpts-eink", "https://example.com/book-excerpts-rss");
+  }, "/read", "https://example.com/read/p");
   assert.match(detail, /一段 &lt;文字&gt;/);
   assert.match(detail, /返回列表/);
-  assert.doesNotMatch(detail, /阅读原文|在 Notion 中查看|专有名词与术语|原标题：/);
+  assert.match(detail, /class="btn"[^>]*href="https:\/\/example\.com\/original"/);
+  assert.match(detail, /class="btn"[^>]*href="https:\/\/www\.notion\.so\/1"/);
+  assert.match(detail, /阅读原文/);
+  assert.match(detail, /在 Notion 中查看/);
+  assert.doesNotMatch(detail, /专有名词与术语|原标题：/);
 });
 
-test("e-ink detail uses pangu spacing without changing image proxy URLs", () => {
+test("e-ink detail pangues all visible text without changing image proxy URLs", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
   const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
   const html = renderEinkDetail({
     id: pageId,
     title: "AI时代的RSS",
-    originalTitle: "AI时代的RSS",
+    originalTitle: "Hello世界",
     body: `使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}" />`,
     chinese: false,
-    terms: "",
+    terms: "API接口\nApplication Programming Interface",
     sourceTitle: "Cloudflare Workers",
-    author: "",
-    chapter: "",
-    publisher: "",
-    originalUrl: null,
-    publishedDate: "",
+    author: "张三AI",
+    chapter: "Chapter1章节",
+    publisher: "ABC出版社",
+    originalUrl: "https://example.com/original",
+    publishedDate: "2025-06-12",
     link: "https://www.notion.so/1",
     pubDate: null,
-  }, "/book-excerpts-eink", "https://example.com/book-excerpts-rss");
+  }, "/read", "https://example.com/read/p");
   assert.match(html, /<title>AI 时代的 RSS<\/title>/);
   assert.match(html, /<h1>AI 时代的 RSS<\/h1>/);
+  assert.match(html, /作者：张三 AI/);
   assert.match(html, /使用 API 处理 2026 年数据/);
-  assert.match(html, new RegExp(`src="https://example\\.com/book-excerpts-rss/image/${pageId}/${blockId}"`));
-  assert.doesNotMatch(html, /https:\/\/example\.com \/book/);
+  assert.match(html, /原标题：Hello 世界/);
+  assert.match(html, /出版方：ABC 出版社/);
+  assert.match(html, /章节：Chapter1 章节/);
+  assert.match(html, /专有名词与术语/);
+  assert.match(html, /API 接口/);
+  assert.match(html, /在 Notion 中查看/);
+  assert.match(html, /阅读原文/);
+  assert.match(html, new RegExp(`src="https://example\\.com/read/p/${pageId}/${blockId}"`));
+  assert.doesNotMatch(html, /https:\/\/example\.com \/book|AI时代的RSS|使用API处理|Hello世界|ABC出版社|张三AI/);
 });
 
 test("excerpt image proxy serves only images referenced by the language body field", async (context) => {
@@ -832,7 +846,7 @@ test("excerpt image proxy serves only images referenced by the language body fie
     return new Response("image bytes", { headers: { "Content-Type": "image/jpeg" } });
   }) as typeof fetch;
   context.after(() => { globalThis.fetch = token; });
-  const url = `https://example.com/book-excerpts-rss/image/${pageId}/${blockId}`;
+  const url = `https://example.com/read/p/${pageId}/${blockId}`;
   const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "source" };
   const response = await worker.fetch(new Request(url), env);
   assert.equal(response.status, 200);
@@ -848,5 +862,5 @@ test("excerpt image proxy serves only images referenced by the language body fie
   assert.equal((await worker.fetch(new Request(url), env)).status, 200);
   correctParent = false;
   assert.equal((await worker.fetch(new Request(url), env)).status, 404);
-  assert.equal((await worker.fetch(new Request("https://example.com/book-excerpts-rss/image/invalid/invalid"), env)).status, 404);
+  assert.equal((await worker.fetch(new Request("https://example.com/read/p/invalid/invalid"), env)).status, 404);
 });
