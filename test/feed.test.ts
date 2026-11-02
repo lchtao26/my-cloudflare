@@ -838,6 +838,13 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
   assert.match(html, /window\.scrollBy\(0,dir\*step\(\)\)/);
   assert.match(html, /clientX[\s\S]*innerWidth\/2/);
   assert.match(html, /tagName==='A'/);
+  assert.match(html, /class="progress"/);
+  assert.match(html, /id="progress-bar"/);
+  assert.match(html, /localStorage\.setItem\(key,String\(scrollRatio\(\)\)\)/);
+  assert.match(html, /localStorage\.getItem\(key\)/);
+  assert.match(html, /eink-progress:/);
+  assert.match(html, /saveSoon[\s\S]*setTimeout[\s\S]*400/);
+  assert.match(html, /pagehide',saveNow/);
 });
 
 test("e-ink detail pangues all visible text without changing image proxy URLs", () => {

@@ -342,6 +342,9 @@ const EINK_STYLE = [
   "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
   "hr{border:0;border-top:2px solid #000;margin:1.5rem 0;}",
   "cite{font-style:normal;font-weight:700;}",
+  // Thin bottom progress track; width updates from scroll position (no animation).
+  ".progress{position:fixed;left:0;right:0;bottom:0;height:4px;background:#fff;border-top:1px solid #000;z-index:1;}",
+  ".progress-bar{display:block;height:100%;width:0;background:#000;}",
 ].join("");
 
 function einkDocument(title: string, body: string, panguedTitle = false, afterMain = ""): string {
@@ -389,13 +392,40 @@ function einkActionButtons(excerpt: Excerpt): string {
   return buttons.length ? `<div class="actions">\n${buttons.join("\n")}\n</div>` : "";
 }
 
-// Detail pages: tap left half to scroll up, right half to scroll down.
+// Detail pages: tap left/right to page, bottom progress bar, and localStorage resume.
 // Real links/buttons keep their default click behavior.
-const EINK_TAP_SCRIPT = [
+const EINK_DETAIL_CHROME = [
+  `<div class="progress" aria-hidden="true"><span class="progress-bar" id="progress-bar"></span></div>`,
   "<script>",
   "(function(){",
   "function step(){return Math.max(80,window.innerHeight);}",
-  "function go(dir){window.scrollBy(0,dir*step());}",
+  "function pageKey(){var m=location.pathname.match(/\\/read\\/d\\/([0-9a-f-]{36})/i);return m?'eink-progress:'+m[1]:null;}",
+  "function scrollMax(){return document.documentElement.scrollHeight-window.innerHeight;}",
+  "function scrollRatio(){var max=scrollMax();return max>0?Math.min(1,Math.max(0,(window.scrollY||window.pageYOffset||0)/max)):1;}",
+  "function progress(){",
+  "var bar=document.getElementById('progress-bar');",
+  "if(bar)bar.style.width=(scrollRatio()*100)+'%';",
+  "}",
+  "var saveTimer=0;",
+  "function saveNow(){",
+  "var key=pageKey();",
+  "if(!key)return;",
+  "try{localStorage.setItem(key,String(scrollRatio()));}catch(err){}",
+  "}",
+  // Manual scroll can fire dozens of events; throttle localStorage writes.
+  "function saveSoon(){if(saveTimer)return;saveTimer=setTimeout(function(){saveTimer=0;saveNow();},400);}",
+  "function restore(){",
+  "var key=pageKey();",
+  "if(!key)return;",
+  "var raw;",
+  "try{raw=localStorage.getItem(key);}catch(err){return;}",
+  "if(raw==null)return;",
+  "var p=parseFloat(raw);",
+  "if(!(p>=0&&p<=1))return;",
+  "var max=scrollMax();",
+  "if(max>0)window.scrollTo(0,p*max);",
+  "}",
+  "function go(dir){window.scrollBy(0,dir*step());progress();saveNow();}",
   "document.addEventListener('click',function(e){",
   "var el=e.target;",
   "while(el&&el!==document.body){",
@@ -404,9 +434,14 @@ const EINK_TAP_SCRIPT = [
   "}",
   "go((e.clientX||0)<window.innerWidth/2?-1:1);",
   "},false);",
+  "window.addEventListener('scroll',function(){progress();saveSoon();},false);",
+  "window.addEventListener('pagehide',saveNow,false);",
+  "window.addEventListener('load',function(){restore();progress();},false);",
+  "restore();",
+  "progress();",
   "})();",
   "</script>",
-].join("");
+].join("\n");
 
 export function renderEinkDetail(excerpt: Excerpt, listPath: string, imageBaseUrl: string): string {
   const back = `<p class="nav"><a href="${htmlText(listPath)}">${einkText("返回列表")}</a></p>`;
@@ -416,7 +451,7 @@ export function renderEinkDetail(excerpt: Excerpt, listPath: string, imageBaseUr
     excerptDetailBody(excerpt, imageBaseUrl),
     einkActionButtons(excerpt),
     back,
-  ].join("\n"), true, EINK_TAP_SCRIPT);
+  ].join("\n"), true, EINK_DETAIL_CHROME);
 }
 
 async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promise<Excerpt | null> {
