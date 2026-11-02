@@ -338,10 +338,15 @@ const EINK_STYLE = [
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".item-link{display:block;min-height:3rem;font-weight:700;}",
   ".meta{font-size:1rem;}",
-  ".nav a{display:inline-block;min-height:3rem;padding:0.75rem 0;font-weight:700;}",
+  ".nav-row{display:flex;gap:0.5rem;align-items:stretch;margin:0.85rem 0;}",
+  ".nav-row a,.nav-row span{flex:1;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.75rem 0.35rem;font-weight:700;text-align:center;text-decoration:underline;}",
+  ".nav-row .is-disabled{opacity:0.4;text-decoration:none;}",
+  ".nav-row a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".actions{margin:1.5rem 0;}",
   ".btn{display:block;border:2px solid #000;padding:0.85rem 1rem;margin:0.75rem 0;text-align:center;text-decoration:none;font-weight:700;min-height:3rem;}",
   ".btn:focus-visible{outline:3px solid #000;outline-offset:3px;}",
+  // E-ink / slow-refresh screens: keep the page offline-friendly and hide external jumps.
+  "@media (update: slow){.actions{display:none!important;}}",
   "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
   "hr{border:0;border-top:2px solid #000;margin:1.5rem 0;}",
   "cite{font-style:normal;font-weight:700;}",
@@ -395,6 +400,31 @@ function einkActionButtons(excerpt: Excerpt): string {
   return buttons.length ? `<div class="actions">\n${buttons.join("\n")}\n</div>` : "";
 }
 
+export type EinkNeighbors = {
+  prevId: string | null;
+  nextId: string | null;
+};
+
+export function neighborsFor(excerpts: Excerpt[], pageId: string): EinkNeighbors | undefined {
+  const index = excerpts.findIndex((item) => item.id === pageId);
+  if (index < 0) return undefined;
+  return {
+    prevId: index > 0 ? excerpts[index - 1]!.id : null,
+    nextId: index < excerpts.length - 1 ? excerpts[index + 1]!.id : null,
+  };
+}
+
+function einkNav(listPath: string, excerptId: string, neighbors?: EinkNeighbors): string {
+  const prev = neighbors?.prevId
+    ? `<a href="${htmlText(`${listPath}/d/${neighbors.prevId}`)}">${einkText("上一篇")}</a>`
+    : `<span class="is-disabled">${einkText("上一篇")}</span>`;
+  const next = neighbors?.nextId
+    ? `<a href="${htmlText(`${listPath}/d/${neighbors.nextId}`)}">${einkText("下一篇")}</a>`
+    : `<span class="is-disabled">${einkText("下一篇")}</span>`;
+  const back = `<a href="${htmlText(`${listPath}#${excerptId}`)}">${einkText("返回列表")}</a>`;
+  return `<nav class="nav-row">\n${prev}\n${back}\n${next}\n</nav>`;
+}
+
 // Detail pages: tap left/right to page, bottom progress bar, and localStorage resume.
 // Real links/buttons keep their default click behavior.
 const EINK_DETAIL_CHROME = [
@@ -446,14 +476,19 @@ const EINK_DETAIL_CHROME = [
   "</script>",
 ].join("\n");
 
-export function renderEinkDetail(excerpt: Excerpt, listPath: string, imageBaseUrl: string): string {
-  const back = `<p class="nav"><a href="${htmlText(`${listPath}#${excerpt.id}`)}">${einkText("返回列表")}</a></p>`;
+export function renderEinkDetail(
+  excerpt: Excerpt,
+  listPath: string,
+  imageBaseUrl: string,
+  neighbors?: EinkNeighbors,
+): string {
+  const nav = einkNav(listPath, excerpt.id, neighbors);
   return einkDocument(excerpt.title, [
-    back,
+    nav,
     `<h1>${einkText(excerpt.title)}</h1>`,
     excerptDetailBody(excerpt, imageBaseUrl),
     einkActionButtons(excerpt),
-    back,
+    nav,
   ].join("\n"), true, EINK_DETAIL_CHROME);
 }
 
@@ -700,10 +735,21 @@ const worker = {
       }
 
       if (einkDetailId) {
-        const excerpt = await fetchExcerptById(configured, einkDetailId);
+        // Load the RSS-view list in parallel so prev/next follow the same order as /read.
+        const excerptPromise = fetchExcerptById(configured, einkDetailId);
+        const listPromise = excerptsViewId
+          ? fetchExcerptPages(configured, excerptsViewId).then((pages) =>
+            pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null))
+          : Promise.resolve([] as Excerpt[]);
+        const [excerpt, list] = await Promise.all([excerptPromise, listPromise]);
         if (!excerpt) return new Response("Not found", { status: 404 });
         return htmlResponse(
-          renderEinkDetail(excerpt, READ_LIST_PATH, `${url.origin}${READ_ASSET_PREFIX}`),
+          renderEinkDetail(
+            excerpt,
+            READ_LIST_PATH,
+            `${url.origin}${READ_ASSET_PREFIX}`,
+            neighborsFor(list, excerpt.id),
+          ),
           request.method,
         );
       }

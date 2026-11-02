@@ -4,6 +4,7 @@ import { parseRssFeed } from "feedsmith";
 import worker, {
   bookFromPage,
   excerptFromPage,
+  neighborsFor,
   renderEinkDetail,
   renderEinkList,
   renderExcerptFeed,
@@ -752,6 +753,10 @@ test("e-ink detail renders body metadata, action buttons, and reuses the image p
   const html = await response.text();
   assert.match(html, /<title>详情标题<\/title>/);
   assert.match(html, new RegExp(`href="/read#${pageId}"`));
+  assert.match(html, /class="nav-row"/);
+  assert.match(html, /上一篇/);
+  assert.match(html, /下一篇/);
+  assert.match(html, /@media \(update: slow\)\{\.actions\{display:none/);
   assert.match(html, /<p><cite>某书<\/cite> · 作者：张三<\/p>/);
   assert.match(html, /第一段/);
   assert.match(html, /第二段/);
@@ -812,11 +817,92 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
   }, "/read", "https://example.com/read/p");
   assert.match(detail, /一段 &lt;文字&gt;/);
   assert.match(detail, new RegExp(`href="/read#${pageId}"[^>]*>返回列表`));
+  assert.match(detail, /class="is-disabled">上一篇</);
+  assert.match(detail, /class="is-disabled">下一篇</);
   assert.match(detail, /class="btn"[^>]*href="https:\/\/example\.com\/original"/);
   assert.match(detail, /class="btn"[^>]*href="https:\/\/www\.notion\.so\/1"/);
   assert.match(detail, /阅读原文/);
   assert.match(detail, /在 Notion 中查看/);
   assert.doesNotMatch(detail, /专有名词与术语|原标题：/);
+});
+
+test("e-ink detail nav links previous and next excerpts beside back to list", () => {
+  const first = "407e75a1-639c-81ca-8919-f4bff2a57884";
+  const middle = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+  const last = "409e75a1-639c-81ca-8919-f4bff2a57886";
+  const stub = (id: string): Parameters<typeof renderEinkDetail>[0] => ({
+    id,
+    title: id,
+    originalTitle: id,
+    body: "正文",
+    chinese: false,
+    terms: "",
+    sourceTitle: "",
+    author: "",
+    chapter: "",
+    publisher: "",
+    originalUrl: null,
+    publishedDate: "",
+    link: `https://www.notion.so/${id}`,
+    pubDate: null,
+  });
+  assert.deepEqual(neighborsFor([stub(first), stub(middle), stub(last)], middle), {
+    prevId: first,
+    nextId: last,
+  });
+  const html = renderEinkDetail(stub(middle), "/read", "https://example.com/read/p", {
+    prevId: first,
+    nextId: last,
+  });
+  assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
+  assert.match(html, new RegExp(`href="/read#${middle}"[^>]*>返回列表`));
+  assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
+  assert.match(html, /@media \(update: slow\)\{\.actions\{display:none/);
+});
+
+test("e-ink detail loads view neighbors for article navigation", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const viewId = "excerpt-view";
+  const first = "407e75a1-639c-81ca-8919-f4bff2a57884";
+  const middle = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+  const last = "409e75a1-639c-81ca-8919-f4bff2a57886";
+  const pageJson = (id: string, title: string) => ({
+    id,
+    url: `https://www.notion.so/${id}`,
+    parent: { type: "data_source_id", data_source_id: "excerpt-source" },
+    properties: {
+      "标题翻译": { type: "rich_text", rich_text: [{ plain_text: title }] },
+      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
+    },
+  });
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const href = String(url);
+    if (href.includes(`/pages/${middle}`)) return Response.json(pageJson(middle, "中间"));
+    if (href.includes(`/views/${viewId}`)) {
+      return Response.json({ data_source_id: "excerpt-source", filter: null, quick_filters: {}, sorts: [] });
+    }
+    if (init?.method === "POST" && href.includes("/data_sources/excerpt-source/query")) {
+      return Response.json({
+        results: [pageJson(first, "一"), pageJson(middle, "二"), pageJson(last, "三")],
+        has_more: false,
+      });
+    }
+    throw new Error(`Unexpected fetch: ${href}`);
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+
+  const response = await worker.fetch(
+    new Request(`https://example.workers.dev/read/d/${middle}`),
+    {
+      NOTION_TOKEN: "test",
+      NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
+      NOTION_EXCERPTS_VIEW_ID: viewId,
+    },
+  );
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
+  assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
 });
 
 test("e-ink detail taps left to scroll up and right to scroll down", () => {
