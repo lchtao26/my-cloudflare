@@ -404,7 +404,7 @@ test("detail pages preserve paragraphs from newlines and stored br tags while es
     const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
     const main = detail.match(/<main>([\s\S]*)<\/main>/)?.[1] ?? "";
     assert.match(detail, /<p>第一段<\/p>\n<p>第二段<br \/>\n段内换行&lt;script&gt;alert \(1\)&lt;\/script&gt;&lt;br onmouseover=&quot;alert\(1\)&quot;&gt; &amp; \]\]&gt;<\/p>/);
-    // User body stays escaped; the fixed pager may include a small scroll script outside main.
+    // User body stays escaped; detail pages may include a small tap-to-scroll script outside main.
     assert.doesNotMatch(main, /<script|<br onmouseover|&lt;br\s*\/?&gt;/);
   }
 });
@@ -816,7 +816,7 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
   assert.doesNotMatch(detail, /专有名词与术语|原标题：/);
 });
 
-test("e-ink detail fixed pager scrolls the current page by one viewport", () => {
+test("e-ink detail taps left to scroll up and right to scroll down", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const html = renderEinkDetail({
     id: pageId,
@@ -834,13 +834,10 @@ test("e-ink detail fixed pager scrolls the current page by one viewport", () => 
     link: "https://www.notion.so/1",
     pubDate: null,
   }, "/read", "https://example.com/read/p");
-  assert.match(html, /position:fixed/);
-  assert.match(html, /id="pager-prev"[^>]*>向上</);
-  assert.match(html, /id="pager-next"[^>]*>向下</);
-  assert.doesNotMatch(html, /<svg\b/);
-  assert.match(html, /display:flex;align-items:center;justify-content:center/);
+  assert.doesNotMatch(html, /class="pager"|向上|向下/);
   assert.match(html, /window\.scrollBy\(0,dir\*step\(\)\)/);
-  assert.doesNotMatch(html, /\/read\/d\//);
+  assert.match(html, /clientX[\s\S]*innerWidth\/2/);
+  assert.match(html, /tagName==='A'/);
 });
 
 test("e-ink detail pangues all visible text without changing image proxy URLs", () => {
