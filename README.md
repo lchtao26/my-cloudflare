@@ -29,3 +29,7 @@ Cloudflare Worker 从 Notion「书籍推荐」数据库读取最近编辑的前 
 正文字段中的 `notion-file-block` 图片引用会转换为 RSS 图片，并由 Worker 转发，避免使用会过期的文件地址。同时支持自闭合标签与带说明文字的 `<image>...</image>` 写法；标签内的说明文字会被忽略，不写入 `alt`，也不显示在图片下方。图片块需属于对应节选页面，且仍被该条目使用的正文字段引用。无法解析的其他图片引用会保留为文字。
 
 `NOTION_EXCERPTS_DATA_SOURCE_ID` 与 `NOTION_EXCERPTS_VIEW_ID`（RSS 视图）已在 `wrangler.jsonc` 中配置。请在「阅读节选」数据库的“连接”中添加与书籍推荐相同的 Notion 集成，并确保其有读取权限。部署后订阅地址为 `https://my-cloudflare.lichcode.workers.dev/book-excerpts-rss`。RSS 地址无需登录即可读取内容；打开 Notion 页面仍需相应的页面访问权限。
+
+## 阅读节选水墨屏页面
+
+`/book-excerpts-eink` 与 `/book-excerpts-eink/{pageId}` 为水墨屏设备提供极简 HTML 阅读页。列表范围与 RSS 视图一致；详情正文格式与 RSS `description` 相同，但不输出“阅读原文”“在 Notion 中查看”等跳转链接。页面使用纯黑白、衬线大字号、固定行宽、实线分隔与大触控目标，无 JavaScript、无动画。图片继续复用 `/book-excerpts-rss/image/...` 代理。缓存 5 分钟。

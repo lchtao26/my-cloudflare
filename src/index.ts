@@ -6,6 +6,7 @@ const FEED_DESCRIPTION = "来自 Notion「书籍推荐」的书目 RSS";
 const NOTION_PAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FEED_PATH = "/book-express-rss";
 const EXCERPT_FEED_PATH = "/book-excerpts-rss";
+const EINK_PATH = "/book-excerpts-eink";
 const FEED_ITEM_LIMIT = 30;
 
 type RichText = { plain_text?: string; text?: { content?: string } };
@@ -263,7 +264,8 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
   });
 }
 
-function excerptDescription(excerpt: Excerpt, feedUrl: string): string {
+function excerptDescription(excerpt: Excerpt, feedUrl: string, options?: { includeLinks?: boolean }): string {
+  const includeLinks = options?.includeLinks !== false;
   const source = [
     excerpt.sourceTitle ? `<cite>${displayText(excerpt.sourceTitle)}</cite>` : "",
     excerpt.author ? `作者：${displayText(excerpt.author)}` : "",
@@ -285,9 +287,89 @@ function excerptDescription(excerpt: Excerpt, feedUrl: string): string {
     ...(body ? [body] : []),
     "<hr />",
     ...(details.length ? [`<p>${details.join("<br />\n")}</p>`] : []),
-    `<p>${links}</p>`,
+    ...(includeLinks ? [`<p>${links}</p>`] : []),
     ...(terms ? ["<hr />", `<p>${displayText("专有名词与术语")}</p>`, terms] : []),
   ].join("\n");
+}
+
+// E-ink: pure black/white, serif, wide leading, capped line length, no motion/hover-only UI.
+const EINK_STYLE = [
+  "*,*::before,*::after{box-sizing:border-box;animation:none!important;transition:none!important;}",
+  "html{-webkit-text-size-adjust:100%;}",
+  "body{margin:0;padding:1.25rem 1rem 2.5rem;font-family:Georgia,'Times New Roman',serif;font-size:1.125rem;line-height:1.75;color:#000;background:#fff;}",
+  "main{max-width:68ch;margin:0 auto;}",
+  "h1{font-size:1.5rem;line-height:1.35;font-weight:700;margin:0 0 1rem;}",
+  "p,li{margin:0.85rem 0;}",
+  "ul{list-style:none;margin:0;padding:0;}",
+  "li{border-top:2px solid #000;padding:1rem 0;}",
+  "li:last-child{border-bottom:2px solid #000;}",
+  "a{color:#000;text-decoration:underline;}",
+  "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
+  ".item-link{display:block;min-height:3rem;font-weight:700;}",
+  ".meta{font-size:1rem;}",
+  ".nav a{display:inline-block;min-height:3rem;padding:0.75rem 0;font-weight:700;}",
+  "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
+  "hr{border:0;border-top:2px solid #000;margin:1.5rem 0;}",
+  "cite{font-style:normal;font-weight:700;}",
+].join("");
+
+function einkDocument(title: string, body: string): string {
+  return [
+    "<!DOCTYPE html>",
+    '<html lang="zh-CN">',
+    "<head>",
+    '<meta charset="utf-8" />',
+    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+    `<title>${displayText(title)}</title>`,
+    `<style>${EINK_STYLE}</style>`,
+    "</head>",
+    `<body>\n<main>\n${body}\n</main>\n</body>`,
+    "</html>",
+  ].join("\n");
+}
+
+export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
+  const items = excerpts.map((excerpt) => {
+    const href = htmlText(`${listPath}/${excerpt.id}`);
+    const meta = [
+      excerpt.sourceTitle ? displayText(excerpt.sourceTitle) : "",
+      excerpt.author ? `作者：${displayText(excerpt.author)}` : "",
+    ].filter(Boolean).join(" · ");
+    return [
+      "<li>",
+      `<a class="item-link" href="${href}">${displayText(excerpt.title)}</a>`,
+      ...(meta ? [`<p class="meta">${meta}</p>`] : []),
+      "</li>",
+    ].join("");
+  }).join("\n");
+  return einkDocument("阅读节选", [
+    `<h1>${displayText("阅读节选")}</h1>`,
+    items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
+  ].join("\n"));
+}
+
+export function renderEinkDetail(excerpt: Excerpt, listPath: string, imageBaseUrl: string): string {
+  const back = `<p class="nav"><a href="${htmlText(listPath)}">${displayText("返回列表")}</a></p>`;
+  return einkDocument(excerpt.title, [
+    back,
+    `<h1>${displayText(excerpt.title)}</h1>`,
+    excerptDescription(excerpt, imageBaseUrl, { includeLinks: false }),
+    back,
+  ].join("\n"));
+}
+
+async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promise<Excerpt | null> {
+  const response = await fetch(`https://api.notion.com/v1/pages/${encodeURIComponent(pageId)}`, {
+    headers: {
+      Authorization: `Bearer ${env.NOTION_TOKEN}`,
+      "Notion-Version": NOTION_VERSION,
+    },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
+  const page = await response.json() as NotionPage;
+  if (page.parent?.type !== "data_source_id" || page.parent.data_source_id !== env.NOTION_DATA_SOURCE_ID) return null;
+  return excerptFromPage(page);
 }
 
 // Self-closing tags and captioned <image>...</image> wrappers both count.
@@ -471,23 +553,38 @@ async function fetchExcerptImage(env: ConfiguredBindings, pageId: string, blockI
   return imageUrl ? fetchImage(imageUrl) : null;
 }
 
+function htmlResponse(body: string | null, method: string): Response {
+  return new Response(method === "HEAD" ? null : body, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=300, must-revalidate",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
 const worker = {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
     const coverId = coverIdFromPath(url.pathname);
     const isExcerptFeed = url.pathname === EXCERPT_FEED_PATH;
+    const isEinkList = url.pathname === EINK_PATH;
+    const einkDetailMatch = url.pathname.match(/^\/book-excerpts-eink\/([^/]+)$/);
+    const einkDetailId = einkDetailMatch?.[1] && NOTION_PAGE_ID.test(einkDetailMatch[1]) ? einkDetailMatch[1] : null;
     const imageMatch = url.pathname.match(/^\/book-excerpts-rss\/image\/([^/]+)\/([^/]+)$/);
     const imageIds = imageMatch && NOTION_PAGE_ID.test(imageMatch[1] ?? "") && NOTION_PAGE_ID.test(imageMatch[2] ?? "") ? [imageMatch[1]!, imageMatch[2]!] : null;
-    if (url.pathname !== FEED_PATH && !isExcerptFeed && !coverId && !imageIds) {
+    const usesExcerpts = isExcerptFeed || isEinkList || Boolean(einkDetailId) || Boolean(imageIds);
+    if (url.pathname !== FEED_PATH && !usesExcerpts && !coverId) {
       return new Response("Not found", { status: 404 });
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
     }
     const notionToken = env.NOTION_TOKEN;
-    const dataSourceId = isExcerptFeed || imageIds ? env.NOTION_EXCERPTS_DATA_SOURCE_ID : env.NOTION_DATA_SOURCE_ID;
+    const dataSourceId = usesExcerpts ? env.NOTION_EXCERPTS_DATA_SOURCE_ID : env.NOTION_DATA_SOURCE_ID;
     const excerptsViewId = env.NOTION_EXCERPTS_VIEW_ID;
-    if (!notionToken || !dataSourceId || (isExcerptFeed && !excerptsViewId)) {
+    const needsView = isExcerptFeed || isEinkList;
+    if (!notionToken || !dataSourceId || (needsView && !excerptsViewId)) {
       return new Response("Feed is not configured", { status: 503 });
     }
     const configured = { NOTION_TOKEN: notionToken, NOTION_DATA_SOURCE_ID: dataSourceId };
@@ -502,6 +599,22 @@ const worker = {
         const cover = await fetchCover(configured, coverId);
         if (!cover) return new Response("Not found", { status: 404 });
         return request.method === "HEAD" ? new Response(null, { status: cover.status, headers: cover.headers }) : cover;
+      }
+
+      if (einkDetailId) {
+        const excerpt = await fetchExcerptById(configured, einkDetailId);
+        if (!excerpt) return new Response("Not found", { status: 404 });
+        return htmlResponse(
+          renderEinkDetail(excerpt, EINK_PATH, `${url.origin}${EXCERPT_FEED_PATH}`),
+          request.method,
+        );
+      }
+
+      if (isEinkList) {
+        const excerpts = (await fetchExcerptPages(configured, excerptsViewId!))
+          .map(excerptFromPage)
+          .filter((item): item is Excerpt => item !== null);
+        return htmlResponse(renderEinkList(excerpts, EINK_PATH), request.method);
       }
 
       const feedUrl = `${url.origin}${url.pathname}`;
@@ -523,11 +636,11 @@ const worker = {
         },
       });
     } catch (error) {
-      console.error(coverId || imageIds ? "Failed to load image" : "Failed to build book RSS", error);
-      return new Response(coverId || imageIds ? "Image temporarily unavailable" : "Feed temporarily unavailable", {
-        status: 502,
-        headers: { "Cache-Control": "no-store" },
-      });
+      console.error(coverId || imageIds ? "Failed to load image" : isEinkList || einkDetailId ? "Failed to build e-ink page" : "Failed to build book RSS", error);
+      return new Response(
+        coverId || imageIds ? "Image temporarily unavailable" : isEinkList || einkDetailId ? "Page temporarily unavailable" : "Feed temporarily unavailable",
+        { status: 502, headers: { "Cache-Control": "no-store" } },
+      );
     }
   },
 };

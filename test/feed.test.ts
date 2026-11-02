@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseRssFeed } from "feedsmith";
-import worker, { bookFromPage, excerptFromPage, renderExcerptFeed, renderFeed, viewQueryFilter, type NotionPage } from "../src/index.ts";
+import worker, {
+  bookFromPage,
+  excerptFromPage,
+  renderEinkDetail,
+  renderEinkList,
+  renderExcerptFeed,
+  renderFeed,
+  viewQueryFilter,
+  type NotionPage,
+} from "../src/index.ts";
 
 const page: NotionPage = {
   id: "book-1",
@@ -615,6 +624,160 @@ test("RSS preserves original text spacing while escaping content and keeping ima
   const bookItem = parseRssFeed(renderFeed([book], "https://example.com/book-express-rss")).items?.[0];
   assert.equal(bookItem?.title, "AI时代的RSS");
   assert.match(bookItem?.description ?? "", /保留API与2026年之间的原始排版 &amp; &lt;文字&gt;/);
+});
+
+test("e-ink list uses the RSS view and links to detail pages", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+  const pageId = "407e75a1-639c-81ca-8919-f4bff2a57884";
+  const viewId = "40ae75a1-639c-81f8-b7fe-000c40372432";
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const href = String(url);
+    const method = init?.method ?? "GET";
+    if (method === "GET" && href.includes(`/views/${viewId}`)) {
+      requests.push({ url: href });
+      return Response.json({
+        object: "view",
+        id: viewId,
+        data_source_id: "excerpt-source",
+        filter: { property: "正文翻译", rich_text: { is_not_empty: true } },
+        sorts: [],
+      });
+    }
+    requests.push({ url: href, body: JSON.parse(String(init?.body)) });
+    return Response.json({
+      results: [{
+        id: pageId,
+        url: "https://www.notion.so/excerpt-1",
+        properties: {
+          "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "第一节" }] },
+          "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
+          "出处": { type: "rich_text", rich_text: [{ plain_text: "某书" }] },
+          "作者": { type: "rich_text", rich_text: [{ plain_text: "张三" }] },
+        },
+      }],
+      has_more: false,
+    });
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+
+  const response = await worker.fetch(
+    new Request("https://example.workers.dev/book-excerpts-eink"),
+    {
+      NOTION_TOKEN: "test",
+      NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
+      NOTION_EXCERPTS_VIEW_ID: viewId,
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("Content-Type") ?? "", /text\/html/);
+  const html = await response.text();
+  assert.match(html, /<title>阅读节选<\/title>/);
+  assert.match(html, new RegExp(`href="/book-excerpts-eink/${pageId}"`));
+  assert.match(html, /第一节/);
+  assert.match(html, /某书 · 作者：张三/);
+  assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
+  assert.equal((await worker.fetch(new Request("https://example.workers.dev/book-excerpts-eink"), {
+    NOTION_TOKEN: "test",
+    NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
+  })).status, 503);
+});
+
+test("e-ink detail mirrors RSS description without jump links and reuses the image proxy", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const pageId = "407e75a1-639c-81ca-8919-f4bff2a57884";
+  const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
+  const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
+  globalThis.fetch = (async (url: RequestInfo | URL) => {
+    const href = String(url);
+    if (href.includes(`/pages/${pageId}`)) {
+      return Response.json({
+        id: pageId,
+        url: "https://www.notion.so/excerpt-1",
+        parent: { type: "data_source_id", data_source_id: "excerpt-source" },
+        properties: {
+          "标题": { type: "title", title: [{ plain_text: "Original & title" }] },
+          "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "详情标题" }] },
+          "正文翻译": { type: "rich_text", rich_text: [{ plain_text: `第一段<br /><br /><image source="notion-file-block://${blockId}/${fileId}" /><br /><br />第二段` }] },
+          "出处": { type: "rich_text", rich_text: [{ plain_text: "某书" }] },
+          "作者": { type: "rich_text", rich_text: [{ plain_text: "张三" }] },
+          "出版方": { type: "rich_text", rich_text: [{ plain_text: "某出版社" }] },
+          "章节": { type: "rich_text", rich_text: [{ plain_text: "第一章" }] },
+          "发布日期": { type: "date", date: { start: "2025-06-12" } },
+          "专有名词与术语": { type: "rich_text", rich_text: [{ plain_text: "术语 A<br />释义" }] },
+          "原文链接": { type: "url", url: "https://example.com/original" },
+        },
+      });
+    }
+    throw new Error(`Unexpected fetch: ${href}`);
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+
+  const response = await worker.fetch(
+    new Request(`https://example.workers.dev/book-excerpts-eink/${pageId}`),
+    { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
+  );
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /<title>详情标题<\/title>/);
+  assert.match(html, /href="\/book-excerpts-eink"/);
+  assert.match(html, /<p><cite>某书<\/cite> · 作者：张三<\/p>/);
+  assert.match(html, /第一段/);
+  assert.match(html, /第二段/);
+  assert.match(html, /原标题：Original &amp; title/);
+  assert.match(html, /出版方：某出版社/);
+  assert.match(html, /章节：第一章/);
+  assert.match(html, /发布日期：2025-06-12/);
+  assert.match(html, new RegExp(`src="https://example\\.workers\\.dev/book-excerpts-rss/image/${pageId}/${blockId}"`));
+  assert.match(html, /专有名词与术语/);
+  assert.match(html, /术语 A/);
+  assert.doesNotMatch(html, /阅读原文|在 Notion 中查看|example\.com\/original|notion\.so\/excerpt-1/);
+  assert.equal((await worker.fetch(
+    new Request("https://example.workers.dev/book-excerpts-eink/not-a-page-id"),
+    { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
+  )).status, 404);
+});
+
+test("e-ink render helpers escape content and omit empty metadata", () => {
+  const pageId = "407e75a1-639c-81ca-8919-f4bff2a57884";
+  const list = renderEinkList([{
+    id: pageId,
+    title: "甲 & 乙",
+    originalTitle: "甲 & 乙",
+    body: "正文",
+    chinese: false,
+    terms: "",
+    sourceTitle: "",
+    author: "",
+    chapter: "",
+    publisher: "",
+    originalUrl: null,
+    publishedDate: "",
+    link: "https://www.notion.so/1",
+    pubDate: null,
+  }], "/book-excerpts-eink");
+  assert.match(list, /甲 &amp; 乙/);
+  assert.doesNotMatch(list, /作者：|class="meta"/);
+
+  const detail = renderEinkDetail({
+    id: pageId,
+    title: "标题",
+    originalTitle: "标题",
+    body: "一段 <文字>",
+    chinese: false,
+    terms: "",
+    sourceTitle: "出处",
+    author: "作者",
+    chapter: "",
+    publisher: "",
+    originalUrl: "https://example.com/original",
+    publishedDate: "",
+    link: "https://www.notion.so/1",
+    pubDate: null,
+  }, "/book-excerpts-eink", "https://example.com/book-excerpts-rss");
+  assert.match(detail, /一段 &lt;文字&gt;/);
+  assert.match(detail, /返回列表/);
+  assert.doesNotMatch(detail, /阅读原文|在 Notion 中查看|专有名词与术语|原标题：/);
 });
 
 test("excerpt image proxy serves only images referenced by the language body field", async (context) => {
