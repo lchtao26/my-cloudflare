@@ -262,7 +262,7 @@ function excerptDetailUrl(feedUrl: string, excerptId: string): string {
 
 export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string {
   return generateRssFeed({
-    title: "阅读节选",
+    title: "阅读片段",
     link: feedUrl,
     description: "来自 Notion「阅读节选」的书籍、杂志与网页译文及中文原文 RSS",
     language: "zh-CN",
@@ -351,8 +351,8 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
       "</li>",
     ].join("");
   }).join("\n");
-  return einkDocument("阅读节选", [
-    `<h1>${displayText("阅读节选")}</h1>`,
+  return einkDocument("阅读片段", [
+    `<h1>${displayText("阅读片段")}</h1>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
   ].join("\n"));
 }

@@ -300,7 +300,7 @@ test("excerpt feed uses the Notion RSS view filter, paginates, and links to e-in
   assert.match(response.headers.get("Content-Type") ?? "", /application\/rss\+xml/);
   const feed = await response.text();
   const parsed = parseRssFeed(feed);
-  assert.equal(parsed.title, "阅读节选");
+  assert.equal(parsed.title, "阅读片段");
   assert.equal(parsed.items?.length, 2);
   const item = parsed.items?.[0];
   assert.equal(item?.title, "第一节 & 开始");
@@ -671,7 +671,7 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
   assert.equal(response.status, 200);
   assert.match(response.headers.get("Content-Type") ?? "", /text\/html/);
   const html = await response.text();
-  assert.match(html, /<title>阅读节选<\/title>/);
+  assert.match(html, /<title>阅读片段<\/title>/);
   assert.match(html, new RegExp(`href="/read/d/${pageId}"`));
   assert.match(html, /第一节/);
   assert.match(html, /某书 · 作者：张三/);
