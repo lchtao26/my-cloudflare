@@ -504,7 +504,7 @@ test("Comic excerpts use the original title and body, not translations", () => {
   assert.equal(excerpt.body, "漫画正文图片");
   assert.equal(excerpt.chinese, false);
   const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0];
-  assert.equal(item?.title, "《漫画》第189話");
+  assert.equal(item?.title, "《漫画》第 189 話");
   assert.equal(item?.description, undefined);
   const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
   assert.match(detail, /漫画正文图片/);
@@ -606,7 +606,7 @@ test("detail pages turn captioned notion image wrappers into proxied images and 
   assert.doesNotMatch(detail, /©文藝春秋|notion-file-block|<image|<\/image>/);
 });
 
-test("RSS preserves original title spacing; book feed still escapes description content", () => {
+test("RSS item titles are pangued; descriptions keep original spacing", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: {
     "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "AI时代的RSS" }] },
@@ -615,7 +615,7 @@ test("RSS preserves original title spacing; book feed still escapes description 
   } });
   assert.ok(excerpt);
   const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0];
-  assert.equal(item?.title, "AI时代的RSS");
+  assert.equal(item?.title, "AI 时代的 RSS");
   assert.equal(item?.description, undefined);
   assert.equal(item?.link, `https://example.com/read/d/${pageId}`);
   const book = bookFromPage({ ...page, properties: {
@@ -625,7 +625,7 @@ test("RSS preserves original title spacing; book feed still escapes description 
   } });
   assert.ok(book);
   const bookItem = parseRssFeed(renderFeed([book], "https://example.com/book/rss")).items?.[0];
-  assert.equal(bookItem?.title, "AI时代的RSS");
+  assert.equal(bookItem?.title, "AI 时代的 RSS");
   assert.match(bookItem?.description ?? "", /保留API与2026年之间的原始排版 &amp; &lt;文字&gt;/);
 });
 

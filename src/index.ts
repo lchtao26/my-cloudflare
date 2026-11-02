@@ -204,7 +204,7 @@ function itemDescription(book: Book, feedUrl: string): string {
 export function renderFeed(books: Book[], feedUrl: string): string {
   const items: Array<RssFeed.Item<Date>> = books.map((book) => {
     const item: RssFeed.Item<Date> = {
-      title: book.title,
+      title: pangu.spaceText(book.title),
       link: book.link,
       description: itemDescription(book, feedUrl),
       guid: { value: `notion:${book.id}`, isPermaLink: false },
@@ -286,7 +286,7 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
     atom: { links: [{ href: feedUrl, rel: "self", type: "application/rss+xml" }] },
     items: excerpts.map((excerpt) => {
       const item: RssFeed.Item<Date> = {
-        title: excerpt.title,
+        title: pangu.spaceText(excerpt.title),
         link: excerptDetailUrl(feedUrl, excerpt.id),
         guid: { value: `notion:${excerpt.id}`, isPermaLink: false },
       };
