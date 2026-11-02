@@ -331,6 +331,9 @@ const EINK_STYLE = [
   "ul{list-style:none;margin:0;padding:0;}",
   "li{border-top:2px solid #000;padding:1rem 0;}",
   "li:last-child{border-bottom:2px solid #000;}",
+  // Fragment return from detail: keep the focused row visible and faintly marked.
+  "li[id]{scroll-margin-top:1rem;}",
+  "li:target{outline:3px solid #000;outline-offset:3px;}",
   "a{color:#000;text-decoration:underline;}",
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".item-link{display:block;min-height:3rem;font-weight:700;}",
@@ -370,7 +373,7 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
       excerpt.author ? `作者：${displayText(excerpt.author)}` : "",
     ].filter(Boolean).join(" · ");
     return [
-      "<li>",
+      `<li id="${htmlText(excerpt.id)}" tabindex="-1">`,
       `<a class="item-link" href="${href}">${displayText(excerpt.title)}</a>`,
       ...(meta ? [`<p class="meta">${meta}</p>`] : []),
       "</li>",
@@ -444,7 +447,7 @@ const EINK_DETAIL_CHROME = [
 ].join("\n");
 
 export function renderEinkDetail(excerpt: Excerpt, listPath: string, imageBaseUrl: string): string {
-  const back = `<p class="nav"><a href="${htmlText(listPath)}">${einkText("返回列表")}</a></p>`;
+  const back = `<p class="nav"><a href="${htmlText(`${listPath}#${excerpt.id}`)}">${einkText("返回列表")}</a></p>`;
   return einkDocument(excerpt.title, [
     back,
     `<h1>${einkText(excerpt.title)}</h1>`,

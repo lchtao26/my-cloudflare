@@ -703,6 +703,8 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
   const html = await response.text();
   assert.match(html, /<title>阅读节选<\/title>/);
   assert.match(html, new RegExp(`href="/read/d/${pageId}"`));
+  assert.match(html, new RegExp(`<li id="${pageId}" tabindex="-1">`));
+  assert.match(html, /li:target/);
   assert.match(html, /第一节/);
   assert.match(html, /某书 · 作者：张三/);
   assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
@@ -749,7 +751,7 @@ test("e-ink detail renders body metadata, action buttons, and reuses the image p
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /<title>详情标题<\/title>/);
-  assert.match(html, /href="\/read"/);
+  assert.match(html, new RegExp(`href="/read#${pageId}"`));
   assert.match(html, /<p><cite>某书<\/cite> · 作者：张三<\/p>/);
   assert.match(html, /第一段/);
   assert.match(html, /第二段/);
@@ -789,6 +791,7 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     pubDate: null,
   }], "/read");
   assert.match(list, /甲 &amp; 乙/);
+  assert.match(list, new RegExp(`<li id="${pageId}" tabindex="-1">`));
   assert.doesNotMatch(list, /作者：|class="meta"/);
 
   const detail = renderEinkDetail({
@@ -808,7 +811,7 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     pubDate: null,
   }, "/read", "https://example.com/read/p");
   assert.match(detail, /一段 &lt;文字&gt;/);
-  assert.match(detail, /返回列表/);
+  assert.match(detail, new RegExp(`href="/read#${pageId}"[^>]*>返回列表`));
   assert.match(detail, /class="btn"[^>]*href="https:\/\/example\.com\/original"/);
   assert.match(detail, /class="btn"[^>]*href="https:\/\/www\.notion\.so\/1"/);
   assert.match(detail, /阅读原文/);
