@@ -4,6 +4,7 @@ import { parseRssFeed } from "feedsmith";
 import worker, {
   bookFromPage,
   excerptFromPage,
+  isAppleUserAgent,
   neighborsFor,
   renderEinkDetail,
   renderEinkList,
@@ -756,7 +757,6 @@ test("e-ink detail renders body metadata, action buttons, and reuses the image p
   assert.match(html, /class="nav-row"/);
   assert.match(html, /上一篇/);
   assert.match(html, /下一篇/);
-  assert.match(html, /@media \(update: slow\)\{\.actions\{display:none/);
   assert.match(html, /<p><cite>某书<\/cite> · 作者：张三<\/p>/);
   assert.match(html, /第一段/);
   assert.match(html, /第二段/);
@@ -767,14 +767,33 @@ test("e-ink detail renders body metadata, action buttons, and reuses the image p
   assert.match(html, new RegExp(`src="https://example\\.workers\\.dev/read/p/${pageId}/${blockId}"`));
   assert.match(html, /专有名词与术语/);
   assert.match(html, /术语 A/);
-  assert.match(html, /class="btn"[^>]*href="https:\/\/example\.com\/original"/);
-  assert.match(html, /class="btn"[^>]*href="https:\/\/www\.notion\.so\/excerpt-1"/);
-  assert.match(html, /阅读原文/);
-  assert.match(html, /在 Notion 中查看/);
+  // Non-Apple UA (default Request): hide external jump buttons.
+  assert.doesNotMatch(html, /阅读原文|在 Notion 中查看|class="actions"/);
+  assert.doesNotMatch(html, /@media \(update: slow\)/);
+
+  const appleHtml = await (await worker.fetch(
+    new Request(`https://example.workers.dev/read/d/${pageId}`, {
+      headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15" },
+    }),
+    { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
+  )).text();
+  assert.match(appleHtml, /class="btn"[^>]*href="https:\/\/example\.com\/original"/);
+  assert.match(appleHtml, /class="btn"[^>]*href="https:\/\/www\.notion\.so\/excerpt-1"/);
+  assert.match(appleHtml, /阅读原文/);
+  assert.match(appleHtml, /在 Notion 中查看/);
+
   assert.equal((await worker.fetch(
     new Request("https://example.workers.dev/read/d/not-a-page-id"),
     { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
   )).status, 404);
+});
+
+test("isAppleUserAgent matches Apple devices only", () => {
+  assert.equal(isAppleUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"), true);
+  assert.equal(isAppleUserAgent("Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)"), true);
+  assert.equal(isAppleUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"), true);
+  assert.equal(isAppleUserAgent("Mozilla/5.0 (Linux; Android 10; KFMAWI) AppleWebKit/537.36"), false);
+  assert.equal(isAppleUserAgent(""), false);
 });
 
 test("e-ink render helpers escape content and omit empty metadata", () => {
@@ -814,7 +833,7 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     publishedDate: "",
     link: "https://www.notion.so/1",
     pubDate: null,
-  }, "/read", "https://example.com/read/p");
+  }, "/read", "https://example.com/read/p", undefined, true);
   assert.match(detail, /一段 &lt;文字&gt;/);
   assert.match(detail, new RegExp(`href="/read#${pageId}"[^>]*>返回列表`));
   assert.match(detail, /class="is-disabled">上一篇</);
@@ -824,6 +843,25 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
   assert.match(detail, /阅读原文/);
   assert.match(detail, /在 Notion 中查看/);
   assert.doesNotMatch(detail, /专有名词与术语|原标题：/);
+  assert.doesNotMatch(
+    renderEinkDetail({
+      id: pageId,
+      title: "标题",
+      originalTitle: "标题",
+      body: "一段",
+      chinese: false,
+      terms: "",
+      sourceTitle: "出处",
+      author: "作者",
+      chapter: "",
+      publisher: "",
+      originalUrl: "https://example.com/original",
+      publishedDate: "",
+      link: "https://www.notion.so/1",
+      pubDate: null,
+    }, "/read", "https://example.com/read/p"),
+    /阅读原文|在 Notion 中查看|class="actions"/,
+  );
 });
 
 test("e-ink detail nav links previous and next excerpts beside back to list", () => {
@@ -857,7 +895,7 @@ test("e-ink detail nav links previous and next excerpts beside back to list", ()
   assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
   assert.match(html, new RegExp(`href="/read#${middle}"[^>]*>返回列表`));
   assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
-  assert.match(html, /@media \(update: slow\)\{\.actions\{display:none/);
+  assert.doesNotMatch(html, /阅读原文|在 Notion 中查看|@media \(update: slow\)/);
 });
 
 test("e-ink detail loads view neighbors for article navigation", async (context) => {
@@ -955,7 +993,7 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
     publishedDate: "2025-06-12",
     link: "https://www.notion.so/1",
     pubDate: null,
-  }, "/read", "https://example.com/read/p");
+  }, "/read", "https://example.com/read/p", undefined, true);
   assert.match(html, /<title>AI 时代的 RSS<\/title>/);
   assert.match(html, /<h1>AI 时代的 RSS<\/h1>/);
   assert.match(html, /作者：张三 AI/);

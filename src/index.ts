@@ -345,8 +345,6 @@ const EINK_STYLE = [
   ".actions{margin:1.5rem 0;}",
   ".btn{display:block;border:2px solid #000;padding:0.85rem 1rem;margin:0.75rem 0;text-align:center;text-decoration:none;font-weight:700;min-height:3rem;}",
   ".btn:focus-visible{outline:3px solid #000;outline-offset:3px;}",
-  // E-ink / slow-refresh screens: keep the page offline-friendly and hide external jumps.
-  "@media (update: slow){.actions{display:none!important;}}",
   "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
   "hr{border:0;border-top:2px solid #000;margin:1.5rem 0;}",
   "cite{font-style:normal;font-weight:700;}",
@@ -388,6 +386,11 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
     `<h1>${displayText("阅读节选")}</h1>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
   ].join("\n"));
+}
+
+/** Apple browsers only — Kindle/other e-readers should not see external jump buttons. */
+export function isAppleUserAgent(userAgent: string): boolean {
+  return /iPhone|iPad|iPod|Macintosh|Mac OS X/i.test(userAgent);
 }
 
 function einkActionButtons(excerpt: Excerpt): string {
@@ -481,13 +484,14 @@ export function renderEinkDetail(
   listPath: string,
   imageBaseUrl: string,
   neighbors?: EinkNeighbors,
+  showExternalActions = false,
 ): string {
   const nav = einkNav(listPath, excerpt.id, neighbors);
   return einkDocument(excerpt.title, [
     nav,
     `<h1>${einkText(excerpt.title)}</h1>`,
     excerptDetailBody(excerpt, imageBaseUrl),
-    einkActionButtons(excerpt),
+    ...(showExternalActions ? [einkActionButtons(excerpt)] : []),
     nav,
   ].join("\n"), true, EINK_DETAIL_CHROME);
 }
@@ -749,6 +753,7 @@ const worker = {
             READ_LIST_PATH,
             `${url.origin}${READ_ASSET_PREFIX}`,
             neighborsFor(list, excerpt.id),
+            isAppleUserAgent(request.headers.get("User-Agent") ?? ""),
           ),
           request.method,
         );
