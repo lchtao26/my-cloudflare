@@ -474,10 +474,13 @@ test("Chinese excerpts use the original title and body, not translations", () =>
   assert.equal(excerpt.title, "中文标题");
   assert.equal(excerpt.body, "中文正文");
   assert.equal(excerpt.chinese, true);
+  assert.equal(excerpt.lang, "zh-CN");
   const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0];
   assert.equal(item?.title, "中文标题");
   assert.equal(item?.description, undefined);
   const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
+  assert.match(detail, /<html lang="zh-CN">/);
+  assert.match(detail, /:lang\(zh\)\{font-family:/);
   assert.match(detail, /中文正文/);
   assert.doesNotMatch(detail, /不应使用|不应输出的译文/);
   assert.equal(excerptFromPage({
@@ -504,10 +507,13 @@ test("Comic excerpts use the original title and body, not translations", () => {
   assert.equal(excerpt.title, "《漫画》第189話");
   assert.equal(excerpt.body, "漫画正文图片");
   assert.equal(excerpt.chinese, false);
+  assert.equal(excerpt.lang, "ja");
   const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0];
   assert.equal(item?.title, "《漫画》第 189 話");
   assert.equal(item?.description, undefined);
   const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
+  assert.match(detail, /<html lang="ja">/);
+  assert.match(detail, /:lang\(ja\)\{font-family:/);
   assert.match(detail, /漫画正文图片/);
   assert.doesNotMatch(detail, /不应使用|不应输出的译文/);
   assert.equal(excerptFromPage({
@@ -706,7 +712,7 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
   const html = await response.text();
   assert.match(html, /<title>阅读节选<\/title>/);
   assert.match(html, new RegExp(`href="/read/d/${pageId}"`));
-  assert.match(html, new RegExp(`<li id="${pageId}" tabindex="-1">`));
+  assert.match(html, new RegExp(`<li id="${pageId}" lang="zh-CN" tabindex="-1">`));
   assert.match(html, /li:target/);
   assert.match(html, /AI 时代的 RSS/);
   assert.match(html, /科技 News · 作者：张三 AI/);
@@ -847,6 +853,7 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     originalTitle: "甲 & 乙",
     body: "正文",
     chinese: false,
+    lang: "zh-CN",
     terms: "",
     sourceTitle: "",
     author: "",
@@ -858,7 +865,7 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     pubDate: null,
   }], "/read");
   assert.match(list, /甲 &amp; 乙/);
-  assert.match(list, new RegExp(`<li id="${pageId}" tabindex="-1">`));
+  assert.match(list, new RegExp(`<li id="${pageId}" lang="zh-CN" tabindex="-1">`));
   assert.doesNotMatch(list, /作者：|class="meta"/);
 
   const detail = renderEinkDetail({
@@ -867,6 +874,7 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     originalTitle: "标题",
     body: "一段 <文字>",
     chinese: false,
+    lang: "zh-CN",
     terms: "",
     sourceTitle: "出处",
     author: "作者",
@@ -893,6 +901,7 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
       originalTitle: "标题",
       body: "一段",
       chinese: false,
+      lang: "zh-CN",
       terms: "",
       sourceTitle: "出处",
       author: "作者",
@@ -917,6 +926,7 @@ test("e-ink detail nav links previous and next excerpts beside back to list", ()
     originalTitle: id,
     body: "正文",
     chinese: false,
+    lang: "zh-CN",
     terms: "",
     sourceTitle: "",
     author: "",
@@ -994,6 +1004,7 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     originalTitle: "标题",
     body: "正文",
     chinese: false,
+    lang: "zh-CN",
     terms: "",
     sourceTitle: "",
     author: "",
@@ -1057,6 +1068,7 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
     originalTitle: "Hello世界",
     body: `使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}" />`,
     chinese: false,
+    lang: "zh-CN",
     terms: "API接口\nApplication Programming Interface",
     sourceTitle: "Cloudflare Workers",
     author: "张三AI",

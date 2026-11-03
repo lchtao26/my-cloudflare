@@ -76,6 +76,8 @@ type Excerpt = {
   originalTitle: string;
   body: string;
   chinese: boolean;
+  /** BCP 47 tag for the language of the text shown on /read (not always the source language). */
+  lang: string;
   terms: string;
   sourceTitle: string;
   author: string;
@@ -135,6 +137,15 @@ function selectProperty(properties: NotionPage["properties"], name: string): str
 function usesOriginalContent(properties: NotionPage["properties"]): boolean {
   return selectProperty(properties, "原文语言") === "中文"
     || selectProperty(properties, "内容形态") === "漫画";
+}
+
+/** Language of the text rendered on e-ink pages (translations are Chinese). */
+function excerptDisplayLang(properties: NotionPage["properties"]): string {
+  if (!usesOriginalContent(properties)) return "zh-CN";
+  const language = selectProperty(properties, "原文语言");
+  if (language === "日文") return "ja";
+  if (language === "英文") return "en";
+  return "zh-CN";
 }
 
 function externalUrl(value: string | null | undefined): string | null {
@@ -244,6 +255,7 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
     originalTitle,
     body,
     chinese,
+    lang: excerptDisplayLang(properties),
     terms: textProperty(properties, "专有名词与术语"),
     sourceTitle: textProperty(properties, "出处"),
     author: textProperty(properties, "作者"),
@@ -325,7 +337,11 @@ const EINK_STYLE = [
   "*,*::before,*::after{box-sizing:border-box;animation:none!important;transition:none!important;}",
   "html{-webkit-text-size-adjust:100%;}",
   // Fixed rem gutters + main max-width (no vw); Kindles often ignore CSS min()/max().
-  "body{margin:0;padding:1.25rem 1.25rem 2.5rem;font-family:Georgia,'Times New Roman',serif;font-size:1.125rem;line-height:1.75;color:#000;background:#fff;}",
+  // Base serif for Kindle; named CJK stacks help desktop/phone via :lang (progressive).
+  "body{margin:0;padding:1.25rem 1.25rem 2.5rem;font-family:serif;font-size:1.125rem;line-height:1.75;color:#000;background:#fff;}",
+  ":lang(zh){font-family:\"Songti SC\",\"STSong\",\"SimSun\",\"NSimSun\",\"Noto Serif CJK SC\",\"Source Han Serif SC\",serif;}",
+  ":lang(ja){font-family:\"Hiragino Mincho ProN\",\"Hiragino Mincho Pro\",\"Yu Mincho\",\"YuMincho\",\"MS PMincho\",\"Noto Serif CJK JP\",\"Source Han Serif JP\",serif;}",
+  ":lang(en){font-family:Georgia,\"Times New Roman\",serif;}",
   "body.detail.eink-weight{font-weight:500;}",
   // 6\" Kindle: 365px column. Scribe (≥720px): 36rem + larger type.
   "main{max-width:365px;margin:0 auto;}",
@@ -361,11 +377,18 @@ const EINK_STYLE = [
   ".progress-bar{display:block;height:100%;width:0;background:#000;}",
 ].join("");
 
-function einkDocument(title: string, body: string, panguedTitle = false, afterMain = "", bodyClass = ""): string {
+function einkDocument(
+  title: string,
+  body: string,
+  panguedTitle = false,
+  afterMain = "",
+  bodyClass = "",
+  lang = "zh-CN",
+): string {
   const bodyAttrs = bodyClass ? ` class="${bodyClass}"` : "";
   return [
     "<!DOCTYPE html>",
-    '<html lang="zh-CN">',
+    `<html lang="${htmlText(lang)}">`,
     "<head>",
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
@@ -405,7 +428,7 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
       excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
     ].filter(Boolean).join(" · ");
     return [
-      `<li id="${htmlText(excerpt.id)}" tabindex="-1">`,
+      `<li id="${htmlText(excerpt.id)}" lang="${htmlText(excerpt.lang)}" tabindex="-1">`,
       `<a class="item-link" href="${href}">${einkText(excerpt.title)}</a>`,
       ...(meta ? [`<p class="meta">${meta}</p>`] : []),
       "</li>",
@@ -524,7 +547,7 @@ export function renderEinkDetail(
     excerptDetailBody(excerpt, imageBaseUrl),
     ...(showExternalActions ? [einkActionButtons(excerpt)] : []),
     nav,
-  ].join("\n"), true, EINK_DETAIL_CHROME, showExternalActions ? "detail" : "detail eink-weight");
+  ].join("\n"), true, EINK_DETAIL_CHROME, showExternalActions ? "detail" : "detail eink-weight", excerpt.lang);
 }
 
 async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promise<Excerpt | null> {
