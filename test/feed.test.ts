@@ -791,7 +791,7 @@ test("e-ink detail renders body metadata, action buttons, and reuses the image p
   assert.equal(response.headers.get("Cache-Control"), "private, max-age=300, must-revalidate");
   assert.equal(response.headers.get("Vary"), "User-Agent");
   const html = await response.text();
-  assert.match(html, /body\.detail\.eink-weight\{font-weight:600;\}/);
+  assert.match(html, /body\.detail\.eink-weight\{font-weight:500;\}/);
   assert.match(html, /<body class="detail eink-weight">/);
   assert.match(html, /<title>详情标题<\/title>/);
   assert.match(html, new RegExp(`href="/read#${pageId}"`));

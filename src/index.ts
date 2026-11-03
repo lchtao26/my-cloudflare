@@ -326,12 +326,13 @@ const EINK_STYLE = [
   "html{-webkit-text-size-adjust:100%;}",
   // vw side padding: Kindles often ignore CSS min(); keep declarations simple.
   "body{margin:0;padding:1.25rem 14vw 2.5rem;font-family:Georgia,'Times New Roman',serif;font-size:1.125rem;line-height:1.75;color:#000;background:#fff;}",
-  "body.detail.eink-weight{font-weight:600;}",
+  "body.detail.eink-weight{font-weight:500;}",
   // 6\" Kindle: 365px column + wider gutters. Scribe (≥720px): 36rem + larger type.
   "main{max-width:365px;margin:0 auto;}",
-  "@media (min-width:720px){body{padding:1.25rem 8vw 2.5rem;font-size:1.25rem;}h1{font-size:1.65rem;}.meta{font-size:1.0625rem;}main{max-width:36rem;}}",
-  "h1{font-size:1.5rem;line-height:1.35;font-weight:700;margin:0 0 1rem;}",
+  "h1{font-size:1.5rem;line-height:1.35;font-weight:700;margin:0 0 1rem;text-wrap:balance;}",
   "p{margin:0.85rem 0;text-align:justify;text-justify:inter-ideograph;}",
+  // Keep mixed-language reading text evenly spaced and scale paragraph gaps with its size.
+  "body.detail p{margin:0.85em 0;text-align:left;}",
   "li{margin:0.85rem 0;}",
   "ul{list-style:none;margin:0;padding:0;}",
   "li{border-top:2px solid #000;padding:1rem 0;}",
@@ -343,6 +344,8 @@ const EINK_STYLE = [
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".item-link{display:block;min-height:3rem;font-weight:700;}",
   ".meta{font-size:1rem;}",
+  // Responsive type must follow the base heading/meta rules to win the cascade.
+  "@media (min-width:720px){body{padding:1.25rem 8vw 2.5rem;font-size:1.25rem;}h1{font-size:1.65rem;}.meta{font-size:1.0625rem;}main{max-width:36rem;}}",
   ".nav-row{display:flex;gap:0.5rem;align-items:stretch;margin:0.85rem 0;}",
   ".nav-row a,.nav-row span{flex:1;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.75rem 0.35rem;font-weight:700;text-align:center;text-decoration:underline;}",
   ".nav-row .is-disabled{opacity:0.4;text-decoration:none;}",
