@@ -390,7 +390,7 @@ test("excerpt titles fall back to the original and missing source fields are omi
   assert.equal(item?.title, "节");
   assert.equal(item?.description, undefined);
   const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
-  assert.match(detail, /<p><cite>书<\/cite><\/p>\n<p>正文<\/p>/);
+  assert.match(detail, /<p><cite>书<\/cite><\/p>\n<div class="excerpt-body" lang="zh-CN">\n<p>正文<\/p>/);
   assert.doesNotMatch(detail, /作者：|出版方：|章节：|原标题：|内容类型：|专有名词与术语|阅读原文|javascript:/);
 });
 
@@ -475,6 +475,8 @@ test("Chinese excerpts use the original title and body, not translations", () =>
   assert.equal(excerpt.body, "中文正文");
   assert.equal(excerpt.chinese, true);
   assert.equal(excerpt.lang, "zh-CN");
+  assert.equal(excerpt.titleLang, "zh-CN");
+  assert.equal(excerpt.originalLang, "zh-CN");
   const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0];
   assert.equal(item?.title, "中文标题");
   assert.equal(item?.description, undefined);
@@ -508,11 +510,15 @@ test("Comic excerpts use the original title and body, not translations", () => {
   assert.equal(excerpt.body, "漫画正文图片");
   assert.equal(excerpt.chinese, false);
   assert.equal(excerpt.lang, "ja");
+  assert.equal(excerpt.titleLang, "ja");
+  assert.equal(excerpt.originalLang, "ja");
   const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0];
   assert.equal(item?.title, "《漫画》第 189 話");
   assert.equal(item?.description, undefined);
   const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
-  assert.match(detail, /<html lang="ja">/);
+  assert.match(detail, /<html lang="zh-CN">/);
+  assert.match(detail, /<h1 lang="ja">/);
+  assert.match(detail, /<div class="excerpt-body" lang="ja">/);
   assert.match(detail, /:lang\(ja\)\{font-family:/);
   assert.match(detail, /漫画正文图片/);
   assert.doesNotMatch(detail, /不应使用|不应输出的译文/);
@@ -524,6 +530,50 @@ test("Comic excerpts use the original title and body, not translations", () => {
       "正文翻译": { type: "rich_text", rich_text: [] },
     },
   }), null);
+});
+
+test("translated excerpts keep original titles in their source language and controls in Chinese", () => {
+  for (const [language, lang, title] of [
+    ["日文", "ja", "読書と思考 <script>"],
+    ["英文", "en", "Reading & thinking"],
+  ]) {
+    const page: NotionPage = {
+      id: "407e75a1-639c-81ca-8919-f4bff2a57884",
+      url: "https://www.notion.so/excerpt",
+      properties: {
+        "原文语言": { type: "select", select: { name: language } },
+        "标题": { type: "title", title: [{ plain_text: title }] },
+        "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "中文译文" }] },
+      },
+    };
+    const excerpt = excerptFromPage(page);
+    assert.ok(excerpt);
+    assert.equal(excerpt.lang, "zh-CN");
+    assert.equal(excerpt.titleLang, lang);
+    assert.equal(excerpt.originalLang, lang);
+    const detail = renderEinkDetail(excerpt, "/read", "/read/p");
+    assert.match(detail, /<html lang="zh-CN">/);
+    assert.match(detail, new RegExp(`<h1 lang="${lang}">`));
+    assert.match(detail, /<div class="excerpt-body" lang="zh-CN">\n<p>中文译文<\/p>/);
+    if (lang === "ja") assert.match(detail, /&lt;script&gt;<\/h1>/);
+    assert.match(renderEinkList([excerpt], "/read"), new RegExp(`<li [^>]*lang="${lang}"`));
+
+    page.properties!["标题翻译"] = { type: "rich_text", rich_text: [{ plain_text: "阅读与思考" }] };
+    const translated = excerptFromPage(page);
+    assert.ok(translated);
+    assert.equal(translated.titleLang, "zh-CN");
+    const translatedDetail = renderEinkDetail(translated, "/read", "/read/p");
+    assert.match(translatedDetail, /<h1 lang="zh-CN">阅读与思考<\/h1>/);
+    assert.match(translatedDetail, new RegExp(`原标题：<span lang="${lang}">`));
+    if (lang === "ja") assert.match(translatedDetail, /&lt;script&gt;<\/span>/);
+
+    page.properties!["标题"] = { type: "title", title: [] };
+    page.properties!["标题翻译"] = { type: "rich_text", rich_text: [] };
+    const untitled = excerptFromPage(page);
+    assert.ok(untitled);
+    assert.equal(untitled.title, "无标题");
+    assert.equal(untitled.titleLang, "zh-CN");
+  }
 });
 
 test("Chinese excerpt feed uses the body property without fetching page blocks", async (context) => {
@@ -805,8 +855,8 @@ test("e-ink detail renders body metadata, action buttons, and reuses the image p
   assert.equal(response.headers.get("Cache-Control"), "private, max-age=300, must-revalidate");
   assert.equal(response.headers.get("Vary"), "User-Agent");
   const html = await response.text();
-  assert.match(html, /body\.detail\.eink-weight\{font-weight:500;\}/);
-  assert.match(html, /<body class="detail eink-weight">/);
+  assert.match(html, /<body class="detail">/);
+  assert.doesNotMatch(html, /eink-weight/);
   assert.match(html, /<title>详情标题<\/title>/);
   assert.match(html, new RegExp(`href="/read#${pageId}"`));
   assert.match(html, /class="nav-row"/);
@@ -815,7 +865,7 @@ test("e-ink detail renders body metadata, action buttons, and reuses the image p
   assert.match(html, /<p><cite>某书<\/cite> · 作者：张三<\/p>/);
   assert.match(html, /第一段/);
   assert.match(html, /第二段/);
-  assert.match(html, /原标题：Original &amp; title/);
+  assert.match(html, /原标题：<span lang="zh-CN">Original &amp; title<\/span>/);
   assert.match(html, /出版方：某出版社/);
   assert.match(html, /章节：第一章/);
   assert.match(html, /发布日期：2025-06-12/);
@@ -862,6 +912,8 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     body: "正文",
     chinese: false,
     lang: "zh-CN",
+    titleLang: "zh-CN",
+    originalLang: "zh-CN",
     terms: "",
     sourceTitle: "",
     author: "",
@@ -883,6 +935,8 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     body: "一段 <文字>",
     chinese: false,
     lang: "zh-CN",
+    titleLang: "zh-CN",
+    originalLang: "zh-CN",
     terms: "",
     sourceTitle: "出处",
     author: "作者",
@@ -910,6 +964,8 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
       body: "一段",
       chinese: false,
       lang: "zh-CN",
+      titleLang: "zh-CN",
+      originalLang: "zh-CN",
       terms: "",
       sourceTitle: "出处",
       author: "作者",
@@ -935,6 +991,8 @@ test("e-ink detail nav links previous and next excerpts beside back to list", ()
     body: "正文",
     chinese: false,
     lang: "zh-CN",
+    titleLang: "zh-CN",
+    originalLang: "zh-CN",
     terms: "",
     sourceTitle: "",
     author: "",
@@ -1013,6 +1071,8 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     body: "正文",
     chinese: false,
     lang: "zh-CN",
+    titleLang: "zh-CN",
+    originalLang: "zh-CN",
     terms: "",
     sourceTitle: "",
     author: "",
@@ -1077,6 +1137,8 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
     body: `使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}" />`,
     chinese: false,
     lang: "zh-CN",
+    titleLang: "zh-CN",
+    originalLang: "en",
     terms: "API接口\nApplication Programming Interface",
     sourceTitle: "Cloudflare Workers",
     author: "张三AI",
@@ -1088,10 +1150,10 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
     pubDate: null,
   }, "/read", "https://example.com/read/p", undefined, true);
   assert.match(html, /<title>AI 时代的 RSS<\/title>/);
-  assert.match(html, /<h1>AI 时代的 RSS<\/h1>/);
+  assert.match(html, /<h1 lang="zh-CN">AI 时代的 RSS<\/h1>/);
   assert.match(html, /作者：张三 AI/);
   assert.match(html, /使用 API 处理 2026 年数据/);
-  assert.match(html, /原标题：Hello 世界/);
+  assert.match(html, /原标题：<span lang="en">Hello 世界<\/span>/);
   assert.match(html, /出版方：ABC 出版社/);
   assert.match(html, /章节：Chapter1 章节/);
   assert.match(html, /专有名词与术语/);

@@ -76,8 +76,10 @@ type Excerpt = {
   originalTitle: string;
   body: string;
   chinese: boolean;
-  /** BCP 47 tag for the language of the text shown on /read (not always the source language). */
+  /** BCP 47 tag for the displayed body (translations are Chinese). */
   lang: string;
+  titleLang: string;
+  originalLang: string;
   terms: string;
   sourceTitle: string;
   author: string;
@@ -139,9 +141,8 @@ function usesOriginalContent(properties: NotionPage["properties"]): boolean {
     || selectProperty(properties, "内容形态") === "漫画";
 }
 
-/** Language of the text rendered on e-ink pages (translations are Chinese). */
-function excerptDisplayLang(properties: NotionPage["properties"]): string {
-  if (!usesOriginalContent(properties)) return "zh-CN";
+/** Source language is also needed for original titles alongside Chinese translations. */
+function excerptOriginalLang(properties: NotionPage["properties"]): string {
   const language = selectProperty(properties, "原文语言");
   if (language === "日文") return "ja";
   if (language === "英文") return "en";
@@ -244,18 +245,20 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
   const link = externalUrl(page.url);
   if (!link || !page.id || !body) return null;
   const originalTitle = textProperty(properties, "标题");
+  const translatedTitle = useOriginal ? "" : textProperty(properties, "标题翻译");
+  const originalLang = excerptOriginalLang(properties);
   const originalLink = properties?.["原文链接"];
   const published = properties?.["发布日期"];
   const date = new Date(page.created_time ?? page.last_edited_time ?? "");
   return {
     id: page.id,
-    title: useOriginal
-      ? originalTitle || "无标题"
-      : textProperty(properties, "标题翻译") || originalTitle || "无标题",
+    title: translatedTitle || originalTitle || "无标题",
     originalTitle,
     body,
     chinese,
-    lang: excerptDisplayLang(properties),
+    lang: useOriginal ? originalLang : "zh-CN",
+    titleLang: translatedTitle || !originalTitle ? "zh-CN" : originalLang,
+    originalLang,
     terms: textProperty(properties, "专有名词与术语"),
     sourceTitle: textProperty(properties, "出处"),
     author: textProperty(properties, "作者"),
@@ -315,17 +318,20 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string): string {
     excerpt.sourceTitle ? `<cite>${einkText(excerpt.sourceTitle)}</cite>` : "",
     excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
   ].filter(Boolean).join(" · ");
+  const originalTitle = excerpt.originalTitle && excerpt.originalTitle !== excerpt.title
+    ? `${einkText("原标题：")}<span lang="${htmlText(excerpt.originalLang)}">${einkText(excerpt.originalTitle)}</span>`
+    : "";
   const details = [
-    ["原标题", excerpt.originalTitle !== excerpt.title ? excerpt.originalTitle : ""],
     ["出版方", excerpt.publisher],
     ["章节", excerpt.chapter],
     ["发布日期", excerpt.publishedDate],
   ].filter(([, value]) => value).map(([label, value]) => einkText(`${label}：${value}`));
+  if (originalTitle) details.unshift(originalTitle);
   const body = excerpt.body ? einkParagraphs(excerpt.body, excerpt.id, imageBaseUrl) : "";
   const terms = excerpt.terms ? einkParagraphs(excerpt.terms, excerpt.id, imageBaseUrl) : "";
   return [
     ...(source ? [`<p>${source}</p>`] : []),
-    ...(body ? [body] : []),
+    ...(body ? [`<div class="excerpt-body" lang="${htmlText(excerpt.lang)}">\n${body}\n</div>`] : []),
     "<hr />",
     ...(details.length ? [`<p>${details.join("<br />\n")}</p>`] : []),
     ...(terms ? ["<hr />", `<p>${einkText("专有名词与术语")}</p>`, terms] : []),
@@ -337,18 +343,19 @@ const EINK_STYLE = [
   "*,*::before,*::after{box-sizing:border-box;animation:none!important;transition:none!important;}",
   "html{-webkit-text-size-adjust:100%;}",
   // Fixed rem gutters + main max-width (no vw); Kindles often ignore CSS min()/max().
-  // Base serif for Kindle; named CJK stacks help desktop/phone via :lang (progressive).
-  "body{margin:0;padding:1.25rem 1.25rem 2.5rem;font-family:serif;font-size:1.125rem;line-height:1.75;color:#000;background:#fff;}",
-  ":lang(zh){font-family:\"Songti SC\",\"STSong\",\"SimSun\",\"NSimSun\",\"Noto Serif CJK SC\",\"Source Han Serif SC\",serif;}",
-  ":lang(ja){font-family:\"Hiragino Mincho ProN\",\"Hiragino Mincho Pro\",\"Yu Mincho\",\"YuMincho\",\"MS PMincho\",\"Noto Serif CJK JP\",\"Source Han Serif JP\",serif;}",
+  // Local fonts only: prefer modern CJK families, then native serif faces on older readers.
+  "body{margin:0;padding:1.25rem 1.25rem 2.5rem;font-family:serif;font-size:1.125rem;font-weight:400;line-height:1.75;letter-spacing:normal;text-align:left;word-break:normal;overflow-wrap:break-word;color:#000;background:#fff;}",
+  ":lang(zh){font-family:\"Noto Serif CJK SC\",\"Noto Serif SC\",\"Source Han Serif SC\",\"Source Han Serif CN\",\"Songti SC\",\"STSong\",\"SimSun\",serif;}",
+  ":lang(ja){font-family:\"Noto Serif CJK JP\",\"Noto Serif JP\",\"Source Han Serif\",\"Source Han Serif JP\",\"Hiragino Mincho ProN\",\"Hiragino Mincho Pro\",\"Yu Mincho\",\"YuMincho\",\"MS PMincho\",serif;}",
   ":lang(en){font-family:Georgia,\"Times New Roman\",serif;}",
-  "body.detail.eink-weight{font-weight:500;}",
+  ":lang(zh),:lang(ja){line-break:strict;}",
+  // Pangu already inserts mixed-script spaces; leave unsupported CSS harmless on old readers.
+  "body{text-autospace:no-autospace;}",
   // 6\" Kindle: 365px column. Scribe (≥720px): 36rem + larger type.
   "main{max-width:365px;margin:0 auto;}",
   "h1{font-size:1.5rem;line-height:1.35;font-weight:700;margin:0 0 1rem;}",
-  "p{margin:0.85rem 0;text-align:justify;text-justify:inter-ideograph;}",
   // Keep mixed-language reading text evenly spaced and scale paragraph gaps with its size.
-  "body.detail p{margin:0.85em 0;text-align:left;}",
+  "p{margin:0.85em 0;}",
   "li{margin:0.85rem 0;}",
   "ul{list-style:none;margin:0;padding:0;}",
   "li{border-top:2px solid #000;padding:1rem 0;}",
@@ -384,12 +391,11 @@ function einkDocument(
   panguedTitle = false,
   afterMain = "",
   bodyClass = "",
-  lang = "zh-CN",
 ): string {
   const bodyAttrs = bodyClass ? ` class="${bodyClass}"` : "";
   return [
     "<!DOCTYPE html>",
-    `<html lang="${htmlText(lang)}">`,
+    '<html lang="zh-CN">',
     "<head>",
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
@@ -446,9 +452,9 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
       excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
     ].filter(Boolean).join(" · ");
     return [
-      `<li id="${htmlText(excerpt.id)}" lang="${htmlText(excerpt.lang)}" tabindex="-1">`,
+      `<li id="${htmlText(excerpt.id)}" lang="${htmlText(excerpt.titleLang)}" tabindex="-1">`,
       `<a class="item-link" href="${href}">${einkText(excerpt.title)}</a>`,
-      ...(meta ? [`<p class="meta">${meta}</p>`] : []),
+      ...(meta ? [`<p class="meta" lang="zh-CN">${meta}</p>`] : []),
       "</li>",
     ].join("");
   }).join("\n");
@@ -561,11 +567,13 @@ export function renderEinkDetail(
   const nav = einkNav(listPath, excerpt.id, neighbors);
   return einkDocument(excerpt.title, [
     nav,
-    `<h1>${einkText(excerpt.title)}</h1>`,
+    "<article>",
+    `<h1 lang="${htmlText(excerpt.titleLang)}">${einkText(excerpt.title)}</h1>`,
     excerptDetailBody(excerpt, imageBaseUrl),
+    "</article>",
     ...(showExternalActions ? [einkActionButtons(excerpt)] : []),
     nav,
-  ].join("\n"), true, EINK_DETAIL_CHROME, showExternalActions ? "detail" : "detail eink-weight", excerpt.lang);
+  ].join("\n"), true, EINK_DETAIL_CHROME, "detail");
 }
 
 async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promise<Excerpt | null> {
