@@ -455,7 +455,7 @@ function einkNav(listPath: string, excerptId: string, neighbors?: EinkNeighbors)
   return `<nav class="nav-row">\n${prev}\n${back}\n${next}\n</nav>`;
 }
 
-// Detail pages: tap left/right to page, bottom progress bar, and localStorage resume.
+// Detail pages: touch-oriented tap paging, bottom progress bar, and localStorage resume.
 // Real links/buttons keep their default click behavior.
 const EINK_DETAIL_CHROME = [
   `<div class="progress" aria-hidden="true"><span class="progress-bar" id="progress-bar"></span></div>`,
@@ -490,6 +490,7 @@ const EINK_DETAIL_CHROME = [
   "}",
   "function go(dir){window.scrollBy(0,dir*step());progress();saveNow();}",
   "document.addEventListener('click',function(e){",
+  "if(e.pointerType==='mouse'||(window.matchMedia&&window.matchMedia('(hover: hover) and (pointer: fine)').matches))return;",
   "var el=e.target;",
   "while(el&&el!==document.body){",
   "if(el.tagName==='A'||el.tagName==='BUTTON')return;",

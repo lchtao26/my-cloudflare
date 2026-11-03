@@ -1015,6 +1015,36 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
   assert.match(html, /eink-progress:/);
   assert.match(html, /saveSoon[\s\S]*setTimeout[\s\S]*400/);
   assert.match(html, /pagehide',saveNow/);
+
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
+  assert.ok(script);
+  function simulateClick(desktop: boolean, pointerType?: string, tagName = "P") {
+    let click: (event: object) => void = () => assert.fail("click listener was not registered");
+    const scrolls: number[] = [];
+    const body = {};
+    const document = {
+      body, documentElement: { scrollHeight: 2000 },
+      getElementById: () => null,
+      addEventListener(_name: string, handler: typeof click) { click = handler; },
+    };
+    const window = {
+      innerHeight: 600, innerWidth: 1000, scrollY: 0,
+      matchMedia: () => ({ matches: desktop }),
+      scrollBy: (_x: number, y: number) => scrolls.push(y),
+      addEventListener: () => {},
+    };
+    runInNewContext(script, {
+      window, document, location: { pathname: `/read/d/${pageId}` },
+      localStorage: { getItem: () => null, setItem: () => {} },
+    });
+    click({ target: { tagName, parentNode: body }, clientX: 750, pointerType });
+    return scrolls;
+  }
+  assert.deepEqual(simulateClick(true), []);
+  assert.deepEqual(simulateClick(true, "touch"), []);
+  assert.deepEqual(simulateClick(false, "mouse"), []);
+  assert.deepEqual(simulateClick(false, "touch"), [600]);
+  assert.deepEqual(simulateClick(false, undefined, "A"), []);
 });
 
 test("e-ink detail pangues all visible text without changing image proxy URLs", () => {
