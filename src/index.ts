@@ -345,7 +345,7 @@ const EINK_STYLE = [
   "body.detail.eink-weight{font-weight:500;}",
   // 6\" Kindle: 365px column. Scribe (≥720px): 36rem + larger type.
   "main{max-width:365px;margin:0 auto;}",
-  "h1{font-size:1.5rem;line-height:1.35;font-weight:700;margin:0 0 1rem;text-wrap:balance;}",
+  "h1{font-size:1.5rem;line-height:1.35;font-weight:700;margin:0 0 1rem;}",
   "p{margin:0.85rem 0;text-align:justify;text-justify:inter-ideograph;}",
   // Keep mixed-language reading text evenly spaced and scale paragraph gaps with its size.
   "body.detail p{margin:0.85em 0;text-align:left;}",
