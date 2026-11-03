@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 import { parseRssFeed } from "feedsmith";
 import worker, {
   bookFromPage,
@@ -681,10 +682,10 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
         id: pageId,
         url: "https://www.notion.so/excerpt-1",
         properties: {
-          "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "第一节" }] },
+          "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "AI时代的RSS" }] },
           "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
-          "出处": { type: "rich_text", rich_text: [{ plain_text: "某书" }] },
-          "作者": { type: "rich_text", rich_text: [{ plain_text: "张三" }] },
+          "出处": { type: "rich_text", rich_text: [{ plain_text: "科技News" }] },
+          "作者": { type: "rich_text", rich_text: [{ plain_text: "张三AI" }] },
         },
       }],
       has_more: false,
@@ -707,13 +708,49 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
   assert.match(html, new RegExp(`href="/read/d/${pageId}"`));
   assert.match(html, new RegExp(`<li id="${pageId}" tabindex="-1">`));
   assert.match(html, /li:target/);
-  assert.match(html, /第一节/);
-  assert.match(html, /某书 · 作者：张三/);
+  assert.match(html, /AI 时代的 RSS/);
+  assert.match(html, /科技 News · 作者：张三 AI/);
   assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
   assert.equal((await worker.fetch(new Request("https://example.workers.dev/read"), {
     NOTION_TOKEN: "test",
     NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
   })).status, 503);
+});
+
+test("e-ink list updates its return anchor only for normal article navigation", () => {
+  const html = renderEinkList([], "/read");
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script);
+  let activate: (event: object) => void = () => assert.fail("click listener was not registered");
+  const state = { existing: "preserved" };
+  const replacements: Array<{ state: unknown; url: string }> = [];
+  const history = {
+    state,
+    replaceState(nextState: unknown, _title: string, url: string) {
+      replacements.push({ state: nextState, url });
+    },
+  };
+  runInNewContext(script, {
+    window: { history }, history,
+    location: { pathname: "/read", search: "?source=rss", hash: "#older-article" },
+    document: { addEventListener(_event: string, handler: typeof activate) { activate = handler; } },
+  });
+  const link = {
+    tagName: "A", className: "item-link", target: "", hasAttribute: () => false,
+    parentNode: { tagName: "LI", id: "newer-article" },
+  };
+  const click = { target: { parentNode: link }, button: 0 };
+  activate(click);
+  assert.deepEqual(replacements, [{ state, url: "/read?source=rss#newer-article" }]);
+
+  for (const modifier of ["ctrlKey", "metaKey", "shiftKey", "altKey", "defaultPrevented"]) {
+    activate({ ...click, [modifier]: true });
+  }
+  activate({ ...click, button: 1 });
+  activate({ ...click, target: { ...link, target: "_blank" } });
+  assert.equal(replacements.length, 1);
+  // Browsers without the History API still render ordinary working links.
+  assert.doesNotThrow(() => runInNewContext(script, { window: {} }));
 });
 
 test("e-ink detail renders body metadata, action buttons, and reuses the image proxy", async (context) => {
@@ -751,7 +788,11 @@ test("e-ink detail renders body metadata, action buttons, and reuses the image p
     { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
   );
   assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "private, max-age=300, must-revalidate");
+  assert.equal(response.headers.get("Vary"), "User-Agent");
   const html = await response.text();
+  assert.match(html, /body\.detail\.eink-weight\{font-weight:600;\}/);
+  assert.match(html, /<body class="detail eink-weight">/);
   assert.match(html, /<title>详情标题<\/title>/);
   assert.match(html, new RegExp(`href="/read#${pageId}"`));
   assert.match(html, /class="nav-row"/);
@@ -777,6 +818,7 @@ test("e-ink detail renders body metadata, action buttons, and reuses the image p
     }),
     { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
   )).text();
+  assert.match(appleHtml, /<body class="detail">/);
   assert.match(appleHtml, /class="btn"[^>]*href="https:\/\/example\.com\/original"/);
   assert.match(appleHtml, /class="btn"[^>]*href="https:\/\/www\.notion\.so\/excerpt-1"/);
   assert.match(appleHtml, /阅读原文/);
@@ -792,6 +834,7 @@ test("isAppleUserAgent matches Apple devices only", () => {
   assert.equal(isAppleUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"), true);
   assert.equal(isAppleUserAgent("Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)"), true);
   assert.equal(isAppleUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"), true);
+  assert.equal(isAppleUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_6_3; Silk/1.0.13.81)"), false);
   assert.equal(isAppleUserAgent("Mozilla/5.0 (Linux; Android 10; KFMAWI) AppleWebKit/537.36"), false);
   assert.equal(isAppleUserAgent(""), false);
 });

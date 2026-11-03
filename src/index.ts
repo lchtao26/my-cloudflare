@@ -113,7 +113,7 @@ function displayText(value: string): string {
   return htmlText(value);
 }
 
-/** Visible e-ink detail copy always goes through pangu, then HTML escaping. */
+/** Format visible e-ink text before escaping it for HTML. */
 function einkText(value: string): string {
   return htmlText(pangu.spaceText(value));
 }
@@ -326,7 +326,7 @@ const EINK_STYLE = [
   "html{-webkit-text-size-adjust:100%;}",
   // vw side padding: Kindles often ignore CSS min(); keep declarations simple.
   "body{margin:0;padding:1.25rem 14vw 2.5rem;font-family:Georgia,'Times New Roman',serif;font-size:1.125rem;line-height:1.75;color:#000;background:#fff;}",
-  "body.detail{font-weight:600;}",
+  "body.detail.eink-weight{font-weight:600;}",
   // 6\" Kindle: 365px column + wider gutters. Scribe (≥720px): 36rem + larger type.
   "main{max-width:365px;margin:0 auto;}",
   "@media (min-width:720px){body{padding:1.25rem 8vw 2.5rem;font-size:1.25rem;}h1{font-size:1.65rem;}.meta{font-size:1.0625rem;}main{max-width:36rem;}}",
@@ -339,7 +339,7 @@ const EINK_STYLE = [
   // Fragment return from detail: keep the focused row visible and faintly marked.
   "li[id]{scroll-margin-top:1rem;}",
   "li:target{outline:3px solid #000;outline-offset:3px;}",
-  "a{color:#000;text-decoration:underline;}",
+  "a{color:#000;text-decoration:underline;text-underline-offset:0.2em;}",
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".item-link{display:block;min-height:3rem;font-weight:700;}",
   ".meta{font-size:1rem;}",
@@ -374,16 +374,36 @@ function einkDocument(title: string, body: string, panguedTitle = false, afterMa
   ].join("\n");
 }
 
+// Keep the list's history entry anchored to the article being opened, including
+// when it already has an older fragment from a previous "返回列表" navigation.
+const EINK_LIST_NAV = [
+  "<script>",
+  "(function(){",
+  "if(!window.history||!window.history.replaceState)return;",
+  "document.addEventListener('click',function(e){",
+  "if(e.defaultPrevented||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||(typeof e.button==='number'&&e.button!==0))return;",
+  "var link=e.target;",
+  "while(link&&link!==document.body&&link.tagName!=='A')link=link.parentNode;",
+  "if(!link||link.tagName!=='A'||(' '+link.className+' ').indexOf(' item-link ')<0)return;",
+  "if((link.target&&link.target!=='_self')||link.hasAttribute('download'))return;",
+  "var row=link.parentNode;",
+  "if(!row||row.tagName!=='LI'||!row.id)return;",
+  "try{history.replaceState(history.state,'',location.pathname+location.search+'#'+encodeURIComponent(row.id));}catch(err){}",
+  "},false);",
+  "})();",
+  "</script>",
+].join("\n");
+
 export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
   const items = excerpts.map((excerpt) => {
     const href = htmlText(`${listPath}/d/${excerpt.id}`);
     const meta = [
-      excerpt.sourceTitle ? displayText(excerpt.sourceTitle) : "",
-      excerpt.author ? `作者：${displayText(excerpt.author)}` : "",
+      excerpt.sourceTitle ? einkText(excerpt.sourceTitle) : "",
+      excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
     ].filter(Boolean).join(" · ");
     return [
       `<li id="${htmlText(excerpt.id)}" tabindex="-1">`,
-      `<a class="item-link" href="${href}">${displayText(excerpt.title)}</a>`,
+      `<a class="item-link" href="${href}">${einkText(excerpt.title)}</a>`,
       ...(meta ? [`<p class="meta">${meta}</p>`] : []),
       "</li>",
     ].join("");
@@ -391,12 +411,13 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
   return einkDocument("阅读节选", [
     `<h1>${displayText("阅读节选")}</h1>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
-  ].join("\n"));
+  ].join("\n"), false, EINK_LIST_NAV);
 }
 
 /** Apple browsers only — Kindle/other e-readers should not see external jump buttons. */
 export function isAppleUserAgent(userAgent: string): boolean {
-  return /iPhone|iPad|iPod|Macintosh|Mac OS X/i.test(userAgent);
+  return !/\b(?:Kindle|Silk)\b/i.test(userAgent)
+    && /iPhone|iPad|iPod|Macintosh|Mac OS X/i.test(userAgent);
 }
 
 function einkActionButtons(excerpt: Excerpt): string {
@@ -499,7 +520,7 @@ export function renderEinkDetail(
     excerptDetailBody(excerpt, imageBaseUrl),
     ...(showExternalActions ? [einkActionButtons(excerpt)] : []),
     nav,
-  ].join("\n"), true, EINK_DETAIL_CHROME, "detail");
+  ].join("\n"), true, EINK_DETAIL_CHROME, showExternalActions ? "detail" : "detail eink-weight");
 }
 
 async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promise<Excerpt | null> {
@@ -695,11 +716,12 @@ async function fetchExcerptImage(env: ConfiguredBindings, pageId: string, blockI
   return imageUrl ? fetchImage(imageUrl) : null;
 }
 
-function htmlResponse(body: string | null, method: string): Response {
+function htmlResponse(body: string | null, method: string, variesByDevice = false): Response {
   return new Response(method === "HEAD" ? null : body, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=300, must-revalidate",
+      "Cache-Control": `${variesByDevice ? "private" : "public"}, max-age=300, must-revalidate`,
+      ...(variesByDevice ? { Vary: "User-Agent" } : {}),
       "X-Content-Type-Options": "nosniff",
     },
   });
@@ -762,6 +784,7 @@ const worker = {
             isAppleUserAgent(request.headers.get("User-Agent") ?? ""),
           ),
           request.method,
+          true,
         );
       }
 
