@@ -353,18 +353,19 @@ const EINK_STYLE = [
   "ul{list-style:none;margin:0;padding:0;}",
   "li{border-top:2px solid #000;padding:1rem 0;}",
   "li:last-child{border-bottom:2px solid #000;}",
-  // Fragment return from detail: keep the focused row visible and faintly marked.
-  "li[id]{scroll-margin-top:1rem;}",
+  // Fragment return from detail: no UA focus ring (scroll centering is JS).
+  "li:focus{outline:none;}",
   "li:target{outline:3px solid #000;outline-offset:3px;}",
-  "a{color:#000;text-decoration:underline;text-underline-offset:0.2em;}",
+  "a{color:#000;text-decoration:none;}",
+  "a:hover{text-decoration:underline;text-underline-offset:0.35em;}",
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".item-link{display:block;min-height:3rem;font-weight:700;}",
   ".meta{font-size:1rem;}",
   // Responsive type must follow the base heading/meta rules to win the cascade.
   "@media (min-width:720px){body{font-size:1.25rem;}h1{font-size:1.65rem;}.meta{font-size:1.0625rem;}main{max-width:36rem;}}",
   ".nav-row{display:flex;gap:0.5rem;align-items:stretch;margin:0.85rem 0;}",
-  ".nav-row a,.nav-row span{flex:1;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.75rem 0.35rem;font-weight:700;text-align:center;text-decoration:underline;}",
-  ".nav-row .is-disabled{opacity:0.4;text-decoration:none;}",
+  ".nav-row a,.nav-row span{flex:1;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.75rem 0.35rem;font-weight:700;text-align:center;}",
+  ".nav-row .is-disabled{opacity:0.4;}",
   ".nav-row a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".actions{margin:1.5rem 0;}",
   ".btn{display:block;border:2px solid #000;padding:0.85rem 1rem;margin:0.75rem 0;text-align:center;text-decoration:none;font-weight:700;min-height:3rem;}",
@@ -402,9 +403,26 @@ function einkDocument(
 
 // Keep the list's history entry anchored to the article being opened, including
 // when it already has an older fragment from a previous "返回列表" navigation.
+// Hash targets are scrolled toward the middle of the viewport (not flush top).
 const EINK_LIST_NAV = [
   "<script>",
   "(function(){",
+  "function centerHash(){",
+  "try{",
+  "var hash=window.location&&window.location.hash;",
+  "if(!hash)return;",
+  "var id=decodeURIComponent(hash.slice(1));",
+  "if(!id||!document||typeof document.getElementById!=='function')return;",
+  "var row=document.getElementById(id);",
+  "if(!row||typeof row.scrollIntoView!=='function')return;",
+  "row.scrollIntoView({block:'center'});",
+  "}catch(err){}",
+  "}",
+  "centerHash();",
+  "if(window.addEventListener){",
+  "window.addEventListener('load',centerHash,false);",
+  "window.addEventListener('hashchange',centerHash,false);",
+  "}",
   "if(!window.history||!window.history.replaceState)return;",
   "document.addEventListener('click',function(e){",
   "if(e.defaultPrevented||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||(typeof e.button==='number'&&e.button!==0))return;",

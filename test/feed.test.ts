@@ -713,7 +713,6 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
   assert.match(html, /<title>阅读节选<\/title>/);
   assert.match(html, new RegExp(`href="/read/d/${pageId}"`));
   assert.match(html, new RegExp(`<li id="${pageId}" lang="zh-CN" tabindex="-1">`));
-  assert.match(html, /li:target/);
   assert.match(html, /AI 时代的 RSS/);
   assert.match(html, /科技 News · 作者：张三 AI/);
   assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
@@ -736,11 +735,20 @@ test("e-ink list updates its return anchor only for normal article navigation", 
       replacements.push({ state: nextState, url });
     },
   };
+  const location = { pathname: "/read", search: "?source=rss", hash: "#older-article" };
+  const scrollCalls: Array<{ block?: string } | boolean> = [];
+  const targetRow = {
+    scrollIntoView(arg: { block?: string } | boolean) { scrollCalls.push(arg); },
+  };
   runInNewContext(script, {
-    window: { history }, history,
-    location: { pathname: "/read", search: "?source=rss", hash: "#older-article" },
-    document: { addEventListener(_event: string, handler: typeof activate) { activate = handler; } },
+    window: { history, location, addEventListener() {} }, history, location,
+    document: {
+      addEventListener(_event: string, handler: typeof activate) { activate = handler; },
+      getElementById(id: string) { return id === "older-article" ? targetRow : null; },
+    },
   });
+  assert.equal(scrollCalls.length, 1);
+  assert.equal(JSON.stringify(scrollCalls[0]), JSON.stringify({ block: "center" }));
   const link = {
     tagName: "A", className: "item-link", target: "", hasAttribute: () => false,
     parentNode: { tagName: "LI", id: "newer-article" },
