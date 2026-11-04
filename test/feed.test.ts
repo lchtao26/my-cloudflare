@@ -1097,17 +1097,20 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
 
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
   assert.ok(script);
-  function simulateClick(desktop: boolean, pointerType?: string, tagName = "P") {
-    let click: (event: object) => void = () => assert.fail("click listener was not registered");
+  function setupPaging(desktop: boolean, pointerEvents = true) {
+    const handlers = new Map<string, (event: object) => void>();
     const scrolls: number[] = [];
     const body = {};
+    let selected = false;
     const document = {
       body, documentElement: { scrollHeight: 2000 },
       getElementById: () => null,
-      addEventListener(_name: string, handler: typeof click) { click = handler; },
+      addEventListener(name: string, handler: (event: object) => void) { handlers.set(name, handler); },
     };
     const window = {
       innerHeight: 600, innerWidth: 1000, scrollY: 0,
+      PointerEvent: pointerEvents ? class {} : undefined,
+      getSelection: () => ({ rangeCount: 1, isCollapsed: !selected }),
       matchMedia: () => ({ matches: desktop }),
       scrollBy: (_x: number, y: number) => scrolls.push(y),
       addEventListener: () => {},
@@ -1116,14 +1119,49 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
       window, document, location: { pathname: `/read/d/${pageId}` },
       localStorage: { getItem: () => null, setItem: () => {} },
     });
-    click({ target: { tagName, parentNode: body }, clientX: 750, pointerType });
-    return scrolls;
+    function dispatch(name: string, event: object) {
+      const handler = handlers.get(name);
+      assert.ok(handler, `${name} listener was not registered`);
+      handler(event);
+    }
+    return {
+      scrolls,
+      selectText(value: boolean) { selected = value; },
+      startTap() { dispatch(pointerEvents ? "pointerdown" : "touchstart", {}); },
+      click(pointerType?: string, tagName = "P", clientX = 750) {
+        dispatch("click", { target: { tagName, parentNode: body }, clientX, pointerType });
+      },
+    };
   }
-  assert.deepEqual(simulateClick(true), []);
-  assert.deepEqual(simulateClick(true, "touch"), []);
-  assert.deepEqual(simulateClick(false, "mouse"), []);
-  assert.deepEqual(simulateClick(false, "touch"), [600]);
-  assert.deepEqual(simulateClick(false, undefined, "A"), []);
+
+  const desktop = setupPaging(true);
+  desktop.click();
+  desktop.click("touch");
+  assert.deepEqual(desktop.scrolls, []);
+
+  const touch = setupPaging(false);
+  touch.click("mouse");
+  touch.click(undefined, "A");
+  assert.deepEqual(touch.scrolls, []);
+
+  for (const pointerEvents of [true, false]) {
+    const paging = setupPaging(false, pointerEvents);
+    paging.startTap();
+    paging.selectText(true);
+    paging.click("touch");
+    assert.deepEqual(paging.scrolls, [], "a long press may still dispatch a click");
+
+    paging.startTap();
+    paging.selectText(false);
+    paging.click("touch");
+    assert.deepEqual(paging.scrolls, [], "the dismissing tap can clear the selection before click");
+
+    paging.startTap();
+    paging.click("touch");
+    paging.startTap();
+    paging.click("touch", "P", 250);
+    assert.deepEqual(paging.scrolls, [600, -600]);
+  }
 });
 
 test("e-ink detail pangues all visible text without changing image proxy URLs", () => {
