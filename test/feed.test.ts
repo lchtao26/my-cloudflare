@@ -1117,6 +1117,7 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     const scrolls: number[] = [];
     const body = {};
     let selected = false;
+    let now = 1000;
     const document = {
       body, documentElement: { scrollHeight: 2000 },
       getElementById: () => null,
@@ -1132,6 +1133,7 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     };
     runInNewContext(script, {
       window, document, location: { pathname: `/read/d/${pageId}` },
+      Date: { now: () => now },
       localStorage: { getItem: () => null, setItem: () => {} },
     });
     function dispatch(name: string, event: object) {
@@ -1142,7 +1144,18 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     return {
       scrolls,
       selectText(value: boolean) { selected = value; },
-      startTap() { dispatch(pointerEvents ? "pointerdown" : "touchstart", {}); },
+      advance(milliseconds: number) { now += milliseconds; },
+      startPointer() { dispatch("pointerdown", {}); },
+      startTouch(x = 750, y = 200) { dispatch("touchstart", { touches: [{ clientX: x, clientY: y }] }); },
+      moveTouch(x: number, y: number) { dispatch("touchmove", { touches: [{ clientX: x, clientY: y }] }); },
+      endTouch(x = 750, y = 200, tagName = "P") {
+        let prevented = false;
+        dispatch("touchend", {
+          target: { tagName, parentNode: body }, touches: [], changedTouches: [{ clientX: x, clientY: y }],
+          cancelable: true, preventDefault() { prevented = true; },
+        });
+        return prevented;
+      },
       click(pointerType?: string, tagName = "P", clientX = 750) {
         dispatch("click", { target: { tagName, parentNode: body }, clientX, pointerType });
       },
@@ -1161,22 +1174,61 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
 
   for (const pointerEvents of [true, false]) {
     const paging = setupPaging(false, pointerEvents);
-    paging.startTap();
+    paging.startPointer();
     paging.selectText(true);
     paging.click("touch");
     assert.deepEqual(paging.scrolls, [], "a long press may still dispatch a click");
 
-    paging.startTap();
+    paging.startPointer();
     paging.selectText(false);
     paging.click("touch");
     assert.deepEqual(paging.scrolls, [], "the dismissing tap can clear the selection before click");
 
-    paging.startTap();
+    paging.startPointer();
     paging.click("touch");
-    paging.startTap();
+    paging.startPointer();
     paging.click("touch", "P", 250);
     assert.deepEqual(paging.scrolls, [600, -600]);
   }
+
+  for (const pointerEvents of [true, false]) {
+    const paging = setupPaging(false, pointerEvents);
+    paging.startTouch();
+    assert.equal(paging.endTouch(), true, "paging suppresses the subsequent native click");
+    paging.click("mouse");
+    assert.deepEqual(paging.scrolls, [600], "a touch and its synthetic click scroll only once");
+
+    paging.startTouch(250);
+    paging.endTouch(250);
+    assert.deepEqual(paging.scrolls, [600, -600]);
+
+    paging.startTouch();
+    paging.moveTouch(750, 250);
+    assert.equal(paging.endTouch(750, 250), false);
+    paging.click("touch");
+    assert.deepEqual(paging.scrolls, [600, -600], "swiping does not trigger paging");
+
+    paging.startTouch();
+    paging.advance(800);
+    paging.endTouch();
+    assert.deepEqual(paging.scrolls, [600, -600], "a long press does not trigger paging");
+
+    paging.selectText(true);
+    paging.startTouch();
+    paging.selectText(false);
+    assert.equal(paging.endTouch(), false);
+    paging.click("mouse");
+    assert.deepEqual(paging.scrolls, [600, -600], "dismissing a selection does not trigger paging");
+
+    paging.startTouch();
+    assert.equal(paging.endTouch(750, 200, "A"), false);
+    assert.deepEqual(paging.scrolls, [600, -600], "links keep their native behavior");
+  }
+
+  const hybrid = setupPaging(true);
+  hybrid.startTouch();
+  hybrid.endTouch();
+  assert.deepEqual(hybrid.scrolls, [600], "touch works on devices with a mouse or trackpad");
 });
 
 test("e-ink detail pangues all visible text without changing image proxy URLs", () => {
