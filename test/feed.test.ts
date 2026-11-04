@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { parseRssFeed } from "feedsmith";
+import { formatText } from "../src/format-text.ts";
 import worker, {
   bookFromPage,
   excerptFromPage,
@@ -663,26 +664,38 @@ test("detail pages turn captioned notion image wrappers into proxied images and 
   assert.doesNotMatch(detail, /©文藝春秋|notion-file-block|<image|<\/image>/);
 });
 
-test("RSS item titles are pangued; descriptions keep original spacing", () => {
+test("text formatting handles nested quotes, markup, and English apostrophes", () => {
+  assert.equal(formatText("他说：“使用‘AI工具’。”"), "他说：「使用『AI 工具』。」");
+  assert.equal(formatText("‘单独引用’和\"中文\""), "「单独引用」和「中文」");
+  assert.equal(formatText("他说：「已经『格式化』。」"), "他说：「已经『格式化』。」");
+  assert.equal(formatText("『已有引号』"), "『已有引号』");
+  assert.equal(formatText("英文 don't 和 ‘it’s’"), "英文 don't 和 「it’s」");
+  assert.equal(formatText('The "English" title'), 'The "English" title');
+  assert.equal(formatText('中文 <span title="文字">“AI技术”</span> https://example.com/中文'),
+    '中文 <span title="文字">「AI 技术」</span> https://example.com/中文');
+  assert.equal(formatText("未闭合的“引号"), "未闭合的 “引号");
+});
+
+test("RSS item titles are formatted; descriptions keep original spacing", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: {
-    "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "AI时代的RSS" }] },
+    "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "“AI时代的RSS”" }] },
     "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "使用API处理2026年数据。" }] },
     "出处": { type: "rich_text", rich_text: [{ plain_text: "Cloudflare Workers" }] },
   } });
   assert.ok(excerpt);
   const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read/rss")).items?.[0];
-  assert.equal(item?.title, "AI 时代的 RSS");
+  assert.equal(item?.title, "「AI 时代的 RSS」");
   assert.equal(item?.description, undefined);
   assert.equal(item?.link, `https://example.com/read/d/${pageId}`);
   const book = bookFromPage({ ...page, properties: {
     ...page.properties,
-    "书名": { type: "title", title: [{ plain_text: "AI时代的RSS" }] },
+    "书名": { type: "title", title: [{ plain_text: "“AI时代的RSS”" }] },
     "简介": { type: "rich_text", rich_text: [{ plain_text: "保留API与2026年之间的原始排版 & <文字>" }] },
   } });
   assert.ok(book);
   const bookItem = parseRssFeed(renderFeed([book], "https://example.com/book/rss")).items?.[0];
-  assert.equal(bookItem?.title, "AI 时代的 RSS");
+  assert.equal(bookItem?.title, "「AI 时代的 RSS」");
   assert.match(bookItem?.description ?? "", /保留API与2026年之间的原始排版 &amp; &lt;文字&gt;/);
 });
 
@@ -1172,7 +1185,7 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
     id: pageId,
     title: "AI时代的RSS",
     originalTitle: "Hello世界",
-    body: `使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}" />`,
+    body: `“使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}" />\n\n结束。”`,
     chinese: false,
     lang: "zh-CN",
     titleLang: "zh-CN",
@@ -1191,6 +1204,8 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
   assert.match(html, /<h1 lang="zh-CN">AI 时代的 RSS<\/h1>/);
   assert.match(html, /作者：张三 AI/);
   assert.match(html, /使用 API 处理 2026 年数据/);
+  assert.match(html, /<p>「使用 API 处理 2026 年数据。<\/p>/);
+  assert.match(html, /<p>结束。」<\/p>/);
   assert.match(html, /原标题：<span lang="en">Hello 世界<\/span>/);
   assert.match(html, /出版方：ABC 出版社/);
   assert.match(html, /章节：Chapter1 章节/);

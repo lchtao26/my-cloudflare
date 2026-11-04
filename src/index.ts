@@ -1,5 +1,5 @@
 import { generateRssFeed, type RssFeed } from "feedsmith";
-import pangu from "pangu";
+import { formatText } from "./format-text.ts";
 
 const NOTION_VERSION = "2026-03-11";
 const FEED_TITLE = "书籍推荐";
@@ -119,7 +119,7 @@ function displayText(value: string): string {
 
 /** Format visible e-ink text before escaping it for HTML. */
 function einkText(value: string): string {
-  return htmlText(pangu.spaceText(value));
+  return htmlText(formatText(value));
 }
 
 function textProperty(properties: NotionPage["properties"], name: string): string {
@@ -216,7 +216,7 @@ function itemDescription(book: Book, feedUrl: string): string {
 export function renderFeed(books: Book[], feedUrl: string): string {
   const items: Array<RssFeed.Item<Date>> = books.map((book) => {
     const item: RssFeed.Item<Date> = {
-      title: pangu.spaceText(book.title),
+      title: formatText(book.title),
       link: book.link,
       description: itemDescription(book, feedUrl),
       guid: { value: `notion:${book.id}`, isPermaLink: false },
@@ -301,7 +301,7 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
     atom: { links: [{ href: feedUrl, rel: "self", type: "application/rss+xml" }] },
     items: excerpts.map((excerpt) => {
       const item: RssFeed.Item<Date> = {
-        title: pangu.spaceText(excerpt.title),
+        title: formatText(excerpt.title),
         link: excerptDetailUrl(feedUrl, excerpt.id),
         guid: { value: `notion:${excerpt.id}`, isPermaLink: false },
       };
@@ -606,8 +606,8 @@ async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promis
 function einkParagraphs(translation: string, pageId: string, imageBaseUrl: string): string {
   // Existing translations contain literal <br /> separators. Interpret only
   // attribute-free line breaks; all other markup remains escaped text.
-  // Visible text is pangued; image proxy URLs stay untouched.
-  return translation.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim()
+  // Format the whole passage so quotations can span paragraphs and images.
+  return formatText(translation.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim())
     .split(/\n(?:[^\S\n]*\n)+/)
     .map((paragraph) => {
       let output = "";
@@ -617,11 +617,11 @@ function einkParagraphs(translation: string, pageId: string, imageBaseUrl: strin
         const fileId = match[2];
         if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
         // Caption text inside <image>...</image> is ignored; only the file reference is used.
-        output += einkText(paragraph.slice(offset, match.index)).replaceAll("\n", "<br />\n");
+        output += htmlText(paragraph.slice(offset, match.index)).replaceAll("\n", "<br />\n");
         output += `<img src="${htmlText(`${imageBaseUrl}/${pageId}/${blockId}`)}" alt="${einkText("正文图片")}" />`;
         offset = match.index + match[0].length;
       }
-      return `<p>${output}${einkText(paragraph.slice(offset)).replaceAll("\n", "<br />\n")}</p>`;
+      return `<p>${output}${htmlText(paragraph.slice(offset)).replaceAll("\n", "<br />\n")}</p>`;
     })
     .join("\n");
 }
