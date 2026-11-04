@@ -606,8 +606,13 @@ async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promis
 function einkParagraphs(translation: string, pageId: string, imageBaseUrl: string): string {
   // Existing translations contain literal <br /> separators. Interpret only
   // attribute-free line breaks; all other markup remains escaped text.
+  // Captions are not displayed, so exclude them before processing quotes and paragraphs.
+  const withoutCaptions = translation.replace(IMAGE_TAG, (match, blockId: string, fileId: string) => {
+    if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) return match;
+    return match.replace(/>[\s\S]*<\/image>$/i, "></image>");
+  });
   // Format the whole passage so quotations can span paragraphs and images.
-  return formatText(translation.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim())
+  return formatText(withoutCaptions.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim())
     .split(/\n(?:[^\S\n]*\n)+/)
     .map((paragraph) => {
       let output = "";

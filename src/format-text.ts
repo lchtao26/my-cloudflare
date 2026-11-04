@@ -22,9 +22,10 @@ export function formatText(value: string): string {
       const text = parts[part]!;
       for (let index = 0; index < text.length; index++) {
         const quote = text[index]!;
-        if ((quote === "'" || quote === "’") && /[a-z0-9]/i.test(text[index - 1] ?? "") && /[a-z0-9]/i.test(text[index + 1] ?? "")) continue;
-
         const previous = stack[stack.length - 1];
+        if ((quote === "'" || quote === "’") && /[a-z0-9]/i.test(text[index - 1] ?? "")) {
+          if (/[a-z0-9]/i.test(text[index + 1] ?? "") || (quote === "'" && previous?.quote !== "'")) continue;
+        }
         if (previous && CLOSING_QUOTES[previous.quote] === quote) {
           const depth = stack.length - 1;
           if (previous.quote !== "「" && previous.quote !== "『") {

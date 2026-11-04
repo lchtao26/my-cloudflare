@@ -670,6 +670,8 @@ test("text formatting handles nested quotes, markup, and English apostrophes", (
   assert.equal(formatText("他说：「已经『格式化』。」"), "他说：「已经『格式化』。」");
   assert.equal(formatText("『已有引号』"), "『已有引号』");
   assert.equal(formatText("英文 don't 和 ‘it’s’"), "英文 don't 和 「it’s」");
+  assert.equal(formatText("他说：\u201c这是 James' book。\u201d"), "他说：「这是 James' book。」");
+  assert.equal(formatText("他说：\u201c这是 'Alice' 的书。\u201d"), "他说：「这是 『Alice』 的书。」");
   assert.equal(formatText('The "English" title'), 'The "English" title');
   assert.equal(formatText('中文 <span title="文字">“AI技术”</span> https://example.com/中文'),
     '中文 <span title="文字">「AI 技术」</span> https://example.com/中文');
@@ -1185,7 +1187,7 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
     id: pageId,
     title: "AI时代的RSS",
     originalTitle: "Hello世界",
-    body: `“使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}" />\n\n结束。”`,
+    body: `“使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}">图片说明“<br /><br />文字</image>\n\n结束。”`,
     chinese: false,
     lang: "zh-CN",
     titleLang: "zh-CN",
