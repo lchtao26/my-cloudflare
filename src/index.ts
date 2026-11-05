@@ -396,7 +396,8 @@ const EINK_STYLE = [
   // Fragment return from detail: no UA focus ring (scroll centering is JS).
   "li:focus{outline:none;}",
   "li:target{position:relative;padding-left:0.9rem;}",
-  "li:target::before{content:\"\";position:absolute;left:0;top:1.35rem;width:0;height:0;border-top:0.35em solid transparent;border-bottom:0.35em solid transparent;border-left:0.55em solid #000;}",
+  // Center the marker on the title's first line; retain the old offset for older readers.
+  "li:target::before{content:\"\";position:absolute;left:0;top:1.35rem;top:calc(1rem + 0.525em);width:0;height:0;border-top:0.35em solid transparent;border-bottom:0.35em solid transparent;border-left:0.55em solid #000;}",
   "a{color:#000;text-decoration:none;}",
   "a:hover{text-decoration:underline;text-underline-offset:0.35em;}",
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
