@@ -13,6 +13,39 @@ const READ_FEED_PATH = "/read/rss";
 const READ_ASSET_PREFIX = "/read/p";
 const FEED_ITEM_LIMIT = 30;
 
+const READ_CATEGORIES = [
+  { id: "all", label: "全部" },
+  { id: "weekly", label: "周刊" },
+  { id: "novel", label: "小说" },
+  { id: "news", label: "新闻" },
+] as const;
+type ReadCategory = typeof READ_CATEGORIES[number]["id"];
+
+function readCategory(value: string | null): ReadCategory {
+  return READ_CATEGORIES.find((category) => category.id === value)?.id ?? "all";
+}
+
+function categorySearch(category: ReadCategory, page = 1): string {
+  const params = new URLSearchParams();
+  if (category !== "all") params.set("category", category);
+  if (page > 1) params.set("page", String(page));
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+function categoryFilter(category: ReadCategory): object | undefined {
+  if (category === "novel") return { property: "提取来源", select: { equals: "epub" } };
+  if (category === "weekly") return { or: [
+    { property: "原文链接", url: { contains: "bunshun.jp" } },
+    { property: "备注", rich_text: { contains: "bunshun.jp" } },
+  ] };
+  if (category === "news") return { or: [
+    { property: "原文链接", url: { contains: "news.ycombinator.com" } },
+    { property: "备注", rich_text: { starts_with: "HN " } },
+  ] };
+  return undefined;
+}
+
 type RichText = { plain_text?: string; text?: { content?: string } };
 
 type NotionFile = {
@@ -368,6 +401,9 @@ const EINK_STYLE = [
   "a:hover{text-decoration:underline;text-underline-offset:0.35em;}",
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".item-link{display:block;min-height:3rem;font-weight:700;}",
+  ".categories{display:flex;gap:0.25rem;margin:0 0 1rem;}",
+  ".categories a{flex:1;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.5rem 0.15rem;border:2px solid #000;font-weight:700;text-align:center;}",
+  ".categories a[aria-current=page]{background:#000;color:#fff;}",
   ".meta{font-size:1rem;}",
   // Responsive type must follow the base heading/meta rules to win the cascade.
   "@media (min-width:720px){body{font-size:1.25rem;}h1{font-size:1.65rem;}.meta{font-size:1.0625rem;}main{max-width:36rem;}}",
@@ -445,9 +481,9 @@ const EINK_LIST_NAV = [
   "</script>",
 ].join("\n");
 
-export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
+export function renderEinkList(excerpts: Excerpt[], listPath: string, category: ReadCategory = "all", page = 1, hasMore = false): string {
   const items = excerpts.map((excerpt) => {
-    const href = htmlText(`${listPath}/d/${excerpt.id}`);
+    const href = htmlText(`${listPath}/d/${excerpt.id}${categorySearch(category, page)}`);
     const meta = [
       excerpt.sourceTitle ? einkText(excerpt.sourceTitle) : "",
       excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
@@ -461,7 +497,11 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string): string {
   }).join("\n");
   return einkDocument("阅读节选", [
     `<h1>${displayText("阅读节选")}</h1>`,
+    `<nav class="categories" aria-label="阅读分类">${READ_CATEGORIES.map((item) =>
+      `<a href="${htmlText(`${listPath}${categorySearch(item.id)}`)}"${item.id === category ? ' aria-current="page"' : ""}>${item.label}</a>`
+    ).join("")}</nav>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
+    ...(hasMore ? [`<a class="btn" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}${excerpts.length ? `#${excerpts[excerpts.length - 1]!.id}` : ""}`)}">加载更多</a>`] : []),
   ].join("\n"), false, EINK_LIST_NAV);
 }
 
@@ -495,14 +535,14 @@ export function neighborsFor(excerpts: Excerpt[], pageId: string): EinkNeighbors
   };
 }
 
-function einkNav(listPath: string, excerptId: string, neighbors?: EinkNeighbors): string {
+function einkNav(listPath: string, excerptId: string, neighbors?: EinkNeighbors, category: ReadCategory = "all", page = 1): string {
   const prev = neighbors?.prevId
-    ? `<a href="${htmlText(`${listPath}/d/${neighbors.prevId}`)}">${einkText("上一篇")}</a>`
+    ? `<a href="${htmlText(`${listPath}/d/${neighbors.prevId}${categorySearch(category, page)}`)}">${einkText("上一篇")}</a>`
     : `<span class="is-disabled">${einkText("上一篇")}</span>`;
   const next = neighbors?.nextId
-    ? `<a href="${htmlText(`${listPath}/d/${neighbors.nextId}`)}">${einkText("下一篇")}</a>`
+    ? `<a href="${htmlText(`${listPath}/d/${neighbors.nextId}${categorySearch(category, page)}`)}">${einkText("下一篇")}</a>`
     : `<span class="is-disabled">${einkText("下一篇")}</span>`;
-  const back = `<a href="${htmlText(`${listPath}#${excerptId}`)}">${einkText("返回列表")}</a>`;
+  const back = `<a href="${htmlText(`${listPath}${categorySearch(category, page)}#${excerptId}`)}">${einkText("返回列表")}</a>`;
   return `<nav class="nav-row">\n${prev}\n${back}\n${next}\n</nav>`;
 }
 
@@ -603,8 +643,10 @@ export function renderEinkDetail(
   imageBaseUrl: string,
   neighbors?: EinkNeighbors,
   showExternalActions = false,
+  category: ReadCategory = "all",
+  page = 1,
 ): string {
-  const nav = einkNav(listPath, excerpt.id, neighbors);
+  const nav = einkNav(listPath, excerpt.id, neighbors, category, page);
   return einkDocument(excerpt.title, [
     nav,
     "<article>",
@@ -716,7 +758,7 @@ export function viewQueryFilter(view: NotionView): object | undefined {
   return { and: parts };
 }
 
-async function fetchExcerptPages(env: ConfiguredBindings, viewId: string): Promise<NotionPage[]> {
+async function fetchExcerptPages(env: ConfiguredBindings, viewId: string, category: ReadCategory = "all", limit = FEED_ITEM_LIMIT): Promise<NotionPage[]> {
   // Read the saved view filter, quick filters, and sort, then query the data source for full pages.
   // This stays linked to the Notion RSS view without N+1 page fetches (which hit rate limits).
   const headers = {
@@ -730,14 +772,18 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string): Promi
   if (!dataSourceId) throw new Error("Notion view is missing a data source");
 
   const pages: NotionPage[] = [];
-  const filter = viewQueryFilter(view);
+  const viewFilter = viewQueryFilter(view);
+  const selectedFilter = categoryFilter(category);
+  const filter = viewFilter && selectedFilter
+    ? { and: [...("and" in viewFilter && Array.isArray(viewFilter.and) ? viewFilter.and : [viewFilter]), selectedFilter] }
+    : viewFilter ?? selectedFilter;
   let cursor: string | null | undefined;
   do {
     const response = await fetchNotionJson(`https://api.notion.com/v1/data_sources/${encodeURIComponent(dataSourceId)}/query`, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
-        page_size: FEED_ITEM_LIMIT - pages.length,
+        page_size: Math.min(100, limit - pages.length),
         // No saved sort means the table's own order. Don't replace it with last_edited_time.
         ...(view.sorts?.length ? { sorts: view.sorts } : {}),
         ...(filter ? { filter } : {}),
@@ -750,9 +796,9 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string): Promi
     pages.push(...data.results ?? []);
     cursor = data.has_more ? data.next_cursor : null;
     if (data.has_more && !cursor) throw new Error("Notion returned an incomplete page without a cursor");
-  } while (cursor && pages.length < FEED_ITEM_LIMIT);
+  } while (cursor && pages.length < limit);
 
-  return pages.slice(0, FEED_ITEM_LIMIT);
+  return pages.slice(0, limit);
 }
 
 function coverIdFromPath(pathname: string): string | null {
@@ -828,6 +874,9 @@ function htmlResponse(body: string | null, method: string, variesByDevice = fals
 const worker = {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
+    const category = readCategory(url.searchParams.get("category"));
+    const pageParam = url.searchParams.get("page");
+    const page = pageParam && /^[1-9]\d{0,2}$/.test(pageParam) ? Number(pageParam) : 1;
     const coverId = coverIdFromPath(url.pathname);
     const isBookFeed = url.pathname === BOOK_FEED_PATH;
     const isExcerptFeed = url.pathname === READ_FEED_PATH;
@@ -868,7 +917,7 @@ const worker = {
         // Load the RSS-view list in parallel so prev/next follow the same order as /read.
         const excerptPromise = fetchExcerptById(configured, einkDetailId);
         const listPromise = excerptsViewId
-          ? fetchExcerptPages(configured, excerptsViewId).then((pages) =>
+          ? fetchExcerptPages(configured, excerptsViewId, category, page * FEED_ITEM_LIMIT).then((pages) =>
             pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null))
           : Promise.resolve([] as Excerpt[]);
         const [excerpt, list] = await Promise.all([excerptPromise, listPromise]);
@@ -880,6 +929,8 @@ const worker = {
             `${url.origin}${READ_ASSET_PREFIX}`,
             neighborsFor(list, excerpt.id),
             isAppleUserAgent(request.headers.get("User-Agent") ?? ""),
+            category,
+            page,
           ),
           request.method,
           true,
@@ -887,10 +938,12 @@ const worker = {
       }
 
       if (isEinkList) {
-        const excerpts = (await fetchExcerptPages(configured, excerptsViewId!))
+        const limit = page * FEED_ITEM_LIMIT;
+        const pages = await fetchExcerptPages(configured, excerptsViewId!, category, limit + 1);
+        const excerpts = pages.slice(0, limit)
           .map(excerptFromPage)
           .filter((item): item is Excerpt => item !== null);
-        return htmlResponse(renderEinkList(excerpts, READ_LIST_PATH), request.method);
+        return htmlResponse(renderEinkList(excerpts, READ_LIST_PATH, category, page, pages.length > limit && page < 999), request.method);
       }
 
       const feedUrl = `${url.origin}${url.pathname}`;

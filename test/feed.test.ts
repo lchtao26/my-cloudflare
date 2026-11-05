@@ -787,6 +787,91 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
   })).status, 503);
 });
 
+test("e-ink categories filter the view and preserve navigation context", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const pageId = "407e75a1-639c-81ca-8919-f4bff2a57884";
+  const nextId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+  const makePage = (id: string) => ({
+    id, url: `https://www.notion.so/${id}`,
+    parent: { type: "data_source_id", data_source_id: "source" },
+    properties: {
+      "标题翻译": { type: "rich_text", rich_text: [{ plain_text: id }] },
+      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
+    },
+  });
+  const queries: Array<{ filter?: object }> = [];
+  const viewFilter = { property: "正文翻译", rich_text: { is_not_empty: true } };
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const href = String(url);
+    if (href.includes("/views/")) return Response.json({ data_source_id: "source", filter: viewFilter });
+    if (href.includes("/pages/")) return Response.json(makePage(pageId));
+    queries.push(JSON.parse(String(init?.body)));
+    return Response.json({ results: [makePage(pageId), makePage(nextId)], has_more: false });
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
+  for (const [category, label, marker] of [
+    ["weekly", "周刊", "bunshun.jp"],
+    ["novel", "小说", "epub"],
+    ["news", "新闻", "news.ycombinator.com"],
+  ]) {
+    const response = await worker.fetch(new Request(`https://example.com/read?category=${category}`), env);
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, new RegExp(`aria-current="page">${label}</a>`));
+    assert.match(html, new RegExp(`/read/d/${pageId}\\?category=${category}`));
+    assert.match(JSON.stringify(queries.at(-1)?.filter), new RegExp(marker.replaceAll(".", "\\.")));
+    assert.match(JSON.stringify(queries.at(-1)?.filter), /正文翻译/);
+  }
+  const detail = await worker.fetch(new Request(`https://example.com/read/d/${pageId}?category=weekly`), env);
+  const html = await detail.text();
+  assert.match(html, new RegExp(`/read\\?category=weekly#${pageId}`));
+  assert.match(html, new RegExp(`/read/d/${nextId}\\?category=weekly`));
+  assert.match(JSON.stringify(queries.at(-1)?.filter), /bunshun\.jp/);
+
+  const fallback = await worker.fetch(new Request("https://example.com/read?category=unknown"), env);
+  assert.match(await fallback.text(), /aria-current="page">全部<\/a>/);
+  assert.deepEqual(queries.at(-1)?.filter, viewFilter);
+});
+
+test("e-ink list loads more within its category and keeps the expanded list on return", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const pageId = (index: number) => `407e75a1-639c-81ca-8919-${String(index).padStart(12, "0")}`;
+  const pages = Array.from({ length: 65 }, (_, index) => ({
+    id: pageId(index), url: `https://www.notion.so/${pageId(index)}`,
+    parent: { type: "data_source_id", data_source_id: "source" },
+    properties: {
+      "标题翻译": { type: "rich_text", rich_text: [{ plain_text: `文章${index}` }] },
+      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
+    },
+  }));
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const href = String(url);
+    if (href.includes("/views/")) return Response.json({ data_source_id: "source" });
+    if (href.includes("/pages/")) return Response.json(pages[40]);
+    const query = JSON.parse(String(init?.body));
+    const start = Number(query.start_cursor ?? 0);
+    const end = Math.min(start + query.page_size, pages.length);
+    return Response.json({ results: pages.slice(start, end), has_more: end < pages.length, next_cursor: end < pages.length ? String(end) : null });
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
+  const get = async (path: string) => (await worker.fetch(new Request(`https://example.com${path}`), env)).text();
+  const first = await get("/read?category=weekly");
+  assert.equal((first.match(/<li id=/g) ?? []).length, 30);
+  assert.match(first, /category=weekly&amp;page=2[^\"]*">加载更多/);
+  const second = await get("/read?category=weekly&page=2");
+  assert.equal((second.match(/<li id=/g) ?? []).length, 60);
+  assert.match(second, /category=weekly&amp;page=3[^\"]*">加载更多/);
+  assert.match(second, new RegExp(`/read/d/${pageId(40)}\\?category=weekly&amp;page=2`));
+  const detail = await get(`/read/d/${pageId(40)}?category=weekly&page=2`);
+  assert.match(detail, new RegExp(`/read\\?category=weekly&amp;page=2#${pageId(40)}`));
+  assert.match(detail, new RegExp(`/read/d/${pageId(41)}\\?category=weekly&amp;page=2`));
+  const last = await get("/read?category=weekly&page=3");
+  assert.equal((last.match(/<li id=/g) ?? []).length, 65);
+  assert.doesNotMatch(last, />加载更多<\/a>/);
+});
+
 test("e-ink list updates its return anchor only for normal article navigation", () => {
   const html = renderEinkList([], "/read");
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
