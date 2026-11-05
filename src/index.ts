@@ -376,11 +376,8 @@ const EINK_STYLE = [
   "*,*::before,*::after{box-sizing:border-box;animation:none!important;transition:none!important;}",
   "html{-webkit-text-size-adjust:100%;}",
   // Fixed rem gutters + main max-width (no vw); Kindles often ignore CSS min()/max().
-  // Local fonts only: prefer modern CJK families, then native serif faces on older readers.
-  "body{margin:0;padding:1.25rem 1.25rem 2.5rem;font-family:serif;font-size:1.125rem;font-weight:400;line-height:1.75;letter-spacing:normal;text-align:left;word-break:normal;overflow-wrap:break-word;color:#000;background:#fff;}",
-  ":lang(zh){font-family:\"Noto Serif CJK SC\",\"Noto Serif SC\",\"Source Han Serif SC\",\"Source Han Serif CN\",\"Songti SC\",\"STSong\",\"SimSun\",serif;}",
-  ":lang(ja){font-family:\"Noto Serif CJK JP\",\"Noto Serif JP\",\"Source Han Serif\",\"Source Han Serif JP\",\"Hiragino Mincho ProN\",\"Hiragino Mincho Pro\",\"Yu Mincho\",\"YuMincho\",\"MS PMincho\",serif;}",
-  ":lang(en){font-family:Georgia,\"Times New Roman\",serif;}",
+  // OS UI font; sans-serif covers Kindles and other UAs without system-ui.
+  "body{margin:0;padding:1.25rem 1.25rem 2.5rem;font-family:system-ui,sans-serif;font-size:1.125rem;font-weight:400;line-height:1.75;letter-spacing:normal;text-align:left;word-break:normal;overflow-wrap:break-word;color:#000;background:#fff;}",
   ":lang(zh),:lang(ja){line-break:strict;}",
   // Pangu already inserts mixed-script spaces; leave unsupported CSS harmless on old readers.
   "body{text-autospace:no-autospace;}",
