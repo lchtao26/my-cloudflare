@@ -483,7 +483,8 @@ test("Chinese excerpts use the original title and body, not translations", () =>
   assert.equal(item?.description, undefined);
   const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
   assert.match(detail, /<html lang="zh-CN">/);
-  assert.match(detail, /font-family:system-ui,sans-serif/);
+  assert.match(detail, /:lang\(zh\)\{font-family:"Songti SC"/);
+  assert.doesNotMatch(detail, /Source Han Serif/);
   assert.match(detail, /中文正文/);
   assert.doesNotMatch(detail, /不应使用|不应输出的译文/);
   assert.equal(excerptFromPage({
@@ -520,7 +521,7 @@ test("Comic excerpts use the original title and body, not translations", () => {
   assert.match(detail, /<html lang="zh-CN">/);
   assert.match(detail, /<h1 lang="ja">/);
   assert.match(detail, /<div class="excerpt-body" lang="ja">/);
-  assert.match(detail, /font-family:system-ui,sans-serif/);
+  assert.match(detail, /:lang\(ja\)\{font-family:"Hiragino Mincho ProN"/);
   assert.match(detail, /漫画正文图片/);
   assert.doesNotMatch(detail, /不应使用|不应输出的译文/);
   assert.equal(excerptFromPage({
