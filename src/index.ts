@@ -540,6 +540,56 @@ const EINK_LIST_NAV = [
   "</script>",
 ].join("\n");
 
+const EINK_LIST_PAGING = [
+  "<script>",
+  "(function(){",
+  "var main=document.querySelector('main');",
+  "if(!main)return;",
+  "function direction(x,target){",
+  "if(target!==document.body&&target!==document.documentElement)return 0;",
+  "var bounds=main.getBoundingClientRect();",
+  "return x<bounds.left?-1:x>bounds.right?1:0;",
+  "}",
+  "function hasSelection(){",
+  "var selection=typeof window.getSelection==='function'&&window.getSelection();",
+  "return !!(selection&&selection.rangeCount&&!selection.isCollapsed);",
+  "}",
+  "function go(dir){window.scrollBy(0,dir*Math.max(80,window.innerHeight));}",
+  "var start=null,ignoreClickUntil=0,selectionAtStart=false;",
+  "document.addEventListener('pointerdown',function(){selectionAtStart=hasSelection();},true);",
+  "document.addEventListener('touchstart',function(e){",
+  "selectionAtStart=hasSelection();",
+  "if(e.touches.length!==1){start=null;return;}",
+  "var touch=e.touches[0];",
+  "start={x:touch.clientX,y:touch.clientY,time:Date.now(),selected:selectionAtStart,dir:direction(touch.clientX,e.target)};",
+  "},true);",
+  "document.addEventListener('touchmove',function(e){",
+  "if(!start||e.touches.length!==1){start=null;return;}",
+  "var touch=e.touches[0];",
+  "if(Math.abs(touch.clientX-start.x)>15||Math.abs(touch.clientY-start.y)>15)start=null;",
+  "},true);",
+  "document.addEventListener('touchcancel',function(){start=null;ignoreClickUntil=Date.now()+800;},true);",
+  "document.addEventListener('touchend',function(e){",
+  "ignoreClickUntil=Date.now()+800;",
+  "var tap=start;start=null;",
+  "if(!tap||!tap.dir||e.touches.length||e.changedTouches.length!==1||Date.now()-tap.time>700)return;",
+  "var touch=e.changedTouches[0];",
+  "if(Math.abs(touch.clientX-tap.x)>15||Math.abs(touch.clientY-tap.y)>15)return;",
+  "if(e.defaultPrevented||tap.selected||hasSelection()||direction(touch.clientX,e.target)!==tap.dir)return;",
+  "if(e.cancelable)e.preventDefault();",
+  "go(tap.dir);",
+  "},true);",
+  "document.addEventListener('click',function(e){",
+  "var selected=selectionAtStart;selectionAtStart=false;",
+  "if(Date.now()<ignoreClickUntil||e.defaultPrevented||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||(typeof e.button==='number'&&e.button!==0)||selected||hasSelection())return;",
+  "if(e.pointerType==='mouse'||(window.matchMedia&&window.matchMedia('(hover: hover) and (pointer: fine)').matches))return;",
+  "var dir=direction(e.clientX,e.target);",
+  "if(dir)go(dir);",
+  "},false);",
+  "})();",
+  "</script>",
+].join("\n");
+
 export function renderEinkList(excerpts: Excerpt[], listPath: string, category: ReadCategory = "all", page = 1, hasMore = false): string {
   const items = excerpts.map((excerpt) => {
     const href = htmlText(`${listPath}/d/${excerpt.id}${categorySearch(category, page)}`);
@@ -560,7 +610,7 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
     ).join("")}</nav>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
     ...(hasMore ? [`<a class="btn" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}${excerpts.length ? `#${excerpts[excerpts.length - 1]!.id}` : ""}`)}">加载更多</a>`] : []),
-  ].join("\n"), false, EINK_LIST_NAV);
+  ].join("\n"), false, EINK_LIST_NAV + "\n" + EINK_LIST_PAGING);
 }
 
 export type EinkNeighbors = {

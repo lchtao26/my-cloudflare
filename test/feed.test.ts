@@ -1073,6 +1073,92 @@ test("e-ink list updates its return anchor only for normal article navigation", 
   assert.doesNotThrow(() => runInNewContext(script, { window: {} }));
 });
 
+test("e-ink list pages only when the blank margins are tapped", () => {
+  const html = renderEinkList([], "/read");
+  const scripts = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), (match) => match[1]);
+  const script = scripts[1];
+  assert.ok(script);
+  const handlers = new Map<string, (event: object) => void>();
+  const scrolls: number[] = [];
+  const body = {};
+  const root = {};
+  const main = { getBoundingClientRect: () => ({ left: 300, right: 700 }) };
+  let now = 1000;
+  let selected = false;
+  let desktop = false;
+  const document = {
+    body, documentElement: root,
+    querySelector: () => main,
+    addEventListener: (name: string, handler: (event: object) => void) => handlers.set(name, handler),
+  };
+  runInNewContext(script, {
+    document,
+    window: {
+      innerHeight: 600,
+      matchMedia: () => ({ matches: desktop }),
+      scrollBy: (_x: number, y: number) => scrolls.push(y),
+      getSelection: () => ({ rangeCount: 1, isCollapsed: !selected }),
+    },
+    Date: { now: () => now },
+  });
+  const dispatch = (name: string, event: object) => {
+    const handler = handlers.get(name);
+    assert.ok(handler);
+    handler(event);
+  };
+  const click = (x: number, target: object = body, extra: object = {}) =>
+    dispatch("click", { target, clientX: x, button: 0, ...extra });
+  const startTouch = (x: number, target: object = body) =>
+    dispatch("touchstart", { target, touches: [{ clientX: x, clientY: 200 }] });
+  const endTouch = (x: number, target: object = body) => {
+    let prevented = false;
+    dispatch("touchend", {
+      target, touches: [], changedTouches: [{ clientX: x, clientY: 200 }], cancelable: true,
+      preventDefault() { prevented = true; },
+    });
+    return prevented;
+  };
+
+  click(100, body, { pointerType: "mouse" });
+  desktop = true;
+  click(900, root);
+  desktop = false;
+  assert.deepEqual(scrolls, []);
+  click(100, body, { pointerType: "touch" });
+  click(900, root, { pointerType: "touch" });
+  click(500);
+  click(100, { tagName: "A" });
+  click(900, body, { ctrlKey: true });
+  assert.deepEqual(scrolls, [-600, 600]);
+
+  startTouch(900);
+  assert.equal(endTouch(900), true);
+  click(900);
+  assert.deepEqual(scrolls, [-600, 600, 600], "the synthetic click must not scroll twice");
+  now += 801;
+  desktop = true;
+  startTouch(100);
+  assert.equal(endTouch(100), true, "touch still works on devices with a mouse");
+  desktop = false;
+  now += 801;
+  startTouch(100);
+  dispatch("touchmove", { touches: [{ clientX: 100, clientY: 250 }] });
+  assert.equal(endTouch(100), false);
+  now += 801;
+  startTouch(100);
+  now += 701;
+  assert.equal(endTouch(100), false);
+  now += 801;
+  selected = true;
+  startTouch(100);
+  selected = false;
+  assert.equal(endTouch(100), false);
+  now += 801;
+  startTouch(500);
+  assert.equal(endTouch(500), false);
+  assert.deepEqual(scrolls, [-600, 600, 600, -600]);
+});
+
 test("e-ink detail renders linked metadata on every device and reuses the image proxy", async (context) => {
   const originalFetch = globalThis.fetch;
   const pageId = "407e75a1-639c-81ca-8919-f4bff2a57884";
