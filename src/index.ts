@@ -23,7 +23,7 @@ const READ_CATEGORIES = [
 type ReadCategory = typeof READ_CATEGORIES[number]["id"];
 
 function readCategory(value: string | null): ReadCategory {
-  return READ_CATEGORIES.find((category) => category.id === value)?.id ?? "all";
+  return READ_CATEGORIES.find((category) => category.id === (value === "likes" ? "favorites" : value))?.id ?? "all";
 }
 
 function readDetailId(path: string): string | null {
@@ -42,7 +42,7 @@ function fromReadNavigation(request: Request, url: URL): boolean {
 
 function categorySearch(category: ReadCategory, page = 1): string {
   const params = new URLSearchParams();
-  if (category !== "all") params.set("category", category);
+  if (category !== "all") params.set("tab", category === "favorites" ? "likes" : category);
   if (page > 1) params.set("page", String(page));
   const query = params.toString();
   return query ? `?${query}` : "";
@@ -985,7 +985,7 @@ function htmlResponse(body: string | null, method: string, vary?: string): Respo
 const worker = {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
-    const category = readCategory(url.searchParams.get("category"));
+    const category = readCategory(url.searchParams.get("tab") ?? url.searchParams.get("category"));
     const pageParam = url.searchParams.get("page");
     const page = pageParam && /^[1-9]\d{0,2}$/.test(pageParam) ? Number(pageParam) : 1;
     const coverId = coverIdFromPath(url.pathname);

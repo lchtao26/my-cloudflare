@@ -921,42 +921,42 @@ test("e-ink categories filter the view and preserve navigation context", async (
     ["novel", "小说", "epub"],
     ["news", "新闻", "news.ycombinator.com"],
   ]) {
-    const response = await worker.fetch(new Request(`https://example.com/read?category=${category}`), env);
+    const response = await worker.fetch(new Request(`https://example.com/read?tab=${category}`), env);
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.match(html, new RegExp(`aria-current="page">${label}</a>`));
-    assert.match(html, new RegExp(`/read/d/${pageId}\\?category=${category}`));
+    assert.match(html, new RegExp(`/read/d/${pageId}\\?tab=${category}`));
     assert.match(JSON.stringify(queries.at(-1)?.filter), new RegExp(marker.replaceAll(".", "\\.")));
     assert.match(JSON.stringify(queries.at(-1)?.filter), /正文翻译/);
   }
-  const detail = await worker.fetch(new Request(`https://example.com/read/d/${pageId}?category=weekly`, {
-    headers: { Referer: "https://example.com/read?category=weekly" },
+  const detail = await worker.fetch(new Request(`https://example.com/read/d/${pageId}?tab=weekly`, {
+    headers: { Referer: "https://example.com/read?tab=weekly" },
   }), env);
   const html = await detail.text();
-  assert.match(html, new RegExp(`/read\\?category=weekly#${pageId}`));
-  assert.match(html, new RegExp(`/read/d/${nextId}\\?category=weekly`));
+  assert.match(html, new RegExp(`/read\\?tab=weekly#${pageId}`));
+  assert.match(html, new RegExp(`/read/d/${nextId}\\?tab=weekly`));
   assert.match(JSON.stringify(queries.at(-1)?.filter), /bunshun\.jp/);
 
-  const fallback = await worker.fetch(new Request("https://example.com/read?category=unknown"), env);
+  const fallback = await worker.fetch(new Request("https://example.com/read?tab=unknown"), env);
   const fallbackHtml = await fallback.text();
   assert.match(fallbackHtml, /aria-current="page">全部<\/a>/);
-  assert.match(fallbackHtml, /<a id="favorites-tab" hidden href="\/read\?category=favorites">收藏<\/a>/);
+  assert.match(fallbackHtml, /<a id="favorites-tab" hidden href="\/read\?tab=likes">收藏<\/a>/);
   assert.deepEqual(queries.at(-1)?.filter, viewFilter);
 
-  const favorites = await worker.fetch(new Request("https://example.com/read?category=favorites"), env);
+  const favorites = await worker.fetch(new Request("https://example.com/read?tab=likes"), env);
   assert.equal(favorites.status, 200);
   assert.match(await favorites.text(), /aria-current="page">收藏<\/a>/);
   assert.deepEqual(queries.at(-1), { page_size: 31, filter: favoritesFilter, sorts: favoritesSorts });
 
-  const favoriteDetail = await worker.fetch(new Request(`https://example.com/read/d/${pageId}?category=favorites`, {
-    headers: { Referer: "https://example.com/read?category=favorites" },
+  const favoriteDetail = await worker.fetch(new Request(`https://example.com/read/d/${pageId}?tab=likes`, {
+    headers: { Referer: "https://example.com/read?tab=likes" },
   }), env);
   const favoriteHtml = await favoriteDetail.text();
-  assert.match(favoriteHtml, new RegExp(`/read\\?category=favorites#${pageId}`));
-  assert.match(favoriteHtml, new RegExp(`/read/d/${nextId}\\?category=favorites`));
+  assert.match(favoriteHtml, new RegExp(`/read\\?tab=likes#${pageId}`));
+  assert.match(favoriteHtml, new RegExp(`/read/d/${nextId}\\?tab=likes`));
   assert.deepEqual(queries.at(-1), { page_size: 30, filter: favoritesFilter, sorts: favoritesSorts });
 
-  const rss = await worker.fetch(new Request("https://example.com/read/rss?category=favorites"), env);
+  const rss = await worker.fetch(new Request("https://example.com/read/rss?tab=likes"), env);
   assert.equal(rss.status, 200);
   assert.deepEqual(queries.at(-1)?.filter, viewFilter);
 });
@@ -984,19 +984,19 @@ test("e-ink list loads more within its category and keeps the expanded list on r
   context.after(() => { globalThis.fetch = originalFetch; });
   const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
   const get = async (path: string, headers?: HeadersInit) => (await worker.fetch(new Request(`https://example.com${path}`, { headers }), env)).text();
-  const first = await get("/read?category=weekly");
+  const first = await get("/read?tab=weekly");
   assert.equal((first.match(/<li id=/g) ?? []).length, 30);
-  assert.match(first, /category=weekly&amp;page=2[^\"]*">加载更多/);
-  const second = await get("/read?category=weekly&page=2");
+  assert.match(first, /tab=weekly&amp;page=2[^\"]*">加载更多/);
+  const second = await get("/read?tab=weekly&page=2");
   assert.equal((second.match(/<li id=/g) ?? []).length, 60);
-  assert.match(second, /category=weekly&amp;page=3[^\"]*">加载更多/);
-  assert.match(second, new RegExp(`/read/d/${pageId(40)}\\?category=weekly&amp;page=2`));
-  const detail = await get(`/read/d/${pageId(40)}?category=weekly&page=2`, {
-    Referer: "https://example.com/read?category=weekly&page=2",
+  assert.match(second, /tab=weekly&amp;page=3[^\"]*">加载更多/);
+  assert.match(second, new RegExp(`/read/d/${pageId(40)}\\?tab=weekly&amp;page=2`));
+  const detail = await get(`/read/d/${pageId(40)}?tab=weekly&page=2`, {
+    Referer: "https://example.com/read?tab=weekly&page=2",
   });
-  assert.match(detail, new RegExp(`/read\\?category=weekly&amp;page=2#${pageId(40)}`));
-  assert.match(detail, new RegExp(`/read/d/${pageId(41)}\\?category=weekly&amp;page=2`));
-  const last = await get("/read?category=weekly&page=3");
+  assert.match(detail, new RegExp(`/read\\?tab=weekly&amp;page=2#${pageId(40)}`));
+  assert.match(detail, new RegExp(`/read/d/${pageId(41)}\\?tab=weekly&amp;page=2`));
+  const last = await get("/read?tab=weekly&page=3");
   assert.equal((last.match(/<li id=/g) ?? []).length, 65);
   assert.doesNotMatch(last, />加载更多<\/a>/);
 });
