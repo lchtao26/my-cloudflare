@@ -690,7 +690,8 @@ async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promis
 
 function einkParagraphs(translation: string, pageId: string, imageBaseUrl: string): string {
   // Existing translations contain literal <br /> separators. Interpret only
-  // attribute-free line breaks; all other markup remains escaped text.
+  // attribute-free line breaks, Notion file images, and http(s) <img> tags;
+  // all other markup remains escaped text.
   // Captions are not displayed, so exclude them before processing quotes and paragraphs.
   const withoutCaptions = translation.replace(IMAGE_TAG, (match, blockId: string, fileId: string) => {
     if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) return match;
@@ -700,16 +701,36 @@ function einkParagraphs(translation: string, pageId: string, imageBaseUrl: strin
   return formatText(withoutCaptions.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim())
     .split(/\n(?:[^\S\n]*\n)+/)
     .map((paragraph) => {
-      let output = "";
-      let offset = 0;
+      const replacements: Array<{ index: number; length: number; html: string }> = [];
       for (const match of paragraph.matchAll(IMAGE_TAG)) {
         const blockId = match[1];
         const fileId = match[2];
         if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
         // Caption text inside <image>...</image> is ignored; only the file reference is used.
-        output += htmlText(paragraph.slice(offset, match.index)).replaceAll("\n", "<br />\n");
-        output += `<img src="${htmlText(`${imageBaseUrl}/${pageId}/${blockId}`)}" alt="${einkText("正文图片")}" />`;
-        offset = match.index + match[0].length;
+        replacements.push({
+          index: match.index ?? 0,
+          length: match[0].length,
+          html: `<img src="${htmlText(`${imageBaseUrl}/${pageId}/${blockId}`)}" alt="${einkText("正文图片")}" />`,
+        });
+      }
+      for (const match of paragraph.matchAll(HTML_IMG)) {
+        const href = externalUrl(match[1] || match[2]);
+        if (!href) continue;
+        replacements.push({
+          index: match.index ?? 0,
+          length: match[0].length,
+          html: `<img src="${htmlText(href)}" alt="${einkText("正文图片")}" />`,
+        });
+      }
+      replacements.sort((a, b) => a.index - b.index);
+
+      let output = "";
+      let offset = 0;
+      for (const replacement of replacements) {
+        if (replacement.index < offset) continue;
+        output += htmlText(paragraph.slice(offset, replacement.index)).replaceAll("\n", "<br />\n");
+        output += replacement.html;
+        offset = replacement.index + replacement.length;
       }
       return `<p>${output}${htmlText(paragraph.slice(offset)).replaceAll("\n", "<br />\n")}</p>`;
     })

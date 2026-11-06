@@ -649,6 +649,27 @@ test("detail pages turn excerpt image tags into proxied images while unrelated H
   assert.doesNotMatch(detail, /notion-file-block/);
 });
 
+test("detail pages render plain http img tags and escape unsafe ones", () => {
+  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+  const translation = [
+    `<img src="https://cdn.sanity.io/images/cover.png">`,
+    `<img src='http://cdn.example.com/later.jpg' alt="later" />`,
+    `<img src="javascript:alert(1)" />`,
+    `<script>x</script>`,
+  ].join("<br /><br />");
+  const excerpt = excerptFromPage({
+    id: pageId,
+    url: "https://notion.so/page",
+    properties: { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: translation }] } },
+  });
+  assert.ok(excerpt);
+  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
+  assert.match(detail, /<img src="https:\/\/cdn\.sanity\.io\/images\/cover\.png" alt="正文图片" \/>/);
+  assert.match(detail, /<img src="http:\/\/cdn\.example\.com\/later\.jpg" alt="正文图片" \/>/);
+  assert.match(detail, /&lt;img src=&quot;javascript:alert\(1\)&quot; \/&gt;/);
+  assert.match(detail, /&lt;script&gt;x&lt;\/script&gt;/);
+});
+
 test("detail pages turn captioned notion image wrappers into proxied images and ignore caption text", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const blockId = "1a52e0b5-2ddd-4438-8257-9e6c5a426940";
