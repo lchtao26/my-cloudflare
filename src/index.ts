@@ -312,17 +312,32 @@ function excerptDetailUrl(feedUrl: string, excerptId: string): string {
 const IMAGE_TAG = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\?[^"<>]*)?"\s*(?:\/>|>([\s\S]*?)<\/image>)/gi;
 // RSS only needs the first source ids; skip matching the rest of the tag or caption body.
 const IMAGE_SOURCE = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})/gi;
+const HTML_IMG = /<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>/gi;
 
 function excerptDescription(excerpt: Excerpt, feedUrl: string): string | undefined {
-  if (!NOTION_PAGE_ID.test(excerpt.id)) return undefined;
-  for (const match of excerpt.body.matchAll(IMAGE_SOURCE)) {
-    const blockId = match[1]!;
-    const fileId = match[2]!;
-    if (!NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
-    const src = htmlText(`${new URL(feedUrl).origin}${READ_ASSET_PREFIX}/${excerpt.id}/${blockId}`);
-    return `<img src="${src}" alt="正文图片" />`;
+  let earliest: { index: number; html: string } | undefined;
+
+  if (NOTION_PAGE_ID.test(excerpt.id)) {
+    for (const match of excerpt.body.matchAll(IMAGE_SOURCE)) {
+      const blockId = match[1]!;
+      const fileId = match[2]!;
+      if (!NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
+      const src = htmlText(`${new URL(feedUrl).origin}${READ_ASSET_PREFIX}/${excerpt.id}/${blockId}`);
+      earliest = { index: match.index ?? 0, html: `<img src="${src}" alt="正文图片" />` };
+      break;
+    }
   }
-  return undefined;
+
+  for (const match of excerpt.body.matchAll(HTML_IMG)) {
+    const href = externalUrl(match[1] || match[2]);
+    if (!href) continue;
+    const index = match.index ?? 0;
+    if (earliest && earliest.index <= index) break;
+    earliest = { index, html: `<img src="${htmlText(href)}" alt="正文图片" />` };
+    break;
+  }
+
+  return earliest?.html;
 }
 
 export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string {

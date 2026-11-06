@@ -730,6 +730,71 @@ test("RSS description includes only the first body image when present", () => {
   assert.doesNotMatch(item?.description ?? "", new RegExp(secondBlock));
 });
 
+test("RSS description uses the earliest plain img or notion image in the body", () => {
+  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+  const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
+  const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
+  const feedUrl = "https://example.com/read/rss";
+
+  const withImg = excerptFromPage({
+    id: pageId,
+    url: "https://notion.so/page",
+    properties: {
+      "正文翻译": {
+        type: "rich_text",
+        rich_text: [{
+          plain_text: [
+            `<img src="https://cdn.example.com/cover.jpg" alt="cover" />`,
+            `<image source="notion-file-block://${blockId}/${fileId}" />`,
+          ].join("<br /><br />"),
+        }],
+      },
+    },
+  });
+  assert.ok(withImg);
+  assert.equal(
+    parseRssFeed(renderExcerptFeed([withImg], feedUrl)).items?.[0]?.description,
+    `<img src="https://cdn.example.com/cover.jpg" alt="正文图片" />`,
+  );
+
+  const notionFirst = excerptFromPage({
+    id: pageId,
+    url: "https://notion.so/page",
+    properties: {
+      "正文翻译": {
+        type: "rich_text",
+        rich_text: [{
+          plain_text: [
+            `<image source="notion-file-block://${blockId}/${fileId}" />`,
+            `<img src='https://cdn.example.com/later.jpg' />`,
+          ].join("<br /><br />"),
+        }],
+      },
+    },
+  });
+  assert.ok(notionFirst);
+  assert.equal(
+    parseRssFeed(renderExcerptFeed([notionFirst], feedUrl)).items?.[0]?.description,
+    `<img src="https://example.com/read/p/${pageId}/${blockId}" alt="正文图片" />`,
+  );
+
+  const unsafe = excerptFromPage({
+    id: pageId,
+    url: "https://notion.so/page",
+    properties: {
+      "正文翻译": {
+        type: "rich_text",
+        rich_text: [{ plain_text: `<img src="javascript:alert(1)" /><img src="https://cdn.example.com/ok.png" />` }],
+      },
+    },
+  });
+  assert.ok(unsafe);
+  assert.equal(
+    parseRssFeed(renderExcerptFeed([unsafe], feedUrl)).items?.[0]?.description,
+    `<img src="https://cdn.example.com/ok.png" alt="正文图片" />`,
+  );
+});
+
 test("e-ink list uses the RSS view and links to detail pages", async (context) => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
