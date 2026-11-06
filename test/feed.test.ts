@@ -929,7 +929,9 @@ test("e-ink categories filter the view and preserve navigation context", async (
     assert.match(JSON.stringify(queries.at(-1)?.filter), new RegExp(marker.replaceAll(".", "\\.")));
     assert.match(JSON.stringify(queries.at(-1)?.filter), /正文翻译/);
   }
-  const detail = await worker.fetch(new Request(`https://example.com/read/d/${pageId}?category=weekly`), env);
+  const detail = await worker.fetch(new Request(`https://example.com/read/d/${pageId}?category=weekly`, {
+    headers: { Referer: "https://example.com/read?category=weekly" },
+  }), env);
   const html = await detail.text();
   assert.match(html, new RegExp(`/read\\?category=weekly#${pageId}`));
   assert.match(html, new RegExp(`/read/d/${nextId}\\?category=weekly`));
@@ -946,7 +948,9 @@ test("e-ink categories filter the view and preserve navigation context", async (
   assert.match(await favorites.text(), /aria-current="page">收藏<\/a>/);
   assert.deepEqual(queries.at(-1), { page_size: 31, filter: favoritesFilter, sorts: favoritesSorts });
 
-  const favoriteDetail = await worker.fetch(new Request(`https://example.com/read/d/${pageId}?category=favorites`), env);
+  const favoriteDetail = await worker.fetch(new Request(`https://example.com/read/d/${pageId}?category=favorites`, {
+    headers: { Referer: "https://example.com/read?category=favorites" },
+  }), env);
   const favoriteHtml = await favoriteDetail.text();
   assert.match(favoriteHtml, new RegExp(`/read\\?category=favorites#${pageId}`));
   assert.match(favoriteHtml, new RegExp(`/read/d/${nextId}\\?category=favorites`));
@@ -979,7 +983,7 @@ test("e-ink list loads more within its category and keeps the expanded list on r
   }) as typeof fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
   const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
-  const get = async (path: string) => (await worker.fetch(new Request(`https://example.com${path}`), env)).text();
+  const get = async (path: string, headers?: HeadersInit) => (await worker.fetch(new Request(`https://example.com${path}`, { headers }), env)).text();
   const first = await get("/read?category=weekly");
   assert.equal((first.match(/<li id=/g) ?? []).length, 30);
   assert.match(first, /category=weekly&amp;page=2[^\"]*">加载更多/);
@@ -987,7 +991,9 @@ test("e-ink list loads more within its category and keeps the expanded list on r
   assert.equal((second.match(/<li id=/g) ?? []).length, 60);
   assert.match(second, /category=weekly&amp;page=3[^\"]*">加载更多/);
   assert.match(second, new RegExp(`/read/d/${pageId(40)}\\?category=weekly&amp;page=2`));
-  const detail = await get(`/read/d/${pageId(40)}?category=weekly&page=2`);
+  const detail = await get(`/read/d/${pageId(40)}?category=weekly&page=2`, {
+    Referer: "https://example.com/read?category=weekly&page=2",
+  });
   assert.match(detail, new RegExp(`/read\\?category=weekly&amp;page=2#${pageId(40)}`));
   assert.match(detail, new RegExp(`/read/d/${pageId(41)}\\?category=weekly&amp;page=2`));
   const last = await get("/read?category=weekly&page=3");
@@ -1121,15 +1127,12 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
   );
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
-  assert.equal(response.headers.get("Vary"), null);
+  assert.equal(response.headers.get("Vary"), "Referer");
   const html = await response.text();
   assert.match(html, /<body class="detail">/);
   assert.doesNotMatch(html, /eink-weight/);
   assert.match(html, /<title>详情标题<\/title>/);
-  assert.match(html, new RegExp(`href="/read#${pageId}"`));
-  assert.match(html, /class="nav-row"/);
-  assert.match(html, /上一篇/);
-  assert.match(html, /下一篇/);
+  assert.doesNotMatch(html, /<nav class="nav-row">/);
   assert.match(html, /<p><cite>某书<\/cite> · 作者：张三<\/p>/);
   assert.match(html, /第一段/);
   assert.match(html, /第二段/);
@@ -1200,7 +1203,7 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     publishedDate: "",
     link: "https://www.notion.so/1",
     pubDate: null,
-  }, "/read", "https://example.com/read/p");
+  }, "/read", "https://example.com/read/p", { prevId: null, nextId: null });
   assert.match(detail, /一段 &lt;文字&gt;/);
   assert.match(detail, /<cite>It&#39;s<\/cite>/);
   assert.match(detail, new RegExp(`href="/read#${pageId}"[^>]*>返回列表`));
@@ -1248,7 +1251,7 @@ test("e-ink detail nav links previous and next excerpts beside back to list", ()
   assert.doesNotMatch(html, /阅读原文：|@media \(update: slow\)/);
 });
 
-test("e-ink detail loads view neighbors for article navigation", async (context) => {
+test("e-ink detail loads view neighbors only for navigation from read pages", async (context) => {
   const originalFetch = globalThis.fetch;
   const viewId = "excerpt-view";
   const first = "407e75a1-639c-81ca-8919-f4bff2a57884";
@@ -1263,10 +1266,12 @@ test("e-ink detail loads view neighbors for article navigation", async (context)
       "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
     },
   });
+  let viewRequests = 0;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     const href = String(url);
     if (href.includes(`/pages/${middle}`)) return Response.json(pageJson(middle, "中间"));
     if (href.includes(`/views/${viewId}`)) {
+      viewRequests++;
       return Response.json({ data_source_id: "excerpt-source", filter: null, quick_filters: {}, sorts: [] });
     }
     if (init?.method === "POST" && href.includes("/data_sources/excerpt-source/query")) {
@@ -1279,18 +1284,34 @@ test("e-ink detail loads view neighbors for article navigation", async (context)
   }) as typeof fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
 
-  const response = await worker.fetch(
-    new Request(`https://example.workers.dev/read/d/${middle}`),
-    {
-      NOTION_TOKEN: "test",
-      NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
-      NOTION_EXCERPTS_VIEW_ID: viewId,
-    },
-  );
-  assert.equal(response.status, 200);
-  const html = await response.text();
-  assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
-  assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
+  const origin = "https://example.workers.dev";
+  const env = {
+    NOTION_TOKEN: "test",
+    NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
+    NOTION_EXCERPTS_VIEW_ID: viewId,
+  };
+  const open = async (referer?: string) => {
+    const response = await worker.fetch(new Request(`${origin}/read/d/${middle}`, {
+      headers: referer ? { Referer: referer } : {},
+    }), env);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Vary"), "Referer");
+    return response.text();
+  };
+  for (const source of [`${origin}/read`, `${origin}/read/d/${first}`]) {
+    const html = await open(source);
+    assert.equal(html.match(/<nav class="nav-row">/g)?.length, 2);
+    assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
+    assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
+  }
+  assert.equal(viewRequests, 2);
+
+  for (const source of [undefined, "https://other.example/read", `${origin}/read/rss`, "invalid referrer"]) {
+    const html = await open(source);
+    assert.doesNotMatch(html, /<nav class="nav-row">/);
+    assert.match(html, /<p>正文<\/p>/);
+  }
+  assert.equal(viewRequests, 2);
 });
 
 test("e-ink detail taps left to scroll up and right to scroll down", () => {

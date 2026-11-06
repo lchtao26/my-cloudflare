@@ -26,6 +26,20 @@ function readCategory(value: string | null): ReadCategory {
   return READ_CATEGORIES.find((category) => category.id === value)?.id ?? "all";
 }
 
+function readDetailId(path: string): string | null {
+  const prefix = `${READ_DETAIL_PREFIX}/`;
+  if (!path.startsWith(prefix)) return null;
+  const id = path.slice(prefix.length);
+  return NOTION_PAGE_ID.test(id) ? id : null;
+}
+
+function fromReadNavigation(request: Request, url: URL): boolean {
+  const referrer = request.headers.get("Referer");
+  const source = referrer ? URL.parse(referrer) : null;
+  return source !== null && source.origin === url.origin
+    && (source.pathname === READ_LIST_PATH || readDetailId(source.pathname) !== null);
+}
+
 function categorySearch(category: ReadCategory, page = 1): string {
   const params = new URLSearchParams();
   if (category !== "all") params.set("category", category);
@@ -577,11 +591,11 @@ export function neighborsFor(excerpts: Excerpt[], pageId: string): EinkNeighbors
   };
 }
 
-function einkNav(listPath: string, excerptId: string, neighbors?: EinkNeighbors, category: ReadCategory = "all", page = 1): string {
-  const prev = neighbors?.prevId
+function einkNav(listPath: string, excerptId: string, neighbors: EinkNeighbors, category: ReadCategory, page: number): string {
+  const prev = neighbors.prevId
     ? `<a href="${htmlText(`${listPath}/d/${neighbors.prevId}${categorySearch(category, page)}`)}">${einkText("上一篇")}</a>`
     : `<span class="is-disabled">${einkText("上一篇")}</span>`;
-  const next = neighbors?.nextId
+  const next = neighbors.nextId
     ? `<a href="${htmlText(`${listPath}/d/${neighbors.nextId}${categorySearch(category, page)}`)}">${einkText("下一篇")}</a>`
     : `<span class="is-disabled">${einkText("下一篇")}</span>`;
   const back = `<a href="${htmlText(`${listPath}${categorySearch(category, page)}#${excerptId}`)}">${einkText("返回列表")}</a>`;
@@ -714,14 +728,14 @@ export function renderEinkDetail(
   category: ReadCategory = "all",
   page = 1,
 ): string {
-  const nav = einkNav(listPath, excerpt.id, neighbors, category, page);
+  const nav = neighbors ? [einkNav(listPath, excerpt.id, neighbors, category, page)] : [];
   return einkDocument(excerpt.title, [
-    nav,
+    ...nav,
     "<article>",
     `<h1 lang="${htmlText(excerpt.titleLang)}">${einkText(excerpt.title)}</h1>`,
     excerptDetailBody(excerpt, imageBaseUrl),
     "</article>",
-    nav,
+    ...nav,
   ].join("\n"), true, EINK_DETAIL_CHROME, "detail");
 }
 
@@ -952,12 +966,13 @@ async function fetchExcerptImage(env: ConfiguredBindings, pageId: string, blockI
   return imageUrl ? fetchImage(imageUrl) : null;
 }
 
-function htmlResponse(body: string | null, method: string): Response {
+function htmlResponse(body: string | null, method: string, vary?: string): Response {
   return new Response(method === "HEAD" ? null : body, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "public, max-age=300, must-revalidate",
       "X-Content-Type-Options": "nosniff",
+      ...(vary ? { Vary: vary } : {}),
     },
   });
 }
@@ -972,8 +987,7 @@ const worker = {
     const isBookFeed = url.pathname === BOOK_FEED_PATH;
     const isExcerptFeed = url.pathname === READ_FEED_PATH;
     const isEinkList = url.pathname === READ_LIST_PATH;
-    const einkDetailMatch = url.pathname.match(/^\/read\/d\/([^/]+)$/);
-    const einkDetailId = einkDetailMatch?.[1] && NOTION_PAGE_ID.test(einkDetailMatch[1]) ? einkDetailMatch[1] : null;
+    const einkDetailId = readDetailId(url.pathname);
     const imageMatch = url.pathname.match(/^\/read\/p\/([^/]+)\/([^/]+)$/);
     const imageIds = imageMatch && NOTION_PAGE_ID.test(imageMatch[1] ?? "") && NOTION_PAGE_ID.test(imageMatch[2] ?? "") ? [imageMatch[1]!, imageMatch[2]!] : null;
     const usesExcerpts = isExcerptFeed || isEinkList || Boolean(einkDetailId) || Boolean(imageIds);
@@ -1006,24 +1020,27 @@ const worker = {
       }
 
       if (einkDetailId) {
+        const showNavigation = fromReadNavigation(request, url);
         // Load the selected list in parallel so prev/next follow the same order as /read.
         const excerptPromise = fetchExcerptById(configured, einkDetailId);
-        const listPromise = excerptsViewId
+        const listPromise = showNavigation && excerptsViewId
           ? fetchExcerptPages(configured, excerptsViewId, category, page * FEED_ITEM_LIMIT).then((pages) =>
             pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null))
           : Promise.resolve([] as Excerpt[]);
         const [excerpt, list] = await Promise.all([excerptPromise, listPromise]);
         if (!excerpt) return new Response("Not found", { status: 404 });
+        const neighbors = showNavigation ? neighborsFor(list, excerpt.id) ?? { prevId: null, nextId: null } : undefined;
         return htmlResponse(
           renderEinkDetail(
             excerpt,
             READ_LIST_PATH,
             `${url.origin}${READ_ASSET_PREFIX}`,
-            neighborsFor(list, excerpt.id),
+            neighbors,
             category,
             page,
           ),
           request.method,
+          "Referer",
         );
       }
 
