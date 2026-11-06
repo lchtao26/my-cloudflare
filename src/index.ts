@@ -455,8 +455,10 @@ const EINK_STYLE = [
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".item-link{display:block;min-height:3rem;font-weight:700;}",
   ".categories{display:flex;flex-wrap:wrap;gap:0.25rem;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:0 0 1rem;}",
-  ".categories h1{flex:0 0 calc(50% - 0.125rem);grid-column:span 2;align-self:center;margin:0;}",
-  ".categories a{flex:0 0 calc(25% - 0.1875rem);min-width:0;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.5rem 0.15rem;border:2px solid #000;font-weight:700;text-align:center;}",
+  ".categories h1,.categories a{min-width:0;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.5rem 0.15rem;border:2px solid #000;font-weight:700;text-align:center;}",
+  ".categories h1{flex:0 0 calc(50% - 0.125rem);grid-column:span 2;margin:0;font-size:inherit;line-height:inherit;}",
+  ".categories a{flex:0 0 calc(25% - 0.1875rem);}",
+  ".categories a:nth-of-type(-n+2){order:-1;}",
   ".categories a[aria-current=page]{background:#000;color:#fff;}",
   ".meta{font-size:1rem;}",
   // Responsive type must follow the base heading/meta rules to win the cascade.
