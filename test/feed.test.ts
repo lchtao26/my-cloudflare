@@ -1197,19 +1197,19 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
   );
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
-  assert.equal(response.headers.get("Vary"), "Referer");
+  assert.equal(response.headers.get("Vary"), null);
   const html = await response.text();
   assert.match(html, /<body class="detail">/);
   assert.doesNotMatch(html, /eink-weight/);
   assert.match(html, /<title>详情标题<\/title>/);
-  assert.equal(html.match(/<nav class="nav-row" hidden>/g)?.length, 2);
+  assert.equal(html.match(/<nav class="nav-row">/g)?.length, 1);
   assert.match(html, /<p><cite>某书<\/cite> · 作者：张三<\/p>/);
   assert.match(html, /第一段/);
   assert.match(html, /第二段/);
   assert.match(html, /阅读原文：<a [^>]*lang="zh-CN" href="https:\/\/example\.com\/original">Original &amp; title<\/a>/);
   assert.match(html, /出版方：某出版社/);
   assert.match(html, /章节：第一章/);
-  assert.match(html, /<span [^>]*role="button" tabindex="0" aria-controls="data-source"[^>]*>发布日期：2025-06-12<\/span><span id="data-source" hidden><br \/>数据来源：<a [^>]*href="https:\/\/www\.notion\.so\/excerpt-1">Notion<\/a><\/span>/);
+  assert.match(html, /<span>发布日期：2025-06-12<\/span><span id="data-source"><br \/>数据来源：<a [^>]*href="https:\/\/www\.notion\.so\/excerpt-1">Notion<\/a><br \/>分享链接：<button[^>]*>点击复制<\/button>/);
   assert.match(html, new RegExp(`src="https://example\\.workers\\.dev/read/p/${pageId}/${blockId}"`));
   assert.match(html, /名词解释/);
   assert.match(html, /术语 A/);
@@ -1318,10 +1318,12 @@ test("e-ink detail nav links previous and next excerpts beside back to list", ()
   assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
   assert.match(html, new RegExp(`href="/read#${middle}"[^>]*>返回列表`));
   assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
+  assert.ok(html.indexOf("</article>") < html.indexOf('<nav class="nav-row">'));
+  assert.equal((html.match(/<nav class="nav-row">/g) ?? []).length, 1);
   assert.doesNotMatch(html, /阅读原文：|@media \(update: slow\)/);
 });
 
-test("e-ink detail shows navigation by source and keeps hidden links available", async (context) => {
+test("e-ink detail hides its bottom navigation only for shared links", async (context) => {
   const originalFetch = globalThis.fetch;
   const viewId = "excerpt-view";
   const first = "407e75a1-639c-81ca-8919-f4bff2a57884";
@@ -1362,17 +1364,17 @@ test("e-ink detail shows navigation by source and keeps hidden links available",
     NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
     NOTION_EXCERPTS_VIEW_ID: viewId,
   };
-  const open = async (referer?: string) => {
-    const response = await worker.fetch(new Request(`${origin}/read/d/${middle}`, {
+  const open = async (referer?: string, shared = false) => {
+    const response = await worker.fetch(new Request(`${origin}/read/${shared ? "s" : "d"}/${middle}`, {
       headers: referer ? { Referer: referer } : {},
     }), env);
     assert.equal(response.status, 200);
-    assert.equal(response.headers.get("Vary"), "Referer");
+    assert.equal(response.headers.get("Vary"), null);
     return response.text();
   };
   for (const source of [`${origin}/read`, `${origin}/read/d/${first}`]) {
     const html = await open(source);
-    assert.equal(html.match(/<nav class="nav-row">/g)?.length, 2);
+    assert.equal(html.match(/<nav class="nav-row">/g)?.length, 1);
     assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
     assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
   }
@@ -1380,11 +1382,16 @@ test("e-ink detail shows navigation by source and keeps hidden links available",
 
   for (const source of [undefined, "https://other.example/read", `${origin}/read/rss`, "invalid referrer"]) {
     const html = await open(source);
-    assert.equal(html.match(/<nav class="nav-row" hidden>/g)?.length, 2);
+    assert.equal(html.match(/<nav class="nav-row">/g)?.length, 1);
     assert.match(html, /<p>正文<\/p>/);
     assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
     assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
   }
+  assert.equal(viewRequests, 6);
+
+  const shared = await open(`${origin}/read`, true);
+  assert.equal(shared.match(/<nav class="nav-row" hidden>/g)?.length, 1);
+  assert.doesNotMatch(shared, /id="data-source"|id="share-copy"/);
   assert.equal(viewRequests, 6);
 
   viewUnavailable = true;
@@ -1393,7 +1400,7 @@ test("e-ink detail shows navigation by source and keeps hidden links available",
   try {
     const html = await open();
     assert.match(html, /<p>正文<\/p>/);
-    assert.equal(html.match(/<nav class="nav-row" hidden>/g)?.length, 2);
+    assert.equal(html.match(/<nav class="nav-row">/g)?.length, 1);
     assert.match(html, /class="is-disabled">上一篇/);
     assert.match(html, /class="is-disabled">下一篇/);
   } finally {
@@ -1436,32 +1443,26 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
 
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
   assert.ok(script);
-  function setupPaging(desktop: boolean, pointerEvents = true) {
+  function setupPaging(desktop: boolean, pointerEvents = true, shared = false) {
     const handlers = new Map<string, (event: object) => void>();
     const scrolls: number[] = [];
     const body = {};
-    const dateAttributes = new Map([["aria-expanded", "false"]]);
-    const dateKeyHandlers = new Map<string, (event: object) => void>();
-    const navigation = [{ hidden: true }, { hidden: true }];
-    const dateControl = {
-      tagName: "SPAN",
-      parentNode: body,
-      setAttribute: (name: string, value: string) => dateAttributes.set(name, value),
-      removeAttribute: (name: string) => dateAttributes.delete(name),
-      addEventListener(name: string, handler: (event: object) => void) { dateKeyHandlers.set(name, handler); },
-    };
-    const dataSource = { hidden: true };
-    const target = (tagName: string) => tagName === "SPAN" ? dateControl : { tagName, parentNode: body };
+    const shareHandlers = new Map<string, () => void>();
+    const copiedLinks: string[] = [];
+    const storageCalls: string[] = [];
+    const shareButton = { addEventListener: (name: string, handler: () => void) => shareHandlers.set(name, handler) };
+    const shareStatus = { textContent: "" };
+    const target = (tagName: string) => ({ tagName, parentNode: body });
     let selected = false;
     let now = 1000;
     const document = {
       body, documentElement: { scrollHeight: 2000 },
-      getElementById: (id: string) => id === "published-date" ? dateControl : id === "data-source" ? dataSource : null,
-      querySelectorAll: () => navigation,
+      getElementById: (id: string) => id === "share-copy" ? shareButton : id === "share-status" ? shareStatus : null,
       addEventListener(name: string, handler: (event: object) => void) { handlers.set(name, handler); },
     };
     const window = {
       innerHeight: 600, innerWidth: 1000, scrollY: 0,
+      navigator: { clipboard: { writeText: (value: string) => { copiedLinks.push(value); return Promise.resolve(); } } },
       PointerEvent: pointerEvents ? class {} : undefined,
       getSelection: () => ({ rangeCount: 1, isCollapsed: !selected }),
       matchMedia: () => ({ matches: desktop }),
@@ -1469,9 +1470,9 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
       addEventListener: () => {},
     };
     runInNewContext(script, {
-      window, document, location: { pathname: `/read/d/${pageId}` },
+      window, document, location: { origin: "https://example.com", pathname: `/read/${shared ? "s" : "d"}/${pageId}`, search: "?tab=weekly&page=2" },
       Date: { now: () => now },
-      localStorage: { getItem: () => null, setItem: () => {} },
+      localStorage: { getItem: () => { storageCalls.push("read"); return null; }, setItem: () => { storageCalls.push("write"); } },
     });
     function dispatch(name: string, event: object) {
       const handler = handlers.get(name);
@@ -1480,16 +1481,9 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     }
     return {
       scrolls,
-      dataSource,
-      navigation,
-      dateAttributes,
-      pressDateKey(key: string) {
-        let prevented = false;
-        const event = { key, preventDefault() { prevented = true; } };
-        dateKeyHandlers.get("keydown")?.(event);
-        dateKeyHandlers.get("keyup")?.(event);
-        return prevented;
-      },
+      copiedLinks,
+      storageCalls,
+      copyShareLink() { shareHandlers.get("click")?.(); },
       selectText(value: boolean) { selected = value; },
       advance(milliseconds: number) { now += milliseconds; },
       startPointer() { dispatch("pointerdown", {}); },
@@ -1518,7 +1512,7 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
   const touch = setupPaging(false);
   touch.click("mouse");
   touch.click(undefined, "A");
-  touch.click("touch", "SPAN");
+  touch.click("touch", "BUTTON");
   assert.deepEqual(touch.scrolls, []);
 
   for (const pointerEvents of [true, false]) {
@@ -1574,40 +1568,20 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     assert.deepEqual(paging.scrolls, [600, -600], "links keep their native behavior");
   }
 
-  const sourceReveal = setupPaging(false);
-  function tapDate() {
-    sourceReveal.startTouch();
-    assert.equal(sourceReveal.endTouch(750, 200, "SPAN"), false, "the date tap still produces a click");
-    sourceReveal.click("touch", "SPAN");
-    sourceReveal.advance(100);
-  }
-  tapDate();
-  sourceReveal.advance(1000);
-  tapDate();
-  tapDate();
-  assert.equal(sourceReveal.dataSource.hidden, true, "a pause breaks the sequence");
-  sourceReveal.click("touch", "A");
-  tapDate();
-  tapDate();
-  assert.equal(sourceReveal.dataSource.hidden, true, "an intervening click breaks the sequence");
-  tapDate();
-  assert.equal(sourceReveal.dataSource.hidden, false);
-  assert.deepEqual(sourceReveal.navigation.map(({ hidden }) => hidden), [false, false]);
-  assert.equal(sourceReveal.dateAttributes.get("aria-expanded"), "true");
-  assert.deepEqual(sourceReveal.scrolls, [], "tapping the date does not page");
-
-  const keyboardReveal = setupPaging(true);
-  keyboardReveal.pressDateKey("Enter");
-  assert.equal(keyboardReveal.pressDateKey(" "), true, "Space on the date does not scroll");
-  assert.equal(keyboardReveal.dataSource.hidden, true);
-  keyboardReveal.pressDateKey("Enter");
-  assert.equal(keyboardReveal.dataSource.hidden, false);
-  assert.deepEqual(keyboardReveal.navigation.map(({ hidden }) => hidden), [false, false]);
+  const normalPage = setupPaging(false);
+  normalPage.copyShareLink();
+  assert.deepEqual(normalPage.copiedLinks, [`https://example.com/read/s/${pageId}`]);
 
   const hybrid = setupPaging(true);
   hybrid.startTouch();
   hybrid.endTouch();
   assert.deepEqual(hybrid.scrolls, [600], "touch works on devices with a mouse or trackpad");
+  const sharedPage = setupPaging(false, true, true);
+  sharedPage.startTouch();
+  sharedPage.endTouch();
+  sharedPage.copyShareLink();
+  assert.deepEqual(sharedPage.copiedLinks, [`https://example.com/read/s/${pageId}`]);
+  assert.deepEqual(sharedPage.storageCalls, [], "shared pages do not read or save progress");
 });
 
 test("e-ink detail pangues all visible text without changing image proxy URLs", () => {

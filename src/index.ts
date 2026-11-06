@@ -9,6 +9,7 @@ const BOOK_FEED_PATH = "/book/rss";
 const BOOK_ASSET_PREFIX = "/book/p";
 const READ_LIST_PATH = "/read";
 const READ_DETAIL_PREFIX = "/read/d";
+const READ_SHARE_PREFIX = "/read/s";
 const READ_FEED_PATH = "/read/rss";
 const READ_ASSET_PREFIX = "/read/p";
 const FEED_ITEM_LIMIT = 30;
@@ -28,17 +29,10 @@ function readCategory(value: string | null): ReadCategory {
 }
 
 function readDetailId(path: string): string | null {
-  const prefix = `${READ_DETAIL_PREFIX}/`;
-  if (!path.startsWith(prefix)) return null;
+  const prefix = [`${READ_DETAIL_PREFIX}/`, `${READ_SHARE_PREFIX}/`].find((value) => path.startsWith(value));
+  if (!prefix) return null;
   const id = path.slice(prefix.length);
   return NOTION_PAGE_ID.test(id) ? id : null;
-}
-
-function fromReadNavigation(request: Request, url: URL): boolean {
-  const referrer = request.headers.get("Referer");
-  const source = referrer ? URL.parse(referrer) : null;
-  return source !== null && source.origin === url.origin
-    && (source.pathname === READ_LIST_PATH || readDetailId(source.pathname) !== null);
 }
 
 function categorySearch(category: ReadCategory, page = 1): string {
@@ -393,15 +387,15 @@ function einkOriginalTitle(excerpt: Excerpt): string {
     : `${label}<span lang="${lang}">${title}</span>`;
 }
 
-function einkPublication(excerpt: Excerpt): string {
+function einkPublication(excerpt: Excerpt, showActions: boolean): string {
   const date = einkText(`发布日期：${excerpt.publishedDate || "—"}`);
   return [
-    `<span class="published-date" id="published-date" role="button" tabindex="0" aria-controls="data-source" aria-expanded="false" aria-label="${date}，连续点按三次显示数据来源和文章导航">${date}</span>`,
-    `<span id="data-source" hidden><br />${einkText("数据来源：")}<a class="metadata-link" lang="en" href="${htmlText(excerpt.link)}">Notion</a></span>`,
+    `<span>${date}</span>`,
+    ...(showActions ? [`<span id="data-source"><br />${einkText("数据来源：")}<a class="metadata-link" lang="en" href="${htmlText(excerpt.link)}">Notion</a><br />分享链接：<button type="button" class="share-copy" id="share-copy">点击复制</button><span id="share-status" role="status"></span></span>`] : []),
   ].join("");
 }
 
-function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string): string {
+function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: boolean): string {
   const source = [
     excerpt.sourceTitle ? `<cite>${einkText(excerpt.sourceTitle)}</cite>` : "",
     excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
@@ -410,7 +404,7 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string): string {
     einkOriginalTitle(excerpt),
     excerpt.publisher ? einkText(`出版方：${excerpt.publisher}`) : "",
     excerpt.chapter ? einkText(`章节：${excerpt.chapter}`) : "",
-    einkPublication(excerpt),
+    einkPublication(excerpt, showActions),
   ].filter(Boolean);
   const body = excerpt.body ? einkParagraphs(excerpt.body, excerpt.id, imageBaseUrl) : "";
   const terms = excerpt.terms ? einkParagraphs(excerpt.terms, excerpt.id, imageBaseUrl) : "";
@@ -469,8 +463,8 @@ const EINK_STYLE = [
   ".nav-row .is-disabled{opacity:0.4;}",
   ".nav-row a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   "a.metadata-link{text-decoration:underline;text-decoration-thickness:1px;text-decoration-skip-ink:none;text-underline-offset:0.28em;}",
-  ".published-date{display:inline-block;touch-action:manipulation;-webkit-user-select:none;user-select:none;}",
-  ".published-date:focus-visible{outline:3px solid #000;outline-offset:3px;}",
+  ".share-copy{font:inherit;color:inherit;background:none;border:0;padding:0;text-decoration:underline;cursor:pointer;}",
+  ".share-copy:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".btn{display:block;border:2px solid #000;padding:0.85rem 1rem;margin:0.75rem 0;text-align:center;text-decoration:none;font-weight:700;min-height:3rem;}",
   ".btn:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".list-actions{display:flex;gap:0.5rem;}",
@@ -675,34 +669,20 @@ const EINK_DETAIL_CHROME = [
   "var max=scrollMax();",
   "if(max>0)window.scrollTo(0,p*max);",
   "}",
-  "var dateControl=document.getElementById('published-date');",
-  "var dataSource=document.getElementById('data-source');",
-  "var hiddenNavs=document.querySelectorAll('.nav-row[hidden]');",
-  "var dateTaps=0,lastDateTap=0;",
-  "function countDateTap(target){",
-  "if(!dateControl||!dataSource||!dataSource.hidden)return;",
-  "if(target!==dateControl){dateTaps=0;return;}",
-  "var now=Date.now();",
-  "dateTaps=now-lastDateTap>650?1:dateTaps+1;",
-  "lastDateTap=now;",
-  "if(dateTaps<3)return;",
-  "dataSource.hidden=false;",
-  "dateControl.setAttribute('aria-expanded','true');",
-  "dateControl.removeAttribute('aria-label');",
-  "for(var i=0;i<hiddenNavs.length;i++)hiddenNavs[i].hidden=false;",
-  "progress();",
-  "saveNow();",
+  "var shareCopy=document.getElementById('share-copy');",
+  "var shareStatus=document.getElementById('share-status');",
+  "if(shareCopy)shareCopy.addEventListener('click',function(){",
+  "var link=location.origin+location.pathname.replace(/^\\/read\\/[ds]\\//,'/read/s/');",
+  "function fallback(){",
+  "var input=document.createElement('textarea');input.value=link;input.style.position='fixed';input.style.left='-9999px';document.body.appendChild(input);input.select();",
+  "var copied=false;try{copied=document.execCommand('copy');}catch(err){}document.body.removeChild(input);",
+  "if(shareStatus)shareStatus.textContent=copied?' 已复制':' 复制失败';",
   "}",
-  "if(dateControl){",
-  "dateControl.addEventListener('keydown',function(e){",
-  "if(e.key===' ')e.preventDefault();",
-  "if(e.key==='Enter'&&!e.repeat)countDateTap(dateControl);",
+  "if(window.navigator&&window.navigator.clipboard&&window.navigator.clipboard.writeText){",
+  "window.navigator.clipboard.writeText(link).then(function(){if(shareStatus)shareStatus.textContent=' 已复制';},fallback);",
+  "}else fallback();",
   "},false);",
-  "dateControl.addEventListener('keyup',function(e){",
-  "if(e.key===' ')countDateTap(dateControl);",
-  "},false);",
-  "}",
-  "function go(dir){dateTaps=0;window.scrollBy(0,dir*step());progress();saveNow();}",
+  "function go(dir){window.scrollBy(0,dir*step());progress();saveNow();}",
   "function hasSelection(){",
   "var selection=typeof window.getSelection==='function'&&window.getSelection();",
   "return !!(selection&&selection.rangeCount&&!selection.isCollapsed);",
@@ -714,7 +694,7 @@ const EINK_DETAIL_CHROME = [
   "},true);",
   "function isControl(el){",
   "while(el&&el!==document.body){",
-  "if(el===dateControl||el.tagName==='A'||el.tagName==='BUTTON')return true;",
+  "if(el.tagName==='A'||el.tagName==='BUTTON')return true;",
   "el=el.parentNode;",
   "}",
   "return false;",
@@ -745,8 +725,6 @@ const EINK_DETAIL_CHROME = [
   "document.addEventListener('click',function(e){",
   "var hadSelection=selectionAtTapStart;",
   "selectionAtTapStart=false;",
-  // Count the native date click even when the touch handler suppresses duplicate paging.
-  "countDateTap(e.target);",
   "if(Date.now()<ignoreClickUntil)return;",
   "if(e.pointerType==='mouse'||(window.matchMedia&&window.matchMedia('(hover: hover) and (pointer: fine)').matches))return;",
   "if(hadSelection||hasSelection())return;",
@@ -769,15 +747,14 @@ export function renderEinkDetail(
   neighbors?: EinkNeighbors,
   category: ReadCategory = "all",
   page = 1,
-  showNavigation = neighbors !== undefined,
+  showNavigation = true,
 ): string {
   const navNeighbors = neighbors ?? { prevId: null, nextId: null };
   const nav = einkNav(listPath, excerpt.id, navNeighbors, category, page, !showNavigation);
   return einkDocument(excerpt.title, [
-    nav,
     "<article>",
     `<h1 lang="${htmlText(excerpt.titleLang)}">${einkText(excerpt.title)}</h1>`,
-    excerptDetailBody(excerpt, imageBaseUrl),
+    excerptDetailBody(excerpt, imageBaseUrl, showNavigation),
     "</article>",
     nav,
   ].join("\n"), true, EINK_DETAIL_CHROME, "detail");
@@ -1064,14 +1041,13 @@ const worker = {
       }
 
       if (einkDetailId) {
-        const showNavigation = fromReadNavigation(request, url);
+        const showNavigation = !url.pathname.startsWith(`${READ_SHARE_PREFIX}/`);
         // Load the selected list in parallel so prev/next follow the same order as /read.
         const excerptPromise = fetchExcerptById(configured, einkDetailId);
-        const listPromise = excerptsViewId
+        const listPromise = excerptsViewId && showNavigation
           ? fetchExcerptPages(configured, excerptsViewId, category, page * FEED_ITEM_LIMIT).then((pages) =>
             pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null)).catch((error) => {
-              if (showNavigation) throw error;
-              console.error("Failed to load navigation for direct article", error);
+              console.error("Failed to load article navigation", error);
               return [] as Excerpt[];
             })
           : Promise.resolve([] as Excerpt[]);
@@ -1089,7 +1065,6 @@ const worker = {
             showNavigation,
           ),
           request.method,
-          "Referer",
         );
       }
 
