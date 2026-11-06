@@ -473,6 +473,8 @@ const EINK_STYLE = [
   ".published-date:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".btn{display:block;border:2px solid #000;padding:0.85rem 1rem;margin:0.75rem 0;text-align:center;text-decoration:none;font-weight:700;min-height:3rem;}",
   ".btn:focus-visible{outline:3px solid #000;outline-offset:3px;}",
+  ".list-actions{display:flex;gap:0.5rem;}",
+  ".list-actions .btn{flex:1;min-width:0;}",
   "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
   "hr{border:0;border-top:2px solid #000;margin:1.5rem 0;}",
   "cite{font-style:normal;font-weight:700;}",
@@ -609,7 +611,9 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
       `<a href="${htmlText(`${listPath}${categorySearch(item.id)}`)}"${item.id === category ? ' aria-current="page"' : ""}>${item.label}</a>`
     ).join("")}</nav>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
-    ...(hasMore ? [`<a class="btn" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}${excerpts.length ? `#${excerpts[excerpts.length - 1]!.id}` : ""}`)}">加载更多</a>`] : []),
+    ...((items || hasMore) ? [
+      `<div class="list-actions"><a class="btn" href="#">返回顶部</a>${hasMore ? `<a class="btn" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}${excerpts.length ? `#${excerpts[excerpts.length - 1]!.id}` : ""}`)}">加载更多</a>` : ""}</div>`,
+    ] : []),
   ].join("\n"), false, EINK_LIST_NAV + "\n" + EINK_LIST_PAGING);
 }
 

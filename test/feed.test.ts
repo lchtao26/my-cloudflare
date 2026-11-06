@@ -993,6 +993,7 @@ test("e-ink list loads more within its category and keeps the expanded list on r
   const get = async (path: string, headers?: HeadersInit) => (await worker.fetch(new Request(`https://example.com${path}`, { headers }), env)).text();
   const first = await get("/read?tab=weekly");
   assert.equal((first.match(/<li id=/g) ?? []).length, 30);
+  assert.match(first, /<div class="list-actions"><a class="btn" href="#">返回顶部<\/a><a class="btn"[^>]*>加载更多<\/a><\/div>/);
   assert.match(first, /tab=weekly&amp;page=2[^\"]*">加载更多/);
   const second = await get("/read?tab=weekly&page=2");
   assert.equal((second.match(/<li id=/g) ?? []).length, 60);
@@ -1005,6 +1006,7 @@ test("e-ink list loads more within its category and keeps the expanded list on r
   assert.match(detail, new RegExp(`/read/d/${pageId(41)}\\?tab=weekly&amp;page=2`));
   const last = await get("/read?tab=weekly&page=3");
   assert.equal((last.match(/<li id=/g) ?? []).length, 65);
+  assert.match(last, /<a class="btn" href="#">返回顶部<\/a>/);
   assert.doesNotMatch(last, />加载更多<\/a>/);
 });
 
