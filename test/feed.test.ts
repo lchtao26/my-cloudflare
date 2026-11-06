@@ -917,7 +917,8 @@ test("e-ink categories filter the view and preserve navigation context", async (
     NOTION_EXCERPTS_FAVORITES_VIEW_ID: "saved-view",
   };
   for (const [category, label, marker] of [
-    ["weekly", "周刊", "bunshun.jp"],
+    ["weekly", "周刊", "bunshun.jp/denshiban/articles/"],
+    ["bunshun", "文春", "bunshun.jp/articles/"],
     ["novel", "小说", "epub"],
     ["news", "新闻", "news.ycombinator.com"],
   ]) {
@@ -928,6 +929,12 @@ test("e-ink categories filter the view and preserve navigation context", async (
     assert.match(html, new RegExp(`/read/d/${pageId}\\?tab=${category}`));
     assert.match(JSON.stringify(queries.at(-1)?.filter), new RegExp(marker.replaceAll(".", "\\.")));
     assert.match(JSON.stringify(queries.at(-1)?.filter), /正文翻译/);
+    if (category === "weekly" || category === "bunshun") {
+      assert.deepEqual(queries.at(-1)?.filter, { and: [viewFilter, { or: [
+        { property: "原文链接", url: { contains: marker } },
+        { property: "备注", rich_text: { contains: marker } },
+      ] }] });
+    }
   }
   const detail = await worker.fetch(new Request(`https://example.com/read/d/${pageId}?tab=weekly`, {
     headers: { Referer: "https://example.com/read?tab=weekly" },
@@ -935,12 +942,12 @@ test("e-ink categories filter the view and preserve navigation context", async (
   const html = await detail.text();
   assert.match(html, new RegExp(`/read\\?tab=weekly#${pageId}`));
   assert.match(html, new RegExp(`/read/d/${nextId}\\?tab=weekly`));
-  assert.match(JSON.stringify(queries.at(-1)?.filter), /bunshun\.jp/);
+  assert.match(JSON.stringify(queries.at(-1)?.filter), /bunshun\.jp\/denshiban\/articles\//);
 
   const fallback = await worker.fetch(new Request("https://example.com/read?tab=unknown"), env);
   const fallbackHtml = await fallback.text();
   assert.match(fallbackHtml, /aria-current="page">全部<\/a>/);
-  assert.match(fallbackHtml, /<a id="favorites-tab" hidden href="\/read\?tab=likes">收藏<\/a>/);
+  assert.match(fallbackHtml, /<a href="\/read\?tab=likes">收藏<\/a>/);
   assert.deepEqual(queries.at(-1)?.filter, viewFilter);
 
   const favorites = await worker.fetch(new Request("https://example.com/read?tab=likes"), env);
@@ -1001,49 +1008,24 @@ test("e-ink list loads more within its category and keeps the expanded list on r
   assert.doesNotMatch(last, />加载更多<\/a>/);
 });
 
-test("e-ink list reveals favorites after three consecutive title clicks in the current tab", () => {
+test("e-ink list displays every category without interaction", () => {
   const html = renderEinkList([], "/read");
-  assert.match(html, /aria-controls="favorites-tab" aria-expanded="false">阅读节选<\/button>/);
-  assert.match(html, /id="favorites-tab" hidden/);
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
-  assert.ok(script);
-  const storage = new Map<string, string>();
-  const sessionStorage = { getItem: storage.get.bind(storage), setItem: storage.set.bind(storage) };
-  let now = 1000;
-
-  function loadList() {
-    const favorites = { hidden: true };
-    const attributes = new Map([["aria-expanded", "false"]]);
-    const title = { setAttribute: attributes.set.bind(attributes), addEventListener() {} };
-    let onClick: (event: { target: object }) => void = () => assert.fail("click listener was not registered");
-    runInNewContext(script!, {
-      Date: { now: () => now },
-      window: { sessionStorage },
-      document: {
-        getElementById: (id: string) => id === "list-title" ? title : favorites,
-        addEventListener(_event: string, handler: typeof onClick) { onClick = handler; },
-      },
-    });
-    return { favorites, attributes, tap: () => onClick({ target: title }), tapElsewhere: () => onClick({ target: {} }) };
+  assert.match(html, /<h1>阅读节选<\/h1>/);
+  for (const [href, label] of [
+    ["/read", "全部"],
+    ["/read?tab=weekly", "周刊"],
+    ["/read?tab=bunshun", "文春"],
+    ["/read?tab=novel", "小说"],
+    ["/read?tab=news", "新闻"],
+    ["/read?tab=likes", "收藏"],
+  ]) {
+    assert.ok(html.includes(`href="${href}"`), `${label} link is visible`);
   }
-
-  const list = loadList();
-  list.tap();
-  list.tap();
-  assert.equal(list.favorites.hidden, true);
-  list.tapElsewhere();
-  list.tap();
-  assert.equal(list.favorites.hidden, true);
-  now += 651;
-  list.tap();
-  list.tap();
-  assert.equal(list.favorites.hidden, true);
-  list.tap();
-  assert.equal(list.favorites.hidden, false);
-  assert.equal(list.attributes.get("aria-expanded"), "true");
-  assert.equal(loadList().favorites.hidden, false);
-  storage.clear();
-  assert.equal(loadList().favorites.hidden, true);
+  const navigation = html.match(/<nav class="categories"[\s\S]*?<\/nav>/)?.[0];
+  assert.ok(navigation);
+  assert.doesNotMatch(navigation, /hidden/);
+  assert.deepEqual(Array.from(navigation.matchAll(/<a [^>]*>([^<]+)<\/a>/g), (match) => match[1]),
+    ["全部", "收藏", "新闻", "周刊", "文春", "小说"]);
 });
 
 test("e-ink list updates its return anchor only for normal article navigation", () => {

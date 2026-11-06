@@ -15,10 +15,11 @@ const FEED_ITEM_LIMIT = 30;
 
 const READ_CATEGORIES = [
   { id: "all", label: "全部" },
-  { id: "weekly", label: "周刊" },
-  { id: "novel", label: "小说" },
-  { id: "news", label: "新闻" },
   { id: "favorites", label: "收藏" },
+  { id: "news", label: "新闻" },
+  { id: "weekly", label: "周刊" },
+  { id: "bunshun", label: "文春" },
+  { id: "novel", label: "小说" },
 ] as const;
 type ReadCategory = typeof READ_CATEGORIES[number]["id"];
 
@@ -50,10 +51,13 @@ function categorySearch(category: ReadCategory, page = 1): string {
 
 function categoryFilter(category: ReadCategory): object | undefined {
   if (category === "novel") return { property: "提取来源", select: { equals: "epub" } };
-  if (category === "weekly") return { or: [
-    { property: "原文链接", url: { contains: "bunshun.jp" } },
-    { property: "备注", rich_text: { contains: "bunshun.jp" } },
-  ] };
+  if (category === "weekly" || category === "bunshun") {
+    const path = category === "weekly" ? "bunshun.jp/denshiban/articles/" : "bunshun.jp/articles/";
+    return { or: [
+      { property: "原文链接", url: { contains: path } },
+      { property: "备注", rich_text: { contains: path } },
+    ] };
+  }
   if (category === "news") return { or: [
     { property: "原文链接", url: { contains: "news.ycombinator.com" } },
     { property: "备注", rich_text: { starts_with: "HN " } },
@@ -450,11 +454,9 @@ const EINK_STYLE = [
   "a:hover{text-decoration:underline;text-underline-offset:0.35em;}",
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".item-link{display:block;min-height:3rem;font-weight:700;}",
-  ".list-title{border:0;padding:0;background:none;color:inherit;font:inherit;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none;}",
-  ".list-title:focus-visible{outline:3px solid #000;outline-offset:3px;}",
-  ".categories{display:flex;flex-wrap:wrap;gap:0.25rem;margin:0 0 1rem;}",
+  ".categories{display:flex;flex-wrap:wrap;gap:0.25rem;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:0 0 1rem;}",
+  ".categories h1{flex:0 0 calc(50% - 0.125rem);grid-column:span 2;align-self:center;margin:0;}",
   ".categories a{flex:0 0 calc(25% - 0.1875rem);min-width:0;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.5rem 0.15rem;border:2px solid #000;font-weight:700;text-align:center;}",
-  ".categories a[hidden]{display:none;}",
   ".categories a[aria-current=page]{background:#000;color:#fff;}",
   ".meta{font-size:1rem;}",
   // Responsive type must follow the base heading/meta rules to win the cascade.
@@ -505,24 +507,6 @@ function einkDocument(
 const EINK_LIST_NAV = [
   "<script>",
   "(function(){",
-  "var title=typeof document!=='undefined'&&document.getElementById('list-title');",
-  "var favorites=title&&document.getElementById('favorites-tab');",
-  "if(favorites){",
-  "var taps=0,lastTap=0,favoritesKey='eink-show-favorites';",
-  "var showFavorites=function(){favorites.hidden=false;title.setAttribute('aria-expanded','true');};",
-  "try{if(window.sessionStorage.getItem(favoritesKey)==='1')showFavorites();}catch(err){}",
-  "title.addEventListener('keydown',function(e){if(e.repeat&&(e.key==='Enter'||e.key===' '))e.preventDefault();},false);",
-  "document.addEventListener('click',function(e){",
-  "if(!favorites.hidden)return;",
-  "if(e.target!==title){taps=0;return;}",
-  "var now=Date.now();",
-  "taps=now-lastTap>650?1:taps+1;",
-  "lastTap=now;",
-  "if(taps<3)return;",
-  "showFavorites();",
-  "try{window.sessionStorage.setItem(favoritesKey,'1');}catch(err){}",
-  "},false);",
-  "}",
   "function centerHash(){",
   "try{",
   "var hash=window.location&&window.location.hash;",
@@ -569,9 +553,8 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
     ].join("");
   }).join("\n");
   return einkDocument("阅读节选", [
-    `<h1><button class="list-title" id="list-title" type="button" aria-controls="favorites-tab" aria-expanded="false">${displayText("阅读节选")}</button></h1>`,
-    `<nav class="categories" aria-label="阅读分类">${READ_CATEGORIES.map((item) =>
-      `<a${item.id === "favorites" ? ' id="favorites-tab" hidden' : ""} href="${htmlText(`${listPath}${categorySearch(item.id)}`)}"${item.id === category ? ' aria-current="page"' : ""}>${item.label}</a>`
+    `<nav class="categories" aria-label="阅读分类"><h1>${displayText("阅读节选")}</h1>${READ_CATEGORIES.map((item) =>
+      `<a href="${htmlText(`${listPath}${categorySearch(item.id)}`)}"${item.id === category ? ' aria-current="page"' : ""}>${item.label}</a>`
     ).join("")}</nav>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
     ...(hasMore ? [`<a class="btn" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}${excerpts.length ? `#${excerpts[excerpts.length - 1]!.id}` : ""}`)}">加载更多</a>`] : []),
