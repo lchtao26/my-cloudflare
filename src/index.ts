@@ -392,7 +392,7 @@ function einkOriginalTitle(excerpt: Excerpt): string {
 function einkPublication(excerpt: Excerpt): string {
   const date = einkText(`发布日期：${excerpt.publishedDate || "—"}`);
   return [
-    `<span class="published-date" id="published-date" role="button" tabindex="0" aria-controls="data-source" aria-expanded="false" aria-label="${date}，连续点按三次显示数据来源">${date}</span>`,
+    `<span class="published-date" id="published-date" role="button" tabindex="0" aria-controls="data-source" aria-expanded="false" aria-label="${date}，连续点按三次显示数据来源和文章导航">${date}</span>`,
     `<span id="data-source" hidden><br />${einkText("数据来源：")}<a class="metadata-link" lang="en" href="${htmlText(excerpt.link)}">Notion</a></span>`,
   ].join("");
 }
@@ -460,6 +460,7 @@ const EINK_STYLE = [
   // Responsive type must follow the base heading/meta rules to win the cascade.
   "@media (min-width:720px){body{font-size:1.25rem;}h1{font-size:1.65rem;}.meta{font-size:1.0625rem;}main{max-width:36rem;}}",
   ".nav-row{display:flex;gap:0.5rem;align-items:stretch;margin:0.85rem 0;}",
+  ".nav-row[hidden]{display:none;}",
   ".nav-row a,.nav-row span{flex:1;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.75rem 0.35rem;font-weight:700;text-align:center;}",
   ".nav-row .is-disabled{opacity:0.4;}",
   ".nav-row a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
@@ -591,7 +592,7 @@ export function neighborsFor(excerpts: Excerpt[], pageId: string): EinkNeighbors
   };
 }
 
-function einkNav(listPath: string, excerptId: string, neighbors: EinkNeighbors, category: ReadCategory, page: number): string {
+function einkNav(listPath: string, excerptId: string, neighbors: EinkNeighbors, category: ReadCategory, page: number, hidden = false): string {
   const prev = neighbors.prevId
     ? `<a href="${htmlText(`${listPath}/d/${neighbors.prevId}${categorySearch(category, page)}`)}">${einkText("上一篇")}</a>`
     : `<span class="is-disabled">${einkText("上一篇")}</span>`;
@@ -599,7 +600,7 @@ function einkNav(listPath: string, excerptId: string, neighbors: EinkNeighbors, 
     ? `<a href="${htmlText(`${listPath}/d/${neighbors.nextId}${categorySearch(category, page)}`)}">${einkText("下一篇")}</a>`
     : `<span class="is-disabled">${einkText("下一篇")}</span>`;
   const back = `<a href="${htmlText(`${listPath}${categorySearch(category, page)}#${excerptId}`)}">${einkText("返回列表")}</a>`;
-  return `<nav class="nav-row">\n${prev}\n${back}\n${next}\n</nav>`;
+  return `<nav class="nav-row"${hidden ? " hidden" : ""}>\n${prev}\n${back}\n${next}\n</nav>`;
 }
 
 // Detail pages: touch-oriented tap paging, bottom progress bar, and localStorage resume.
@@ -637,6 +638,7 @@ const EINK_DETAIL_CHROME = [
   "}",
   "var dateControl=document.getElementById('published-date');",
   "var dataSource=document.getElementById('data-source');",
+  "var hiddenNavs=document.querySelectorAll('.nav-row[hidden]');",
   "var dateTaps=0,lastDateTap=0;",
   "function countDateTap(target){",
   "if(!dateControl||!dataSource||!dataSource.hidden)return;",
@@ -648,6 +650,7 @@ const EINK_DETAIL_CHROME = [
   "dataSource.hidden=false;",
   "dateControl.setAttribute('aria-expanded','true');",
   "dateControl.removeAttribute('aria-label');",
+  "for(var i=0;i<hiddenNavs.length;i++)hiddenNavs[i].hidden=false;",
   "progress();",
   "saveNow();",
   "}",
@@ -727,15 +730,17 @@ export function renderEinkDetail(
   neighbors?: EinkNeighbors,
   category: ReadCategory = "all",
   page = 1,
+  showNavigation = neighbors !== undefined,
 ): string {
-  const nav = neighbors ? [einkNav(listPath, excerpt.id, neighbors, category, page)] : [];
+  const navNeighbors = neighbors ?? { prevId: null, nextId: null };
+  const nav = einkNav(listPath, excerpt.id, navNeighbors, category, page, !showNavigation);
   return einkDocument(excerpt.title, [
-    ...nav,
+    nav,
     "<article>",
     `<h1 lang="${htmlText(excerpt.titleLang)}">${einkText(excerpt.title)}</h1>`,
     excerptDetailBody(excerpt, imageBaseUrl),
     "</article>",
-    ...nav,
+    nav,
   ].join("\n"), true, EINK_DETAIL_CHROME, "detail");
 }
 
@@ -1023,13 +1028,17 @@ const worker = {
         const showNavigation = fromReadNavigation(request, url);
         // Load the selected list in parallel so prev/next follow the same order as /read.
         const excerptPromise = fetchExcerptById(configured, einkDetailId);
-        const listPromise = showNavigation && excerptsViewId
+        const listPromise = excerptsViewId
           ? fetchExcerptPages(configured, excerptsViewId, category, page * FEED_ITEM_LIMIT).then((pages) =>
-            pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null))
+            pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null)).catch((error) => {
+              if (showNavigation) throw error;
+              console.error("Failed to load navigation for direct article", error);
+              return [] as Excerpt[];
+            })
           : Promise.resolve([] as Excerpt[]);
         const [excerpt, list] = await Promise.all([excerptPromise, listPromise]);
         if (!excerpt) return new Response("Not found", { status: 404 });
-        const neighbors = showNavigation ? neighborsFor(list, excerpt.id) ?? { prevId: null, nextId: null } : undefined;
+        const neighbors = neighborsFor(list, excerpt.id) ?? { prevId: null, nextId: null };
         return htmlResponse(
           renderEinkDetail(
             excerpt,
@@ -1038,6 +1047,7 @@ const worker = {
             neighbors,
             category,
             page,
+            showNavigation,
           ),
           request.method,
           "Referer",

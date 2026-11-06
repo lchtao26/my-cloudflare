@@ -1132,7 +1132,7 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
   assert.match(html, /<body class="detail">/);
   assert.doesNotMatch(html, /eink-weight/);
   assert.match(html, /<title>详情标题<\/title>/);
-  assert.doesNotMatch(html, /<nav class="nav-row">/);
+  assert.equal(html.match(/<nav class="nav-row" hidden>/g)?.length, 2);
   assert.match(html, /<p><cite>某书<\/cite> · 作者：张三<\/p>/);
   assert.match(html, /第一段/);
   assert.match(html, /第二段/);
@@ -1251,7 +1251,7 @@ test("e-ink detail nav links previous and next excerpts beside back to list", ()
   assert.doesNotMatch(html, /阅读原文：|@media \(update: slow\)/);
 });
 
-test("e-ink detail loads view neighbors only for navigation from read pages", async (context) => {
+test("e-ink detail shows navigation by source and keeps hidden links available", async (context) => {
   const originalFetch = globalThis.fetch;
   const viewId = "excerpt-view";
   const first = "407e75a1-639c-81ca-8919-f4bff2a57884";
@@ -1267,11 +1267,13 @@ test("e-ink detail loads view neighbors only for navigation from read pages", as
     },
   });
   let viewRequests = 0;
+  let viewUnavailable = false;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     const href = String(url);
     if (href.includes(`/pages/${middle}`)) return Response.json(pageJson(middle, "中间"));
     if (href.includes(`/views/${viewId}`)) {
       viewRequests++;
+      if (viewUnavailable) return new Response(null, { status: 503 });
       return Response.json({ data_source_id: "excerpt-source", filter: null, quick_filters: {}, sorts: [] });
     }
     if (init?.method === "POST" && href.includes("/data_sources/excerpt-source/query")) {
@@ -1308,10 +1310,25 @@ test("e-ink detail loads view neighbors only for navigation from read pages", as
 
   for (const source of [undefined, "https://other.example/read", `${origin}/read/rss`, "invalid referrer"]) {
     const html = await open(source);
-    assert.doesNotMatch(html, /<nav class="nav-row">/);
+    assert.equal(html.match(/<nav class="nav-row" hidden>/g)?.length, 2);
     assert.match(html, /<p>正文<\/p>/);
+    assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
+    assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
   }
-  assert.equal(viewRequests, 2);
+  assert.equal(viewRequests, 6);
+
+  viewUnavailable = true;
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    const html = await open();
+    assert.match(html, /<p>正文<\/p>/);
+    assert.equal(html.match(/<nav class="nav-row" hidden>/g)?.length, 2);
+    assert.match(html, /class="is-disabled">上一篇/);
+    assert.match(html, /class="is-disabled">下一篇/);
+  } finally {
+    console.error = originalConsoleError;
+  }
 });
 
 test("e-ink detail taps left to scroll up and right to scroll down", () => {
@@ -1355,6 +1372,7 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     const body = {};
     const dateAttributes = new Map([["aria-expanded", "false"]]);
     const dateKeyHandlers = new Map<string, (event: object) => void>();
+    const navigation = [{ hidden: true }, { hidden: true }];
     const dateControl = {
       tagName: "SPAN",
       parentNode: body,
@@ -1369,6 +1387,7 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     const document = {
       body, documentElement: { scrollHeight: 2000 },
       getElementById: (id: string) => id === "published-date" ? dateControl : id === "data-source" ? dataSource : null,
+      querySelectorAll: () => navigation,
       addEventListener(name: string, handler: (event: object) => void) { handlers.set(name, handler); },
     };
     const window = {
@@ -1392,6 +1411,7 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     return {
       scrolls,
       dataSource,
+      navigation,
       dateAttributes,
       pressDateKey(key: string) {
         let prevented = false;
@@ -1502,6 +1522,7 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
   assert.equal(sourceReveal.dataSource.hidden, true, "an intervening click breaks the sequence");
   tapDate();
   assert.equal(sourceReveal.dataSource.hidden, false);
+  assert.deepEqual(sourceReveal.navigation.map(({ hidden }) => hidden), [false, false]);
   assert.equal(sourceReveal.dateAttributes.get("aria-expanded"), "true");
   assert.deepEqual(sourceReveal.scrolls, [], "tapping the date does not page");
 
@@ -1511,6 +1532,7 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
   assert.equal(keyboardReveal.dataSource.hidden, true);
   keyboardReveal.pressDateKey("Enter");
   assert.equal(keyboardReveal.dataSource.hidden, false);
+  assert.deepEqual(keyboardReveal.navigation.map(({ hidden }) => hidden), [false, false]);
 
   const hybrid = setupPaging(true);
   hybrid.startTouch();
