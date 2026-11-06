@@ -897,15 +897,25 @@ test("e-ink categories filter the view and preserve navigation context", async (
   });
   const queries: Array<{ filter?: object }> = [];
   const viewFilter = { property: "正文翻译", rich_text: { is_not_empty: true } };
+  const favoritesFilter = { property: "收藏", checkbox: { equals: true } };
+  const favoritesSorts = [{ property: "发布日期", direction: "descending" }];
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     const href = String(url);
+    if (href.endsWith("/views/saved-view")) {
+      return Response.json({ data_source_id: "source", filter: favoritesFilter, sorts: favoritesSorts });
+    }
     if (href.includes("/views/")) return Response.json({ data_source_id: "source", filter: viewFilter });
     if (href.includes("/pages/")) return Response.json(makePage(pageId));
     queries.push(JSON.parse(String(init?.body)));
     return Response.json({ results: [makePage(pageId), makePage(nextId)], has_more: false });
   }) as typeof fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
-  const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
+  const env = {
+    NOTION_TOKEN: "test",
+    NOTION_EXCERPTS_DATA_SOURCE_ID: "source",
+    NOTION_EXCERPTS_VIEW_ID: "view",
+    NOTION_EXCERPTS_FAVORITES_VIEW_ID: "saved-view",
+  };
   for (const [category, label, marker] of [
     ["weekly", "周刊", "bunshun.jp"],
     ["novel", "小说", "epub"],
@@ -926,7 +936,24 @@ test("e-ink categories filter the view and preserve navigation context", async (
   assert.match(JSON.stringify(queries.at(-1)?.filter), /bunshun\.jp/);
 
   const fallback = await worker.fetch(new Request("https://example.com/read?category=unknown"), env);
-  assert.match(await fallback.text(), /aria-current="page">全部<\/a>/);
+  const fallbackHtml = await fallback.text();
+  assert.match(fallbackHtml, /aria-current="page">全部<\/a>/);
+  assert.match(fallbackHtml, /<a id="favorites-tab" hidden href="\/read\?category=favorites">收藏<\/a>/);
+  assert.deepEqual(queries.at(-1)?.filter, viewFilter);
+
+  const favorites = await worker.fetch(new Request("https://example.com/read?category=favorites"), env);
+  assert.equal(favorites.status, 200);
+  assert.match(await favorites.text(), /aria-current="page">收藏<\/a>/);
+  assert.deepEqual(queries.at(-1), { page_size: 31, filter: favoritesFilter, sorts: favoritesSorts });
+
+  const favoriteDetail = await worker.fetch(new Request(`https://example.com/read/d/${pageId}?category=favorites`), env);
+  const favoriteHtml = await favoriteDetail.text();
+  assert.match(favoriteHtml, new RegExp(`/read\\?category=favorites#${pageId}`));
+  assert.match(favoriteHtml, new RegExp(`/read/d/${nextId}\\?category=favorites`));
+  assert.deepEqual(queries.at(-1), { page_size: 30, filter: favoritesFilter, sorts: favoritesSorts });
+
+  const rss = await worker.fetch(new Request("https://example.com/read/rss?category=favorites"), env);
+  assert.equal(rss.status, 200);
   assert.deepEqual(queries.at(-1)?.filter, viewFilter);
 });
 
@@ -966,6 +993,51 @@ test("e-ink list loads more within its category and keeps the expanded list on r
   const last = await get("/read?category=weekly&page=3");
   assert.equal((last.match(/<li id=/g) ?? []).length, 65);
   assert.doesNotMatch(last, />加载更多<\/a>/);
+});
+
+test("e-ink list reveals favorites after three consecutive title clicks in the current tab", () => {
+  const html = renderEinkList([], "/read");
+  assert.match(html, /aria-controls="favorites-tab" aria-expanded="false">阅读节选<\/button>/);
+  assert.match(html, /id="favorites-tab" hidden/);
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script);
+  const storage = new Map<string, string>();
+  const sessionStorage = { getItem: storage.get.bind(storage), setItem: storage.set.bind(storage) };
+  let now = 1000;
+
+  function loadList() {
+    const favorites = { hidden: true };
+    const attributes = new Map([["aria-expanded", "false"]]);
+    const title = { setAttribute: attributes.set.bind(attributes), addEventListener() {} };
+    let onClick: (event: { target: object }) => void = () => assert.fail("click listener was not registered");
+    runInNewContext(script!, {
+      Date: { now: () => now },
+      window: { sessionStorage },
+      document: {
+        getElementById: (id: string) => id === "list-title" ? title : favorites,
+        addEventListener(_event: string, handler: typeof onClick) { onClick = handler; },
+      },
+    });
+    return { favorites, attributes, tap: () => onClick({ target: title }), tapElsewhere: () => onClick({ target: {} }) };
+  }
+
+  const list = loadList();
+  list.tap();
+  list.tap();
+  assert.equal(list.favorites.hidden, true);
+  list.tapElsewhere();
+  list.tap();
+  assert.equal(list.favorites.hidden, true);
+  now += 651;
+  list.tap();
+  list.tap();
+  assert.equal(list.favorites.hidden, true);
+  list.tap();
+  assert.equal(list.favorites.hidden, false);
+  assert.equal(list.attributes.get("aria-expanded"), "true");
+  assert.equal(loadList().favorites.hidden, false);
+  storage.clear();
+  assert.equal(loadList().favorites.hidden, true);
 });
 
 test("e-ink list updates its return anchor only for normal article navigation", () => {
