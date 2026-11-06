@@ -212,6 +212,16 @@ test("cover image is loaded from the Notion page and proxied", async (context) =
   globalThis.fetch = (async () => Response.json({ properties: { "封面": { type: "files", files: [] } } })) as typeof fetch;
   const empty = await worker.fetch(new Request(`https://example.workers.dev/book/p/${pageId}`), env);
   assert.equal(empty.status, 404);
+
+  globalThis.fetch = (async (url: RequestInfo | URL) => String(url).includes("/pages/")
+    ? Response.json({ properties: page.properties })
+    : new Response("<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>", {
+      headers: { "Content-Type": "image/svg+xml; charset=utf-8" },
+    })) as typeof fetch;
+  context.mock.method(console, "error", () => {});
+  const svg = await worker.fetch(new Request(`https://example.workers.dev/book/p/${pageId}`), env);
+  assert.equal(svg.status, 502);
+  assert.doesNotMatch(await svg.text(), /<script>/);
 });
 
 test("missing configuration and Notion failures return explicit errors", async (context) => {
@@ -1125,7 +1135,7 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     titleLang: "zh-CN",
     originalLang: "zh-CN",
     terms: "",
-    sourceTitle: "出处",
+    sourceTitle: "It's",
     author: "作者",
     chapter: "",
     publisher: "",
@@ -1135,6 +1145,7 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     pubDate: null,
   }, "/read", "https://example.com/read/p", undefined, true);
   assert.match(detail, /一段 &lt;文字&gt;/);
+  assert.match(detail, /<cite>It&#39;s<\/cite>/);
   assert.match(detail, new RegExp(`href="/read#${pageId}"[^>]*>返回列表`));
   assert.match(detail, /class="is-disabled">上一篇</);
   assert.match(detail, /class="is-disabled">下一篇</);

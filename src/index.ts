@@ -143,7 +143,8 @@ function htmlText(value: string): string {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function displayText(value: string): string {
@@ -858,11 +859,15 @@ async function fetchCover(env: ConfiguredBindings, pageId: string): Promise<Resp
   return fetchImage(imageUrl);
 }
 
+// Raster formats only: SVG can run scripts on this origin when a proxy URL is opened directly.
+const PROXIED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"]);
+
 async function fetchImage(imageUrl: string): Promise<Response> {
   const image = await fetch(imageUrl);
   if (!image.ok) throw new Error(`Cover image returned ${image.status}`);
   const contentType = image.headers.get("Content-Type") ?? "";
-  if (!contentType.startsWith("image/")) throw new Error("Cover image has an unexpected content type");
+  const mediaType = contentType.split(";")[0]!.trim().toLowerCase();
+  if (!PROXIED_IMAGE_TYPES.has(mediaType)) throw new Error("Cover image has an unexpected content type");
   return new Response(image.body, {
     headers: {
       "Content-Type": contentType,
