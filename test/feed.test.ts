@@ -6,7 +6,6 @@ import { formatText } from "../src/format-text.ts";
 import worker, {
   bookFromPage,
   excerptFromPage,
-  isAppleUserAgent,
   neighborsFor,
   renderEinkDetail,
   renderEinkList,
@@ -321,7 +320,7 @@ test("excerpt feed uses the Notion RSS view filter, paginates, and links to e-in
   assert.equal(item?.link, "https://example.workers.dev/read/d/407e75a1-639c-81ca-8919-f4bff2a57884");
   assert.equal(item?.guid?.value, "notion:407e75a1-639c-81ca-8919-f4bff2a57884");
   assert.equal(item?.description, undefined);
-  assert.doesNotMatch(feed, /<item>[\s\S]*?<description>|一行 &lt;文字&gt;|阅读原文|专有名词与术语/);
+  assert.doesNotMatch(feed, /<item>[\s\S]*?<description>|一行 &lt;文字&gt;|阅读原文|名词解释/);
   assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
   assert.deepEqual(requests[1]?.body?.filter, {
     and: [
@@ -402,7 +401,7 @@ test("excerpt titles fall back to the original and missing source fields are omi
   assert.equal(item?.description, undefined);
   const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
   assert.match(detail, /<p><cite>书<\/cite><\/p>\n<div class="excerpt-body" lang="zh-CN">\n<p>正文<\/p>/);
-  assert.doesNotMatch(detail, /作者：|出版方：|章节：|原标题：|内容类型：|专有名词与术语|阅读原文|javascript:/);
+  assert.doesNotMatch(detail, /作者：|出版方：|章节：|内容类型：|名词解释|阅读原文|javascript:/);
 });
 
 test("detail pages preserve paragraphs from newlines and stored br tags while escaping other HTML", () => {
@@ -576,7 +575,7 @@ test("translated excerpts keep original titles in their source language and cont
     assert.equal(translated.titleLang, "zh-CN");
     const translatedDetail = renderEinkDetail(translated, "/read", "/read/p");
     assert.match(translatedDetail, /<h1 lang="zh-CN">阅读与思考<\/h1>/);
-    assert.match(translatedDetail, new RegExp(`原标题：<span lang="${lang}">`));
+    assert.match(translatedDetail, new RegExp(`阅读原文：<span lang="${lang}">`));
     if (lang === "ja") assert.match(translatedDetail, /&lt;script&gt;<\/span>/);
 
     page.properties!["标题"] = { type: "title", title: [] };
@@ -1014,7 +1013,7 @@ test("e-ink list updates its return anchor only for normal article navigation", 
   assert.doesNotThrow(() => runInNewContext(script, { window: {} }));
 });
 
-test("e-ink detail renders body metadata, action buttons, and reuses the image proxy", async (context) => {
+test("e-ink detail renders linked metadata on every device and reuses the image proxy", async (context) => {
   const originalFetch = globalThis.fetch;
   const pageId = "407e75a1-639c-81ca-8919-f4bff2a57884";
   const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
@@ -1049,8 +1048,8 @@ test("e-ink detail renders body metadata, action buttons, and reuses the image p
     { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
   );
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("Cache-Control"), "private, max-age=300, must-revalidate");
-  assert.equal(response.headers.get("Vary"), "User-Agent");
+  assert.equal(response.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
+  assert.equal(response.headers.get("Vary"), null);
   const html = await response.text();
   assert.match(html, /<body class="detail">/);
   assert.doesNotMatch(html, /eink-weight/);
@@ -1062,42 +1061,28 @@ test("e-ink detail renders body metadata, action buttons, and reuses the image p
   assert.match(html, /<p><cite>某书<\/cite> · 作者：张三<\/p>/);
   assert.match(html, /第一段/);
   assert.match(html, /第二段/);
-  assert.match(html, /原标题：<span lang="zh-CN">Original &amp; title<\/span>/);
+  assert.match(html, /阅读原文：<a [^>]*lang="zh-CN" href="https:\/\/example\.com\/original">Original &amp; title<\/a>/);
   assert.match(html, /出版方：某出版社/);
   assert.match(html, /章节：第一章/);
-  assert.match(html, /发布日期：2025-06-12/);
+  assert.match(html, /<span [^>]*role="button" tabindex="0" aria-controls="data-source"[^>]*>发布日期：2025-06-12<\/span><span id="data-source" hidden><br \/>数据来源：<a [^>]*href="https:\/\/www\.notion\.so\/excerpt-1">Notion<\/a><\/span>/);
   assert.match(html, new RegExp(`src="https://example\\.workers\\.dev/read/p/${pageId}/${blockId}"`));
-  assert.match(html, /专有名词与术语/);
+  assert.match(html, /名词解释/);
   assert.match(html, /术语 A/);
-  // Non-Apple UA (default Request): hide external jump buttons.
-  assert.doesNotMatch(html, /阅读原文|在 Notion 中查看|class="actions"/);
+  assert.doesNotMatch(html, /相关链接|class="actions"/);
   assert.doesNotMatch(html, /@media \(update: slow\)/);
 
-  const appleHtml = await (await worker.fetch(
-    new Request(`https://example.workers.dev/read/d/${pageId}`, {
-      headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15" },
-    }),
-    { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
-  )).text();
-  assert.match(appleHtml, /<body class="detail">/);
-  assert.match(appleHtml, /class="btn"[^>]*href="https:\/\/example\.com\/original"/);
-  assert.match(appleHtml, /class="btn"[^>]*href="https:\/\/www\.notion\.so\/excerpt-1"/);
-  assert.match(appleHtml, /阅读原文/);
-  assert.match(appleHtml, /在 Notion 中查看/);
+  for (const userAgent of ["Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", "Mozilla/5.0 (Linux; Kindle) Silk/3.0"]) {
+    const deviceResponse = await worker.fetch(
+      new Request(`https://example.workers.dev/read/d/${pageId}`, { headers: { "User-Agent": userAgent } }),
+      { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
+    );
+    assert.equal(await deviceResponse.text(), html);
+  }
 
   assert.equal((await worker.fetch(
     new Request("https://example.workers.dev/read/d/not-a-page-id"),
     { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
   )).status, 404);
-});
-
-test("isAppleUserAgent matches Apple devices only", () => {
-  assert.equal(isAppleUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"), true);
-  assert.equal(isAppleUserAgent("Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)"), true);
-  assert.equal(isAppleUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"), true);
-  assert.equal(isAppleUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_6_3; Silk/1.0.13.81)"), false);
-  assert.equal(isAppleUserAgent("Mozilla/5.0 (Linux; Android 10; KFMAWI) AppleWebKit/537.36"), false);
-  assert.equal(isAppleUserAgent(""), false);
 });
 
 test("e-ink render helpers escape content and omit empty metadata", () => {
@@ -1143,39 +1128,15 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     publishedDate: "",
     link: "https://www.notion.so/1",
     pubDate: null,
-  }, "/read", "https://example.com/read/p", undefined, true);
+  }, "/read", "https://example.com/read/p");
   assert.match(detail, /一段 &lt;文字&gt;/);
   assert.match(detail, /<cite>It&#39;s<\/cite>/);
   assert.match(detail, new RegExp(`href="/read#${pageId}"[^>]*>返回列表`));
   assert.match(detail, /class="is-disabled">上一篇</);
   assert.match(detail, /class="is-disabled">下一篇</);
-  assert.match(detail, /class="btn"[^>]*href="https:\/\/example\.com\/original"/);
-  assert.match(detail, /class="btn"[^>]*href="https:\/\/www\.notion\.so\/1"/);
-  assert.match(detail, /阅读原文/);
-  assert.match(detail, /在 Notion 中查看/);
-  assert.doesNotMatch(detail, /专有名词与术语|原标题：/);
-  assert.doesNotMatch(
-    renderEinkDetail({
-      id: pageId,
-      title: "标题",
-      originalTitle: "标题",
-      body: "一段",
-      chinese: false,
-      lang: "zh-CN",
-      titleLang: "zh-CN",
-      originalLang: "zh-CN",
-      terms: "",
-      sourceTitle: "出处",
-      author: "作者",
-      chapter: "",
-      publisher: "",
-      originalUrl: "https://example.com/original",
-      publishedDate: "",
-      link: "https://www.notion.so/1",
-      pubDate: null,
-    }, "/read", "https://example.com/read/p"),
-    /阅读原文|在 Notion 中查看|class="actions"/,
-  );
+  assert.match(detail, /阅读原文：<a [^>]*href="https:\/\/example\.com\/original">标题<\/a>/);
+  assert.match(detail, />发布日期：—<\/span>/);
+  assert.doesNotMatch(detail, /名词解释/);
 });
 
 test("e-ink detail nav links previous and next excerpts beside back to list", () => {
@@ -1212,7 +1173,7 @@ test("e-ink detail nav links previous and next excerpts beside back to list", ()
   assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
   assert.match(html, new RegExp(`href="/read#${middle}"[^>]*>返回列表`));
   assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
-  assert.doesNotMatch(html, /阅读原文|在 Notion 中查看|@media \(update: slow\)/);
+  assert.doesNotMatch(html, /阅读原文：|@media \(update: slow\)/);
 });
 
 test("e-ink detail loads view neighbors for article navigation", async (context) => {
@@ -1299,11 +1260,22 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     const handlers = new Map<string, (event: object) => void>();
     const scrolls: number[] = [];
     const body = {};
+    const dateAttributes = new Map([["aria-expanded", "false"]]);
+    const dateKeyHandlers = new Map<string, (event: object) => void>();
+    const dateControl = {
+      tagName: "SPAN",
+      parentNode: body,
+      setAttribute: (name: string, value: string) => dateAttributes.set(name, value),
+      removeAttribute: (name: string) => dateAttributes.delete(name),
+      addEventListener(name: string, handler: (event: object) => void) { dateKeyHandlers.set(name, handler); },
+    };
+    const dataSource = { hidden: true };
+    const target = (tagName: string) => tagName === "SPAN" ? dateControl : { tagName, parentNode: body };
     let selected = false;
     let now = 1000;
     const document = {
       body, documentElement: { scrollHeight: 2000 },
-      getElementById: () => null,
+      getElementById: (id: string) => id === "published-date" ? dateControl : id === "data-source" ? dataSource : null,
       addEventListener(name: string, handler: (event: object) => void) { handlers.set(name, handler); },
     };
     const window = {
@@ -1326,6 +1298,15 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     }
     return {
       scrolls,
+      dataSource,
+      dateAttributes,
+      pressDateKey(key: string) {
+        let prevented = false;
+        const event = { key, preventDefault() { prevented = true; } };
+        dateKeyHandlers.get("keydown")?.(event);
+        dateKeyHandlers.get("keyup")?.(event);
+        return prevented;
+      },
       selectText(value: boolean) { selected = value; },
       advance(milliseconds: number) { now += milliseconds; },
       startPointer() { dispatch("pointerdown", {}); },
@@ -1334,13 +1315,14 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
       endTouch(x = 750, y = 200, tagName = "P") {
         let prevented = false;
         dispatch("touchend", {
-          target: { tagName, parentNode: body }, touches: [], changedTouches: [{ clientX: x, clientY: y }],
+          target: target(tagName),
+          touches: [], changedTouches: [{ clientX: x, clientY: y }],
           cancelable: true, preventDefault() { prevented = true; },
         });
         return prevented;
       },
       click(pointerType?: string, tagName = "P", clientX = 750) {
-        dispatch("click", { target: { tagName, parentNode: body }, clientX, pointerType });
+        dispatch("click", { target: target(tagName), clientX, pointerType });
       },
     };
   }
@@ -1353,6 +1335,7 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
   const touch = setupPaging(false);
   touch.click("mouse");
   touch.click(undefined, "A");
+  touch.click("touch", "SPAN");
   assert.deepEqual(touch.scrolls, []);
 
   for (const pointerEvents of [true, false]) {
@@ -1408,6 +1391,34 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     assert.deepEqual(paging.scrolls, [600, -600], "links keep their native behavior");
   }
 
+  const sourceReveal = setupPaging(false);
+  function tapDate() {
+    sourceReveal.startTouch();
+    assert.equal(sourceReveal.endTouch(750, 200, "SPAN"), false, "the date tap still produces a click");
+    sourceReveal.click("touch", "SPAN");
+    sourceReveal.advance(100);
+  }
+  tapDate();
+  sourceReveal.advance(1000);
+  tapDate();
+  tapDate();
+  assert.equal(sourceReveal.dataSource.hidden, true, "a pause breaks the sequence");
+  sourceReveal.click("touch", "A");
+  tapDate();
+  tapDate();
+  assert.equal(sourceReveal.dataSource.hidden, true, "an intervening click breaks the sequence");
+  tapDate();
+  assert.equal(sourceReveal.dataSource.hidden, false);
+  assert.equal(sourceReveal.dateAttributes.get("aria-expanded"), "true");
+  assert.deepEqual(sourceReveal.scrolls, [], "tapping the date does not page");
+
+  const keyboardReveal = setupPaging(true);
+  keyboardReveal.pressDateKey("Enter");
+  assert.equal(keyboardReveal.pressDateKey(" "), true, "Space on the date does not scroll");
+  assert.equal(keyboardReveal.dataSource.hidden, true);
+  keyboardReveal.pressDateKey("Enter");
+  assert.equal(keyboardReveal.dataSource.hidden, false);
+
   const hybrid = setupPaging(true);
   hybrid.startTouch();
   hybrid.endTouch();
@@ -1436,20 +1447,18 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
     publishedDate: "2025-06-12",
     link: "https://www.notion.so/1",
     pubDate: null,
-  }, "/read", "https://example.com/read/p", undefined, true);
+  }, "/read", "https://example.com/read/p");
   assert.match(html, /<title>AI 时代的 RSS<\/title>/);
   assert.match(html, /<h1 lang="zh-CN">AI 时代的 RSS<\/h1>/);
   assert.match(html, /作者：张三 AI/);
   assert.match(html, /使用 API 处理 2026 年数据/);
   assert.match(html, /<p>「使用 API 处理 2026 年数据。<\/p>/);
   assert.match(html, /<p>结束。」<\/p>/);
-  assert.match(html, /原标题：<span lang="en">Hello 世界<\/span>/);
+  assert.match(html, /阅读原文：<a [^>]*lang="en"[^>]*>Hello 世界<\/a>/);
   assert.match(html, /出版方：ABC 出版社/);
   assert.match(html, /章节：Chapter1 章节/);
-  assert.match(html, /专有名词与术语/);
+  assert.match(html, /名词解释/);
   assert.match(html, /API 接口/);
-  assert.match(html, /在 Notion 中查看/);
-  assert.match(html, /阅读原文/);
   assert.match(html, new RegExp(`src="https://example\\.com/read/p/${pageId}/${blockId}"`));
   assert.doesNotMatch(html, /https:\/\/example\.com \/book|AI时代的RSS|使用API处理|Hello世界|ABC出版社|张三AI/);
 });

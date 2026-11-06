@@ -362,28 +362,44 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
   });
 }
 
+function einkOriginalTitle(excerpt: Excerpt): string {
+  if (!excerpt.originalUrl && (!excerpt.originalTitle || excerpt.originalTitle === excerpt.title)) return "";
+
+  const label = einkText("阅读原文：");
+  const lang = htmlText(excerpt.originalTitle ? excerpt.originalLang : excerpt.titleLang);
+  const title = einkText(excerpt.originalTitle || excerpt.title);
+  return excerpt.originalUrl
+    ? `${label}<a class="metadata-link" lang="${lang}" href="${htmlText(excerpt.originalUrl)}">${title}</a>`
+    : `${label}<span lang="${lang}">${title}</span>`;
+}
+
+function einkPublication(excerpt: Excerpt): string {
+  const date = einkText(`发布日期：${excerpt.publishedDate || "—"}`);
+  return [
+    `<span class="published-date" id="published-date" role="button" tabindex="0" aria-controls="data-source" aria-expanded="false" aria-label="${date}，连续点按三次显示数据来源">${date}</span>`,
+    `<span id="data-source" hidden><br />${einkText("数据来源：")}<a class="metadata-link" lang="en" href="${htmlText(excerpt.link)}">Notion</a></span>`,
+  ].join("");
+}
+
 function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string): string {
   const source = [
     excerpt.sourceTitle ? `<cite>${einkText(excerpt.sourceTitle)}</cite>` : "",
     excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
   ].filter(Boolean).join(" · ");
-  const originalTitle = excerpt.originalTitle && excerpt.originalTitle !== excerpt.title
-    ? `${einkText("原标题：")}<span lang="${htmlText(excerpt.originalLang)}">${einkText(excerpt.originalTitle)}</span>`
-    : "";
   const details = [
-    ["出版方", excerpt.publisher],
-    ["章节", excerpt.chapter],
-    ["发布日期", excerpt.publishedDate],
-  ].filter(([, value]) => value).map(([label, value]) => einkText(`${label}：${value}`));
-  if (originalTitle) details.unshift(originalTitle);
+    einkOriginalTitle(excerpt),
+    excerpt.publisher ? einkText(`出版方：${excerpt.publisher}`) : "",
+    excerpt.chapter ? einkText(`章节：${excerpt.chapter}`) : "",
+    einkPublication(excerpt),
+  ].filter(Boolean);
   const body = excerpt.body ? einkParagraphs(excerpt.body, excerpt.id, imageBaseUrl) : "";
   const terms = excerpt.terms ? einkParagraphs(excerpt.terms, excerpt.id, imageBaseUrl) : "";
   return [
     ...(source ? [`<p>${source}</p>`] : []),
     ...(body ? [`<div class="excerpt-body" lang="${htmlText(excerpt.lang)}">\n${body}\n</div>`] : []),
     "<hr />",
-    ...(details.length ? [`<p>${details.join("<br />\n")}</p>`] : []),
-    ...(terms ? ["<hr />", `<p>${einkText("专有名词与术语")}</p>`, terms] : []),
+    `<p>${details.join("<br />\n")}</p>`,
+    ...(terms ? ["<hr />", `<p>${einkText("名词解释")}</p>`, terms] : []),
   ].join("\n");
 }
 
@@ -428,7 +444,9 @@ const EINK_STYLE = [
   ".nav-row a,.nav-row span{flex:1;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.75rem 0.35rem;font-weight:700;text-align:center;}",
   ".nav-row .is-disabled{opacity:0.4;}",
   ".nav-row a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
-  ".actions{margin:1.5rem 0;}",
+  "a.metadata-link{text-decoration:underline;text-decoration-thickness:1px;text-decoration-skip-ink:none;text-underline-offset:0.28em;}",
+  ".published-date{display:inline-block;touch-action:manipulation;-webkit-user-select:none;user-select:none;}",
+  ".published-date:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".btn{display:block;border:2px solid #000;padding:0.85rem 1rem;margin:0.75rem 0;text-align:center;text-decoration:none;font-weight:700;min-height:3rem;}",
   ".btn:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
@@ -522,22 +540,6 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
   ].join("\n"), false, EINK_LIST_NAV);
 }
 
-/** Apple browsers only — Kindle/other e-readers should not see external jump buttons. */
-export function isAppleUserAgent(userAgent: string): boolean {
-  return !/\b(?:Kindle|Silk)\b/i.test(userAgent)
-    && /iPhone|iPad|iPod|Macintosh|Mac OS X/i.test(userAgent);
-}
-
-function einkActionButtons(excerpt: Excerpt): string {
-  const buttons = [
-    excerpt.originalUrl
-      ? `<a class="btn" href="${htmlText(excerpt.originalUrl)}">${einkText("阅读原文")}</a>`
-      : "",
-    `<a class="btn" href="${htmlText(excerpt.link)}">${einkText("在 Notion 中查看")}</a>`,
-  ].filter(Boolean);
-  return buttons.length ? `<div class="actions">\n${buttons.join("\n")}\n</div>` : "";
-}
-
 export type EinkNeighbors = {
   prevId: string | null;
   nextId: string | null;
@@ -564,7 +566,7 @@ function einkNav(listPath: string, excerptId: string, neighbors?: EinkNeighbors,
 }
 
 // Detail pages: touch-oriented tap paging, bottom progress bar, and localStorage resume.
-// Real links/buttons keep their default click behavior.
+// Links and buttons keep their default click behavior.
 const EINK_DETAIL_CHROME = [
   `<div class="progress" aria-hidden="true"><span class="progress-bar" id="progress-bar"></span></div>`,
   "<script>",
@@ -596,7 +598,32 @@ const EINK_DETAIL_CHROME = [
   "var max=scrollMax();",
   "if(max>0)window.scrollTo(0,p*max);",
   "}",
-  "function go(dir){window.scrollBy(0,dir*step());progress();saveNow();}",
+  "var dateControl=document.getElementById('published-date');",
+  "var dataSource=document.getElementById('data-source');",
+  "var dateTaps=0,lastDateTap=0;",
+  "function countDateTap(target){",
+  "if(!dateControl||!dataSource||!dataSource.hidden)return;",
+  "if(target!==dateControl){dateTaps=0;return;}",
+  "var now=Date.now();",
+  "dateTaps=now-lastDateTap>650?1:dateTaps+1;",
+  "lastDateTap=now;",
+  "if(dateTaps<3)return;",
+  "dataSource.hidden=false;",
+  "dateControl.setAttribute('aria-expanded','true');",
+  "dateControl.removeAttribute('aria-label');",
+  "progress();",
+  "saveNow();",
+  "}",
+  "if(dateControl){",
+  "dateControl.addEventListener('keydown',function(e){",
+  "if(e.key===' ')e.preventDefault();",
+  "if(e.key==='Enter'&&!e.repeat)countDateTap(dateControl);",
+  "},false);",
+  "dateControl.addEventListener('keyup',function(e){",
+  "if(e.key===' ')countDateTap(dateControl);",
+  "},false);",
+  "}",
+  "function go(dir){dateTaps=0;window.scrollBy(0,dir*step());progress();saveNow();}",
   "function hasSelection(){",
   "var selection=typeof window.getSelection==='function'&&window.getSelection();",
   "return !!(selection&&selection.rangeCount&&!selection.isCollapsed);",
@@ -608,7 +635,7 @@ const EINK_DETAIL_CHROME = [
   "},true);",
   "function isControl(el){",
   "while(el&&el!==document.body){",
-  "if(el.tagName==='A'||el.tagName==='BUTTON')return true;",
+  "if(el===dateControl||el.tagName==='A'||el.tagName==='BUTTON')return true;",
   "el=el.parentNode;",
   "}",
   "return false;",
@@ -639,6 +666,8 @@ const EINK_DETAIL_CHROME = [
   "document.addEventListener('click',function(e){",
   "var hadSelection=selectionAtTapStart;",
   "selectionAtTapStart=false;",
+  // Count the native date click even when the touch handler suppresses duplicate paging.
+  "countDateTap(e.target);",
   "if(Date.now()<ignoreClickUntil)return;",
   "if(e.pointerType==='mouse'||(window.matchMedia&&window.matchMedia('(hover: hover) and (pointer: fine)').matches))return;",
   "if(hadSelection||hasSelection())return;",
@@ -659,7 +688,6 @@ export function renderEinkDetail(
   listPath: string,
   imageBaseUrl: string,
   neighbors?: EinkNeighbors,
-  showExternalActions = false,
   category: ReadCategory = "all",
   page = 1,
 ): string {
@@ -670,7 +698,6 @@ export function renderEinkDetail(
     `<h1 lang="${htmlText(excerpt.titleLang)}">${einkText(excerpt.title)}</h1>`,
     excerptDetailBody(excerpt, imageBaseUrl),
     "</article>",
-    ...(showExternalActions ? [einkActionButtons(excerpt)] : []),
     nav,
   ].join("\n"), true, EINK_DETAIL_CHROME, "detail");
 }
@@ -902,12 +929,11 @@ async function fetchExcerptImage(env: ConfiguredBindings, pageId: string, blockI
   return imageUrl ? fetchImage(imageUrl) : null;
 }
 
-function htmlResponse(body: string | null, method: string, variesByDevice = false): Response {
+function htmlResponse(body: string | null, method: string): Response {
   return new Response(method === "HEAD" ? null : body, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": `${variesByDevice ? "private" : "public"}, max-age=300, must-revalidate`,
-      ...(variesByDevice ? { Vary: "User-Agent" } : {}),
+      "Cache-Control": "public, max-age=300, must-revalidate",
       "X-Content-Type-Options": "nosniff",
     },
   });
@@ -970,12 +996,10 @@ const worker = {
             READ_LIST_PATH,
             `${url.origin}${READ_ASSET_PREFIX}`,
             neighborsFor(list, excerpt.id),
-            isAppleUserAgent(request.headers.get("User-Agent") ?? ""),
             category,
             page,
           ),
           request.method,
-          true,
         );
       }
 
