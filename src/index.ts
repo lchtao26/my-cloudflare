@@ -12,6 +12,16 @@ const READ_DETAIL_PREFIX = "/read/d";
 const READ_SHARE_PREFIX = "/read/s";
 const READ_FEED_PATH = "/read/rss";
 const READ_ASSET_PREFIX = "/read/p";
+const SHORT_SHARE_PREFIX = "/s";
+// Notion ID property whose auto-increment number becomes the short share code.
+const SHORT_ID_PROPERTY = "ID";
+// Share codes are a keyed 32-bit Feistel permutation of the ID, written as 6 base62 characters.
+// IDs stay below 2^20, so a random code decodes to a valid ID only about 1 time in 4096.
+// Changing the keys or alphabet breaks every share link already sent out.
+const SHORT_ID_LIMIT = 2 ** 20;
+const SHARE_CODE_KEYS = [0x3c6e, 0xa54f, 0x510e, 0x9b05];
+const SHARE_CODE_ALPHABET = "hqAiRYEFKT2xePmzuOfgrw4dBbNscH78S9kI30LQjpaGUJXonCMZ6ly15DtWvV";
+const SHARE_CODE = /^[0-9A-Za-z]{6}$/;
 const FEED_ITEM_LIMIT = 30;
 
 const READ_CATEGORIES = [
@@ -33,6 +43,45 @@ function readDetailId(path: string): string | null {
   if (!prefix) return null;
   const id = path.slice(prefix.length);
   return NOTION_PAGE_ID.test(id) ? id : null;
+}
+
+function shareCodeRound(half: number, key: number): number {
+  let value = Math.imul(half ^ key, 0x45d9f3b);
+  value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+  return (value ^ (value >>> 16)) & 0xffff;
+}
+
+export function shareCode(id: number): string {
+  let left = id >>> 16;
+  let right = id & 0xffff;
+  for (const key of SHARE_CODE_KEYS) [left, right] = [right, left ^ shareCodeRound(right, key)];
+  let value = (left * 0x10000) + right;
+  const digits: number[] = [];
+  for (let i = 0; i < 6; i++) {
+    digits.unshift(value % 62);
+    value = Math.floor(value / 62);
+  }
+  // 2^32 only reaches the first five leading digits; mixing in the rest spreads the first character.
+  digits[0] = digits.reduce((sum, digit) => sum + digit, 0) % 62;
+  return digits.map((digit) => SHARE_CODE_ALPHABET[digit]).join("");
+}
+
+export function shareCodeId(code: string): number | null {
+  if (!SHARE_CODE.test(code)) return null;
+  const digits = Array.from(code, (char) => SHARE_CODE_ALPHABET.indexOf(char));
+  digits[0] = ((digits[0]! - digits.slice(1).reduce((sum, digit) => sum + digit, 0)) % 62 + 62) % 62;
+  const value = digits.reduce((total, digit) => total * 62 + digit, 0);
+  if (value >= 2 ** 32) return null;
+  let left = Math.floor(value / 0x10000);
+  let right = value & 0xffff;
+  for (const key of [...SHARE_CODE_KEYS].reverse()) [left, right] = [right ^ shareCodeRound(left, key), left];
+  const id = (left * 0x10000) + right;
+  return id > 0 && id < SHORT_ID_LIMIT ? id : null;
+}
+
+function shortShareId(path: string): number | null {
+  if (!path.startsWith(`${SHORT_SHARE_PREFIX}/`)) return null;
+  return shareCodeId(path.slice(SHORT_SHARE_PREFIX.length + 1));
 }
 
 function categorySearch(category: ReadCategory, page = 1): string {
@@ -76,6 +125,7 @@ type NotionProperty = {
   files?: NotionFile[];
   select?: { name?: string } | null;
   date?: { start?: string } | null;
+  unique_id?: { number?: number | null } | null;
 };
 
 type WorkerBindings = {
@@ -136,6 +186,7 @@ type Excerpt = {
   publishedDate: string;
   link: string;
   pubDate: Date | null;
+  shortId?: number;
 };
 
 export type Book = {
@@ -297,6 +348,8 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
   const originalLang = excerptOriginalLang(properties);
   const originalLink = properties?.["原文链接"];
   const published = properties?.["发布日期"];
+  const uniqueId = properties?.[SHORT_ID_PROPERTY];
+  const shortId = uniqueId?.type === "unique_id" ? uniqueId.unique_id?.number : null;
   const date = new Date(page.created_time ?? page.last_edited_time ?? "");
   return {
     id: page.id,
@@ -316,7 +369,12 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
     publishedDate: published?.type === "date" ? published.date?.start?.slice(0, 10) ?? "" : "",
     link,
     pubDate: Number.isNaN(date.getTime()) ? null : date,
+    ...(typeof shortId === "number" && Number.isInteger(shortId) && shortId > 0 && shortId < SHORT_ID_LIMIT ? { shortId } : {}),
   };
+}
+
+function excerptSharePath(excerpt: Excerpt): string {
+  return excerpt.shortId ? `${SHORT_SHARE_PREFIX}/${shareCode(excerpt.shortId)}` : `${READ_SHARE_PREFIX}/${excerpt.id}`;
 }
 
 function excerptDetailUrl(feedUrl: string, excerptId: string): string {
@@ -391,7 +449,7 @@ function einkPublication(excerpt: Excerpt, showActions: boolean): string {
   const date = einkText(`发布日期：${excerpt.publishedDate || "—"}`);
   return [
     `<span>${date}</span>`,
-    ...(showActions ? [`<span id="data-source"><br />${einkText("数据来源：")}<a class="metadata-link" lang="en" href="${htmlText(excerpt.link)}">Notion</a><br />分享链接：<button type="button" class="share-copy" id="share-copy">点击复制</button><span id="share-status" role="status"></span></span>`] : []),
+    ...(showActions ? [`<span id="data-source"><br />${einkText("数据来源：")}<a class="metadata-link" lang="en" href="${htmlText(excerpt.link)}">Notion</a><br />分享链接：<button type="button" class="share-copy" id="share-copy" data-path="${htmlText(excerptSharePath(excerpt))}">点击复制</button><span id="share-status" role="status"></span></span>`] : []),
   ].join("");
 }
 
@@ -672,7 +730,7 @@ const EINK_DETAIL_CHROME = [
   "var shareCopy=document.getElementById('share-copy');",
   "var shareStatus=document.getElementById('share-status');",
   "if(shareCopy)shareCopy.addEventListener('click',function(){",
-  "var link=location.origin+location.pathname.replace(/^\\/read\\/[ds]\\//,'/read/s/');",
+  "var link=location.origin+shareCopy.getAttribute('data-path');",
   "function fallback(){",
   "var input=document.createElement('textarea');input.value=link;input.style.position='fixed';input.style.left='-9999px';document.body.appendChild(input);input.select();",
   "var copied=false;try{copied=document.execCommand('copy');}catch(err){}document.body.removeChild(input);",
@@ -772,6 +830,21 @@ async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promis
   const page = await response.json() as NotionPage;
   if (page.parent?.type !== "data_source_id" || page.parent.data_source_id !== env.NOTION_DATA_SOURCE_ID) return null;
   return excerptFromPage(page);
+}
+
+async function fetchExcerptByShortId(env: ConfiguredBindings, shortId: number): Promise<Excerpt | null> {
+  const response = await fetchNotionJson(`https://api.notion.com/v1/data_sources/${encodeURIComponent(env.NOTION_DATA_SOURCE_ID)}/query`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.NOTION_TOKEN}`,
+      "Notion-Version": NOTION_VERSION,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ page_size: 1, filter: { property: SHORT_ID_PROPERTY, unique_id: { equals: shortId } } }),
+  });
+  if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
+  const page = (await response.json() as NotionQuery).results?.[0];
+  return page ? excerptFromPage(page) : null;
 }
 
 function einkParagraphs(translation: string, pageId: string, imageBaseUrl: string): string {
@@ -1009,9 +1082,10 @@ const worker = {
     const isExcerptFeed = url.pathname === READ_FEED_PATH;
     const isEinkList = url.pathname === READ_LIST_PATH;
     const einkDetailId = readDetailId(url.pathname);
+    const shortId = shortShareId(url.pathname);
     const imageMatch = url.pathname.match(/^\/read\/p\/([^/]+)\/([^/]+)$/);
     const imageIds = imageMatch && NOTION_PAGE_ID.test(imageMatch[1] ?? "") && NOTION_PAGE_ID.test(imageMatch[2] ?? "") ? [imageMatch[1]!, imageMatch[2]!] : null;
-    const usesExcerpts = isExcerptFeed || isEinkList || Boolean(einkDetailId) || Boolean(imageIds);
+    const usesExcerpts = isExcerptFeed || isEinkList || Boolean(einkDetailId) || shortId !== null || Boolean(imageIds);
     if (!isBookFeed && !usesExcerpts && !coverId) {
       return new Response("Not found", { status: 404 });
     }
@@ -1038,6 +1112,16 @@ const worker = {
         const cover = await fetchCover(configured, coverId);
         if (!cover) return new Response("Not found", { status: 404 });
         return request.method === "HEAD" ? new Response(null, { status: cover.status, headers: cover.headers }) : cover;
+      }
+
+      if (shortId !== null) {
+        const excerpt = await fetchExcerptByShortId(configured, shortId);
+        // Cache misses too, so probing unused numbers does not reach Notion on every request.
+        if (!excerpt) return new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=300" } });
+        return htmlResponse(
+          renderEinkDetail(excerpt, READ_LIST_PATH, `${url.origin}${READ_ASSET_PREFIX}`, undefined, "all", 1, false),
+          request.method,
+        );
       }
 
       if (einkDetailId) {
@@ -1096,9 +1180,9 @@ const worker = {
         },
       });
     } catch (error) {
-      console.error(coverId || imageIds ? "Failed to load image" : isEinkList || einkDetailId ? "Failed to build e-ink page" : "Failed to build book RSS", error);
+      console.error(coverId || imageIds ? "Failed to load image" : isEinkList || einkDetailId || shortId !== null ? "Failed to build e-ink page" : "Failed to build book RSS", error);
       return new Response(
-        coverId || imageIds ? "Image temporarily unavailable" : isEinkList || einkDetailId ? "Page temporarily unavailable" : "Feed temporarily unavailable",
+        coverId || imageIds ? "Image temporarily unavailable" : isEinkList || einkDetailId || shortId !== null ? "Page temporarily unavailable" : "Feed temporarily unavailable",
         { status: 502, headers: { "Cache-Control": "no-store" } },
       );
     }

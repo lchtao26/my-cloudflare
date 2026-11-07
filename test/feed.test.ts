@@ -11,6 +11,8 @@ import worker, {
   renderEinkList,
   renderExcerptFeed,
   renderFeed,
+  shareCode,
+  shareCodeId,
   viewQueryFilter,
   type NotionPage,
 } from "../src/index.ts";
@@ -1408,6 +1410,80 @@ test("e-ink detail hides its bottom navigation only for shared links", async (co
   }
 });
 
+test("short share links resolve the Notion ID property and are copied from detail pages", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+  const page = {
+    id: pageId,
+    url: `https://www.notion.so/${pageId}`,
+    parent: { type: "data_source_id", data_source_id: "excerpt-source" },
+    properties: {
+      ID: { type: "unique_id", unique_id: { prefix: null, number: 42 } },
+      "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "标题" }] },
+      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
+    },
+  };
+  const queries: unknown[] = [];
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const href = String(url);
+    if (href.includes(`/pages/${pageId}`)) return Response.json(page);
+    if (init?.method === "POST" && href.includes("/data_sources/excerpt-source/query")) {
+      const body = JSON.parse(String(init.body));
+      queries.push(body);
+      return Response.json({ results: body.filter?.unique_id?.equals === 42 ? [page] : [], has_more: false });
+    }
+    throw new Error(`Unexpected fetch: ${href}`);
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" };
+  const origin = "https://example.workers.dev";
+
+  const code = shareCode(42);
+  const detail = await (await worker.fetch(new Request(`${origin}/read/d/${pageId}`), env)).text();
+  assert.match(detail, new RegExp(`id="share-copy" data-path="/s/${code}"`));
+
+  const shared = await worker.fetch(new Request(`${origin}/s/${code}`), env);
+  assert.equal(shared.status, 200);
+  const html = await shared.text();
+  assert.match(html, /<p>正文<\/p>/);
+  assert.equal(html.match(/<nav class="nav-row" hidden>/g)?.length, 1);
+  assert.doesNotMatch(html, /id="share-copy"/);
+  assert.deepEqual(queries, [{ page_size: 1, filter: { property: "ID", unique_id: { equals: 42 } } }]);
+
+  const missing = await worker.fetch(new Request(`${origin}/s/${shareCode(7)}`), env);
+  assert.equal(missing.status, 404);
+  assert.equal(missing.headers.get("Cache-Control"), "public, max-age=300");
+  assert.equal(queries.length, 2);
+
+  for (const path of ["/s/42", `/s/${code}/x`, `/s/${code}0`, "/s/abc-ef", "/s/zzzzzz"]) {
+    assert.equal((await worker.fetch(new Request(`${origin}${path}`), env)).status, 404);
+  }
+  assert.equal(queries.length, 2, "malformed short links never reach Notion");
+});
+
+test("share codes round-trip, look unrelated for consecutive IDs, and reject guesses", () => {
+  const codes = new Set<string>();
+  for (const id of [1, 2, 3, 4, 5, 1000, 2 ** 20 - 1]) {
+    const code = shareCode(id);
+    assert.match(code, /^[0-9A-Za-z]{6}$/);
+    assert.equal(shareCodeId(code), id);
+    codes.add(code);
+  }
+  assert.equal(codes.size, 7);
+  assert.notEqual(shareCode(1).slice(0, 3), shareCode(2).slice(0, 3));
+  assert.equal(shareCodeId("abc"), null);
+  assert.equal(shareCodeId("abc-ef"), null);
+
+  let accepted = 0;
+  const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  for (let i = 0; i < 20000; i++) {
+    let guess = "";
+    for (let j = 0; j < 6; j++) guess += alphabet[(i * 7919 + j * 104729 + i * j * 31) % 62];
+    if (shareCodeId(guess) !== null) accepted++;
+  }
+  assert.ok(accepted < 50, `${accepted} of 20000 guesses decoded to an ID`);
+});
+
 test("e-ink detail taps left to scroll up and right to scroll down", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const html = renderEinkDetail({
@@ -1450,7 +1526,10 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     const shareHandlers = new Map<string, () => void>();
     const copiedLinks: string[] = [];
     const storageCalls: string[] = [];
-    const shareButton = { addEventListener: (name: string, handler: () => void) => shareHandlers.set(name, handler) };
+    const shareButton = {
+      addEventListener: (name: string, handler: () => void) => shareHandlers.set(name, handler),
+      getAttribute: (name: string) => name === "data-path" ? html.match(/data-path="([^"]*)"/)?.[1] ?? null : null,
+    };
     const shareStatus = { textContent: "" };
     const target = (tagName: string) => ({ tagName, parentNode: body });
     let selected = false;
