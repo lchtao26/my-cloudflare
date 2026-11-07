@@ -471,7 +471,7 @@ const EINK_STYLE = [
   "html{-webkit-text-size-adjust:100%;}",
   // Fixed rem gutters + main max-width (no vw); Kindles often ignore CSS min()/max().
   // OS-bundled faces first: Safari hides user-installed fonts, and partial installs (e.g. Heavy only) render body text too bold in Chrome.
-  "body{margin:0;padding:1.25rem 1.625rem 2.5rem;font-family:serif;font-size:1.125rem;font-weight:400;line-height:1.75;letter-spacing:normal;text-align:left;word-break:normal;overflow-wrap:break-word;color:#000;background:#fff;}",
+  "body{margin:0;padding:1.25rem 1.625rem 2.5rem;font-family:serif;font-size:1.09375rem;font-weight:400;line-height:1.75;letter-spacing:normal;text-align:left;word-break:normal;overflow-wrap:break-word;color:#000;background:#fff;}",
   ":lang(zh){font-family:\"Songti SC\",\"STSong\",\"Noto Serif CJK SC\",\"SimSun\",serif;}",
   ":lang(ja){font-family:\"Hiragino Mincho ProN\",\"Hiragino Mincho Pro\",\"Yu Mincho\",\"YuMincho\",\"Noto Serif CJK JP\",\"MS PMincho\",serif;}",
   ":lang(en){font-family:Georgia,\"Times New Roman\",serif;}",
@@ -504,7 +504,7 @@ const EINK_STYLE = [
   ".categories a[aria-current=page]{background:#000;color:#fff;}",
   ".meta{font-size:1rem;}",
   // Responsive type must follow the base heading/meta rules to win the cascade.
-  "@media (min-width:440px){body{padding-right:1.25rem;padding-left:1.25rem;}}",
+  "@media (min-width:440px){body{font-size:1.125rem;padding-right:1.25rem;padding-left:1.25rem;}}",
   "@media (min-width:720px){body{font-size:1.25rem;}h1{font-size:1.65rem;}.meta{font-size:1.0625rem;}main{max-width:36rem;}}",
   ".nav-row{display:flex;gap:0.5rem;align-items:stretch;margin:0.85rem 0;}",
   ".nav-row[hidden]{display:none;}",
