@@ -520,7 +520,7 @@ const EINK_STYLE = [
   ".list-actions .btn{flex:1;min-width:0;}",
   "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
   // Mobile article images may extend beyond the reading column to the screen edges.
-  "@media (max-width:719px){@supports (container-type:inline-size) and (width:100cqw){html{container-type:inline-size;}.excerpt-body img{width:100cqw;max-width:none;margin-left:calc(50% - 50cqw);}}}",
+  "@media (max-width:440px){@supports (container-type:inline-size) and (width:100cqw){html{container-type:inline-size;}.excerpt-body img{width:100cqw;max-width:none;margin-left:calc(50% - 50cqw);}}}",
   "hr{border:0;border-top:2px solid #000;margin:1.5rem 0;}",
   "cite{font-style:normal;font-weight:700;}",
   // Thin bottom progress track; width updates from scroll position (no animation).
