@@ -9,15 +9,14 @@ const BOOK_FEED_PATH = "/book/rss";
 const BOOK_ASSET_PREFIX = "/book/p";
 const READ_LIST_PATH = "/read";
 const READ_DETAIL_PREFIX = "/read/d";
-const READ_SHARE_PREFIX = "/read/s";
 const READ_FEED_PATH = "/read/rss";
 const READ_ASSET_PREFIX = "/read/p";
 const SHORT_SHARE_PREFIX = "/s";
-// Notion ID property whose auto-increment number becomes the short share code.
+// Notion ID property whose auto-increment number becomes the detail and share code.
 const SHORT_ID_PROPERTY = "ID";
-// Share codes are a keyed 32-bit Feistel permutation of the ID, written as 6 base62 characters.
+// Codes are a keyed 32-bit Feistel permutation of the ID, written as 6 base62 characters.
 // IDs stay below 2^20, so a random code decodes to a valid ID only about 1 time in 4096.
-// Changing the keys or alphabet breaks every share link already sent out.
+// Changing the keys or alphabet breaks every detail and share link already sent out.
 const SHORT_ID_LIMIT = 2 ** 20;
 const SHARE_CODE_KEYS = [0x3c6e, 0xa54f, 0x510e, 0x9b05];
 const SHARE_CODE_ALPHABET = "hqAiRYEFKT2xePmzuOfgrw4dBbNscH78S9kI30LQjpaGUJXonCMZ6ly15DtWvV";
@@ -36,13 +35,6 @@ type ReadCategory = typeof READ_CATEGORIES[number]["id"];
 
 function readCategory(value: string | null): ReadCategory {
   return READ_CATEGORIES.find((category) => category.id === (value === "likes" ? "favorites" : value))?.id ?? "all";
-}
-
-function readDetailId(path: string): string | null {
-  const prefix = [`${READ_DETAIL_PREFIX}/`, `${READ_SHARE_PREFIX}/`].find((value) => path.startsWith(value));
-  if (!prefix) return null;
-  const id = path.slice(prefix.length);
-  return NOTION_PAGE_ID.test(id) ? id : null;
 }
 
 function shareCodeRound(half: number, key: number): number {
@@ -79,9 +71,9 @@ export function shareCodeId(code: string): number | null {
   return id > 0 && id < SHORT_ID_LIMIT ? id : null;
 }
 
-function shortShareId(path: string): number | null {
-  if (!path.startsWith(`${SHORT_SHARE_PREFIX}/`)) return null;
-  return shareCodeId(path.slice(SHORT_SHARE_PREFIX.length + 1));
+function pathCodeId(path: string, prefix: string): number | null {
+  if (!path.startsWith(`${prefix}/`)) return null;
+  return shareCodeId(path.slice(prefix.length + 1));
 }
 
 function categorySearch(category: ReadCategory, page = 1): string {
@@ -186,7 +178,8 @@ type Excerpt = {
   publishedDate: string;
   link: string;
   pubDate: Date | null;
-  shortId?: number;
+  /** Obfuscated Notion ID number used in detail and share URLs. */
+  code: string;
 };
 
 export type Book = {
@@ -342,14 +335,15 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
   const useOriginal = usesOriginalContent(properties);
   const body = useOriginal ? textProperty(properties, "正文") : textProperty(properties, "正文翻译");
   const link = externalUrl(page.url);
-  if (!link || !page.id || !body) return null;
+  const uniqueId = properties?.[SHORT_ID_PROPERTY];
+  const shortId = uniqueId?.type === "unique_id" ? uniqueId.unique_id?.number : null;
+  const validShortId = typeof shortId === "number" && Number.isInteger(shortId) && shortId > 0 && shortId < SHORT_ID_LIMIT;
+  if (!link || !page.id || !body || !validShortId) return null;
   const originalTitle = textProperty(properties, "标题");
   const translatedTitle = useOriginal ? "" : textProperty(properties, "标题翻译");
   const originalLang = excerptOriginalLang(properties);
   const originalLink = properties?.["原文链接"];
   const published = properties?.["发布日期"];
-  const uniqueId = properties?.[SHORT_ID_PROPERTY];
-  const shortId = uniqueId?.type === "unique_id" ? uniqueId.unique_id?.number : null;
   const date = new Date(page.created_time ?? page.last_edited_time ?? "");
   return {
     id: page.id,
@@ -369,16 +363,12 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
     publishedDate: published?.type === "date" ? published.date?.start?.slice(0, 10) ?? "" : "",
     link,
     pubDate: Number.isNaN(date.getTime()) ? null : date,
-    ...(typeof shortId === "number" && Number.isInteger(shortId) && shortId > 0 && shortId < SHORT_ID_LIMIT ? { shortId } : {}),
+    code: shareCode(shortId),
   };
 }
 
-function excerptSharePath(excerpt: Excerpt): string {
-  return excerpt.shortId ? `${SHORT_SHARE_PREFIX}/${shareCode(excerpt.shortId)}` : `${READ_SHARE_PREFIX}/${excerpt.id}`;
-}
-
-function excerptDetailUrl(feedUrl: string, excerptId: string): string {
-  return `${new URL(feedUrl).origin}${READ_DETAIL_PREFIX}/${excerptId}`;
+function excerptDetailUrl(feedUrl: string, code: string): string {
+  return `${new URL(feedUrl).origin}${READ_DETAIL_PREFIX}/${code}`;
 }
 
 // Self-closing tags and captioned <image>...</image> wrappers both count.
@@ -423,7 +413,7 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
     items: excerpts.map((excerpt) => {
       const item: RssFeed.Item<Date> = {
         title: formatText(excerpt.title),
-        link: excerptDetailUrl(feedUrl, excerpt.id),
+        link: excerptDetailUrl(feedUrl, excerpt.code),
         guid: { value: `notion:${excerpt.id}`, isPermaLink: false },
       };
       const description = excerptDescription(excerpt, feedUrl);
@@ -449,7 +439,7 @@ function einkPublication(excerpt: Excerpt, showActions: boolean): string {
   const date = einkText(`发布日期：${excerpt.publishedDate || "—"}`);
   return [
     `<span>${date}</span>`,
-    ...(showActions ? [`<span id="data-source"><br />${einkText("数据来源：")}<a class="metadata-link" lang="en" href="${htmlText(excerpt.link)}">Notion</a><br />分享链接：<button type="button" class="share-copy" id="share-copy" data-path="${htmlText(excerptSharePath(excerpt))}">点击复制</button><span id="share-status" role="status"></span></span>`] : []),
+    ...(showActions ? [`<span id="data-source"><br />${einkText("数据来源：")}<a class="metadata-link" lang="en" href="${htmlText(excerpt.link)}">Notion</a><br />分享链接：<button type="button" class="share-copy" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}">点击复制</button><span id="share-status" role="status"></span></span>`] : []),
   ].join("");
 }
 
@@ -646,13 +636,13 @@ const EINK_LIST_PAGING = [
 
 export function renderEinkList(excerpts: Excerpt[], listPath: string, category: ReadCategory = "all", page = 1, hasMore = false): string {
   const items = excerpts.map((excerpt) => {
-    const href = htmlText(`${listPath}/d/${excerpt.id}${categorySearch(category, page)}`);
+    const href = htmlText(`${listPath}/d/${excerpt.code}${categorySearch(category, page)}`);
     const meta = [
       excerpt.sourceTitle ? einkText(excerpt.sourceTitle) : "",
       excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
     ].filter(Boolean).join(" · ");
     return [
-      `<li id="${htmlText(excerpt.id)}" lang="${htmlText(excerpt.titleLang)}" tabindex="-1">`,
+      `<li id="${htmlText(excerpt.code)}" lang="${htmlText(excerpt.titleLang)}" tabindex="-1">`,
       `<a class="item-link" href="${href}">${einkText(excerpt.title)}</a>`,
       ...(meta ? [`<p class="meta" lang="zh-CN">${meta}</p>`] : []),
       "</li>",
@@ -664,33 +654,33 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
     ).join("")}</nav>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
     ...((items || hasMore) ? [
-      `<div class="list-actions"><a class="btn" href="#">返回顶部</a>${hasMore ? `<a class="btn" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}${excerpts.length ? `#${excerpts[excerpts.length - 1]!.id}` : ""}`)}">加载更多</a>` : ""}</div>`,
+      `<div class="list-actions"><a class="btn" href="#">返回顶部</a>${hasMore ? `<a class="btn" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}${excerpts.length ? `#${excerpts[excerpts.length - 1]!.code}` : ""}`)}">加载更多</a>` : ""}</div>`,
     ] : []),
   ].join("\n"), false, EINK_LIST_NAV + "\n" + EINK_LIST_PAGING);
 }
 
 export type EinkNeighbors = {
-  prevId: string | null;
-  nextId: string | null;
+  prevCode: string | null;
+  nextCode: string | null;
 };
 
-export function neighborsFor(excerpts: Excerpt[], pageId: string): EinkNeighbors | undefined {
-  const index = excerpts.findIndex((item) => item.id === pageId);
+export function neighborsFor(excerpts: Excerpt[], code: string): EinkNeighbors | undefined {
+  const index = excerpts.findIndex((item) => item.code === code);
   if (index < 0) return undefined;
   return {
-    prevId: index > 0 ? excerpts[index - 1]!.id : null,
-    nextId: index < excerpts.length - 1 ? excerpts[index + 1]!.id : null,
+    prevCode: index > 0 ? excerpts[index - 1]!.code : null,
+    nextCode: index < excerpts.length - 1 ? excerpts[index + 1]!.code : null,
   };
 }
 
-function einkNav(listPath: string, excerptId: string, neighbors: EinkNeighbors, category: ReadCategory, page: number, hidden = false): string {
-  const prev = neighbors.prevId
-    ? `<a href="${htmlText(`${listPath}/d/${neighbors.prevId}${categorySearch(category, page)}`)}">${einkText("上一篇")}</a>`
+function einkNav(listPath: string, code: string, neighbors: EinkNeighbors, category: ReadCategory, page: number, hidden = false): string {
+  const prev = neighbors.prevCode
+    ? `<a href="${htmlText(`${listPath}/d/${neighbors.prevCode}${categorySearch(category, page)}`)}">${einkText("上一篇")}</a>`
     : `<span class="is-disabled">${einkText("上一篇")}</span>`;
-  const next = neighbors.nextId
-    ? `<a href="${htmlText(`${listPath}/d/${neighbors.nextId}${categorySearch(category, page)}`)}">${einkText("下一篇")}</a>`
+  const next = neighbors.nextCode
+    ? `<a href="${htmlText(`${listPath}/d/${neighbors.nextCode}${categorySearch(category, page)}`)}">${einkText("下一篇")}</a>`
     : `<span class="is-disabled">${einkText("下一篇")}</span>`;
-  const back = `<a href="${htmlText(`${listPath}${categorySearch(category, page)}#${excerptId}`)}">${einkText("返回列表")}</a>`;
+  const back = `<a href="${htmlText(`${listPath}${categorySearch(category, page)}#${code}`)}">${einkText("返回列表")}</a>`;
   return `<nav class="nav-row"${hidden ? " hidden" : ""}>\n${prev}\n${back}\n${next}\n</nav>`;
 }
 
@@ -701,7 +691,7 @@ const EINK_DETAIL_CHROME = [
   "<script>",
   "(function(){",
   "function step(){return Math.max(80,window.innerHeight);}",
-  "function pageKey(){var m=location.pathname.match(/\\/read\\/d\\/([0-9a-f-]{36})/i);return m?'eink-progress:'+m[1]:null;}",
+  "function pageKey(){var m=location.pathname.match(/^\\/read\\/d\\/([0-9A-Za-z]{6})$/);return m?'eink-progress:'+m[1]:null;}",
   "function scrollMax(){return document.documentElement.scrollHeight-window.innerHeight;}",
   "function scrollRatio(){var max=scrollMax();return max>0?Math.min(1,Math.max(0,(window.scrollY||window.pageYOffset||0)/max)):1;}",
   "function progress(){",
@@ -807,8 +797,8 @@ export function renderEinkDetail(
   page = 1,
   showNavigation = true,
 ): string {
-  const navNeighbors = neighbors ?? { prevId: null, nextId: null };
-  const nav = einkNav(listPath, excerpt.id, navNeighbors, category, page, !showNavigation);
+  const navNeighbors = neighbors ?? { prevCode: null, nextCode: null };
+  const nav = einkNav(listPath, excerpt.code, navNeighbors, category, page, !showNavigation);
   return einkDocument(excerpt.title, [
     "<article>",
     `<h1 lang="${htmlText(excerpt.titleLang)}">${einkText(excerpt.title)}</h1>`,
@@ -816,20 +806,6 @@ export function renderEinkDetail(
     "</article>",
     nav,
   ].join("\n"), true, EINK_DETAIL_CHROME, "detail");
-}
-
-async function fetchExcerptById(env: ConfiguredBindings, pageId: string): Promise<Excerpt | null> {
-  const response = await fetch(`https://api.notion.com/v1/pages/${encodeURIComponent(pageId)}`, {
-    headers: {
-      Authorization: `Bearer ${env.NOTION_TOKEN}`,
-      "Notion-Version": NOTION_VERSION,
-    },
-  });
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
-  const page = await response.json() as NotionPage;
-  if (page.parent?.type !== "data_source_id" || page.parent.data_source_id !== env.NOTION_DATA_SOURCE_ID) return null;
-  return excerptFromPage(page);
 }
 
 async function fetchExcerptByShortId(env: ConfiguredBindings, shortId: number): Promise<Excerpt | null> {
@@ -1081,11 +1057,11 @@ const worker = {
     const isBookFeed = url.pathname === BOOK_FEED_PATH;
     const isExcerptFeed = url.pathname === READ_FEED_PATH;
     const isEinkList = url.pathname === READ_LIST_PATH;
-    const einkDetailId = readDetailId(url.pathname);
-    const shortId = shortShareId(url.pathname);
+    const detailShortId = pathCodeId(url.pathname, READ_DETAIL_PREFIX);
+    const shortId = detailShortId ?? pathCodeId(url.pathname, SHORT_SHARE_PREFIX);
     const imageMatch = url.pathname.match(/^\/read\/p\/([^/]+)\/([^/]+)$/);
     const imageIds = imageMatch && NOTION_PAGE_ID.test(imageMatch[1] ?? "") && NOTION_PAGE_ID.test(imageMatch[2] ?? "") ? [imageMatch[1]!, imageMatch[2]!] : null;
-    const usesExcerpts = isExcerptFeed || isEinkList || Boolean(einkDetailId) || shortId !== null || Boolean(imageIds);
+    const usesExcerpts = isExcerptFeed || isEinkList || shortId !== null || Boolean(imageIds);
     if (!isBookFeed && !usesExcerpts && !coverId) {
       return new Response("Not found", { status: 404 });
     }
@@ -1094,7 +1070,7 @@ const worker = {
     }
     const notionToken = env.NOTION_TOKEN;
     const dataSourceId = usesExcerpts ? env.NOTION_EXCERPTS_DATA_SOURCE_ID : env.NOTION_DATA_SOURCE_ID;
-    const useFavoritesView = (isEinkList || einkDetailId !== null) && category === "favorites";
+    const useFavoritesView = (isEinkList || detailShortId !== null) && category === "favorites";
     const excerptsViewId = useFavoritesView ? env.NOTION_EXCERPTS_FAVORITES_VIEW_ID : env.NOTION_EXCERPTS_VIEW_ID;
     const needsView = isExcerptFeed || isEinkList;
     if (!notionToken || !dataSourceId || (needsView && !excerptsViewId)) {
@@ -1115,19 +1091,9 @@ const worker = {
       }
 
       if (shortId !== null) {
-        const excerpt = await fetchExcerptByShortId(configured, shortId);
-        // Cache misses too, so probing unused numbers does not reach Notion on every request.
-        if (!excerpt) return new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=300" } });
-        return htmlResponse(
-          renderEinkDetail(excerpt, READ_LIST_PATH, `${url.origin}${READ_ASSET_PREFIX}`, undefined, "all", 1, false),
-          request.method,
-        );
-      }
-
-      if (einkDetailId) {
-        const showNavigation = !url.pathname.startsWith(`${READ_SHARE_PREFIX}/`);
+        const showNavigation = detailShortId !== null;
         // Load the selected list in parallel so prev/next follow the same order as /read.
-        const excerptPromise = fetchExcerptById(configured, einkDetailId);
+        const excerptPromise = fetchExcerptByShortId(configured, shortId);
         const listPromise = excerptsViewId && showNavigation
           ? fetchExcerptPages(configured, excerptsViewId, category, page * FEED_ITEM_LIMIT).then((pages) =>
             pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null)).catch((error) => {
@@ -1136,8 +1102,9 @@ const worker = {
             })
           : Promise.resolve([] as Excerpt[]);
         const [excerpt, list] = await Promise.all([excerptPromise, listPromise]);
-        if (!excerpt) return new Response("Not found", { status: 404 });
-        const neighbors = neighborsFor(list, excerpt.id) ?? { prevId: null, nextId: null };
+        // Cache misses too, so probing unused codes does not reach Notion on every request.
+        if (!excerpt) return new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=300" } });
+        const neighbors = neighborsFor(list, excerpt.code) ?? { prevCode: null, nextCode: null };
         return htmlResponse(
           renderEinkDetail(
             excerpt,
@@ -1180,9 +1147,9 @@ const worker = {
         },
       });
     } catch (error) {
-      console.error(coverId || imageIds ? "Failed to load image" : isEinkList || einkDetailId || shortId !== null ? "Failed to build e-ink page" : "Failed to build book RSS", error);
+      console.error(coverId || imageIds ? "Failed to load image" : isEinkList || shortId !== null ? "Failed to build e-ink page" : "Failed to build book RSS", error);
       return new Response(
-        coverId || imageIds ? "Image temporarily unavailable" : isEinkList || einkDetailId || shortId !== null ? "Page temporarily unavailable" : "Feed temporarily unavailable",
+        coverId || imageIds ? "Image temporarily unavailable" : isEinkList || shortId !== null ? "Page temporarily unavailable" : "Feed temporarily unavailable",
         { status: 502, headers: { "Cache-Control": "no-store" } },
       );
     }
