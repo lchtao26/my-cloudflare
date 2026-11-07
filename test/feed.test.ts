@@ -1527,7 +1527,7 @@ test("share codes round-trip, look unrelated for consecutive IDs, and reject gue
   assert.ok(accepted < 50, `${accepted} of 20000 guesses decoded to an ID`);
 });
 
-test("e-ink detail taps left to scroll up and right to scroll down", () => {
+test("e-ink detail pages only when the blank margins are tapped", () => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const code = shareCode(1);
   const html = renderEinkDetail({
@@ -1552,8 +1552,6 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
   }, "/read", "https://example.com/read/p");
   assert.doesNotMatch(html, /class="pager"|向上|向下/);
   assert.match(html, /window\.scrollBy\(0,dir\*step\(\)\)/);
-  assert.match(html, /clientX[\s\S]*innerWidth\/2/);
-  assert.match(html, /tagName==='A'/);
   assert.match(html, /class="progress"/);
   assert.match(html, /id="progress-bar"/);
   assert.match(html, /localStorage\.setItem\(key,String\(scrollRatio\(\)\)\)/);
@@ -1568,6 +1566,8 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     const handlers = new Map<string, (event: object) => void>();
     const scrolls: number[] = [];
     const body = {};
+    const root = { scrollHeight: 2000 };
+    const main = { getBoundingClientRect: () => ({ left: 300, right: 700 }) };
     const shareHandlers = new Map<string, () => void>();
     const copiedLinks: string[] = [];
     const storageCalls: string[] = [];
@@ -1576,11 +1576,12 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
       getAttribute: (name: string) => name === "data-path" ? html.match(/data-path="([^"]*)"/)?.[1] ?? null : null,
     };
     const shareStatus = { textContent: "" };
-    const target = (tagName: string) => ({ tagName, parentNode: body });
+    const target = (tagName: string) => tagName === "BODY" ? body : tagName === "HTML" ? root : { tagName, parentNode: body };
     let selected = false;
     let now = 1000;
     const document = {
-      body, documentElement: { scrollHeight: 2000 },
+      body, documentElement: root,
+      querySelector: () => main,
       getElementById: (id: string) => id === "share-copy" ? shareButton : id === "share-status" ? shareStatus : null,
       addEventListener(name: string, handler: (event: object) => void) { handlers.set(name, handler); },
     };
@@ -1611,9 +1612,11 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
       selectText(value: boolean) { selected = value; },
       advance(milliseconds: number) { now += milliseconds; },
       startPointer() { dispatch("pointerdown", {}); },
-      startTouch(x = 750, y = 200) { dispatch("touchstart", { touches: [{ clientX: x, clientY: y }] }); },
+      startTouch(x = 750, y = 200, tagName = "BODY") {
+        dispatch("touchstart", { target: target(tagName), touches: [{ clientX: x, clientY: y }] });
+      },
       moveTouch(x: number, y: number) { dispatch("touchmove", { touches: [{ clientX: x, clientY: y }] }); },
-      endTouch(x = 750, y = 200, tagName = "P") {
+      endTouch(x = 750, y = 200, tagName = "BODY") {
         let prevented = false;
         dispatch("touchend", {
           target: target(tagName),
@@ -1622,8 +1625,8 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
         });
         return prevented;
       },
-      click(pointerType?: string, tagName = "P", clientX = 750) {
-        dispatch("click", { target: target(tagName), clientX, pointerType });
+      click(pointerType?: string, tagName = "BODY", clientX = 750, extra: object = {}) {
+        dispatch("click", { target: target(tagName), clientX, pointerType, ...extra });
       },
     };
   }
@@ -1638,6 +1641,38 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
   touch.click(undefined, "A");
   touch.click("touch", "BUTTON");
   assert.deepEqual(touch.scrolls, []);
+
+  const margins = setupPaging(false);
+  for (const x of [250, 750]) {
+    for (const tagName of ["MAIN", "ARTICLE", "H1", "P", "IMG", "A", "BUTTON"]) {
+      margins.click("touch", tagName, x);
+      margins.startTouch(x, 200, tagName);
+      assert.equal(margins.endTouch(x, 200, tagName), false);
+      margins.advance(801);
+    }
+  }
+  for (const x of [300, 500, 700]) {
+    margins.click("touch", "BODY", x);
+    margins.startTouch(x);
+    assert.equal(margins.endTouch(x), false);
+    margins.advance(801);
+  }
+  margins.startTouch(695);
+  assert.equal(margins.endTouch(705), false, "a tap starting inside the column does not page");
+  margins.advance(801);
+  margins.startTouch(705);
+  assert.equal(margins.endTouch(695), false, "a tap ending inside the column does not page");
+  margins.advance(801);
+  margins.startTouch(750, 200, "P");
+  assert.equal(margins.endTouch(), false, "a tap starting on content does not page");
+  margins.advance(801);
+  for (const extra of [{ defaultPrevented: true }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 2 }]) {
+    margins.click("touch", "BODY", 750, extra);
+  }
+  assert.deepEqual(margins.scrolls, [], "content, column boundaries, and modified clicks do not page");
+  margins.click("touch", "BODY", 250);
+  margins.click("touch", "HTML", 750);
+  assert.deepEqual(margins.scrolls, [-600, 600]);
 
   for (const pointerEvents of [true, false]) {
     const paging = setupPaging(false, pointerEvents);
@@ -1654,7 +1689,7 @@ test("e-ink detail taps left to scroll up and right to scroll down", () => {
     paging.startPointer();
     paging.click("touch");
     paging.startPointer();
-    paging.click("touch", "P", 250);
+    paging.click("touch", "BODY", 250);
     assert.deepEqual(paging.scrolls, [600, -600]);
   }
 
