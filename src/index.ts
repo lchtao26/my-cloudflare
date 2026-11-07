@@ -483,15 +483,15 @@ const EINK_STYLE = [
   "h1{font-size:1.5rem;line-height:1.35;font-weight:700;margin:0 0 1rem;}",
   // Keep mixed-language reading text evenly spaced and scale paragraph gaps with its size.
   "p{margin:0.85em 0;}",
-  "li{margin:0.85rem 0;}",
+  "li{margin:0;}",
   "ul{list-style:none;margin:0;padding:0;}",
-  "li{border-top:2px solid #000;padding:1rem 0;}",
+  "li{border-top:2px solid #000;padding:1.5rem 0;}",
   "li:last-child{border-bottom:2px solid #000;}",
   // Fragment return from detail: no UA focus ring (scroll centering is JS).
   "li:focus{outline:none;}",
   "li:target{position:relative;padding-left:0.9rem;}",
   // Center the marker on the title's first line; retain the old offset for older readers.
-  "li:target::before{content:\"\";position:absolute;left:0;top:1.35rem;top:calc(1rem + 0.525em);width:0;height:0;border-top:0.35em solid transparent;border-bottom:0.35em solid transparent;border-left:0.55em solid #000;}",
+  "li:target::before{content:\"\";position:absolute;left:0;top:1.85rem;top:calc(1.5rem + 0.525em);width:0;height:0;border-top:0.35em solid transparent;border-bottom:0.35em solid transparent;border-left:0.55em solid #000;}",
   "a{color:#000;text-decoration:none;}",
   "a:hover{text-decoration:underline;text-underline-offset:0.35em;}",
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
@@ -502,7 +502,7 @@ const EINK_STYLE = [
   ".categories a{flex:0 0 calc(25% - 0.1875rem);}",
   ".categories a:nth-of-type(-n+2){order:-1;}",
   ".categories a[aria-current=page]{background:#000;color:#fff;}",
-  ".meta{font-size:1rem;}",
+  ".meta{font-size:1rem;margin:0.65em 0 0;}",
   // Responsive type must follow the base heading/meta rules to win the cascade.
   "@media (min-width:440px){body{font-size:1.125rem;padding-right:1.25rem;padding-left:1.25rem;}}",
   "@media (min-width:720px){body{font-size:1.25rem;}h1{font-size:1.65rem;}.meta{font-size:1.0625rem;}main{max-width:36rem;}}",
