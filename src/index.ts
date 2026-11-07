@@ -471,7 +471,7 @@ const EINK_STYLE = [
   "html{-webkit-text-size-adjust:100%;}",
   // Fixed rem gutters + main max-width (no vw); Kindles often ignore CSS min()/max().
   // OS-bundled faces first: Safari hides user-installed fonts, and partial installs (e.g. Heavy only) render body text too bold in Chrome.
-  "body{margin:0;padding:1.25rem 1.25rem 2.5rem;font-family:serif;font-size:1rem;font-weight:400;line-height:1.75;letter-spacing:normal;text-align:left;word-break:normal;overflow-wrap:break-word;color:#000;background:#fff;}",
+  "body{margin:0;padding:1.25rem 1.625rem 2.5rem;font-family:serif;font-size:1.125rem;font-weight:400;line-height:1.75;letter-spacing:normal;text-align:left;word-break:normal;overflow-wrap:break-word;color:#000;background:#fff;}",
   ":lang(zh){font-family:\"Songti SC\",\"STSong\",\"Noto Serif CJK SC\",\"SimSun\",serif;}",
   ":lang(ja){font-family:\"Hiragino Mincho ProN\",\"Hiragino Mincho Pro\",\"Yu Mincho\",\"YuMincho\",\"Noto Serif CJK JP\",\"MS PMincho\",serif;}",
   ":lang(en){font-family:Georgia,\"Times New Roman\",serif;}",
@@ -480,7 +480,7 @@ const EINK_STYLE = [
   "body{text-autospace:no-autospace;}",
   // 6\" Kindle: 365px column. Scribe (≥720px): 36rem + larger type.
   "main{max-width:365px;margin:0 auto;}",
-  "h1{font-size:1.375rem;line-height:1.35;font-weight:700;margin:0 0 1rem;}",
+  "h1{font-size:1.5rem;line-height:1.35;font-weight:700;margin:0 0 1rem;}",
   // Keep mixed-language reading text evenly spaced and scale paragraph gaps with its size.
   "p{margin:0.85em 0;}",
   "li{margin:0.85rem 0;}",
@@ -502,9 +502,9 @@ const EINK_STYLE = [
   ".categories a{flex:0 0 calc(25% - 0.1875rem);}",
   ".categories a:nth-of-type(-n+2){order:-1;}",
   ".categories a[aria-current=page]{background:#000;color:#fff;}",
-  ".meta{font-size:0.875rem;}",
+  ".meta{font-size:1rem;}",
   // Responsive type must follow the base heading/meta rules to win the cascade.
-  "@media (min-width:440px){body{font-size:1.125rem;}h1{font-size:1.5rem;}.meta{font-size:1rem;}}",
+  "@media (min-width:440px){body{padding-right:1.25rem;padding-left:1.25rem;}}",
   "@media (min-width:720px){body{font-size:1.25rem;}h1{font-size:1.65rem;}.meta{font-size:1.0625rem;}main{max-width:36rem;}}",
   ".nav-row{display:flex;gap:0.5rem;align-items:stretch;margin:0.85rem 0;}",
   ".nav-row[hidden]{display:none;}",
