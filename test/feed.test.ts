@@ -1251,6 +1251,16 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
   assert.doesNotMatch(html, /相关链接|class="actions"/);
   assert.doesNotMatch(html, /@media \(update: slow\)/);
 
+  const shareResponse = await worker.fetch(
+    new Request(`https://example.workers.dev/s/${code}`),
+    { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
+  );
+  assert.equal(shareResponse.status, 200);
+  const shareHtml = await shareResponse.text();
+  assert.match(shareHtml, /第一段/);
+  assert.match(shareHtml, /第二段/);
+  assert.doesNotMatch(shareHtml, /名词解释|术语 A|释义/);
+
   for (const userAgent of ["Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", "Mozilla/5.0 (Linux; Kindle) Silk/3.0"]) {
     const deviceResponse = await worker.fetch(
       new Request(`https://example.workers.dev/read/d/${code}`, { headers: { "User-Agent": userAgent } }),
