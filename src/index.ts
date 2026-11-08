@@ -227,10 +227,9 @@ function selectProperty(properties: NotionPage["properties"], name: string): str
   return property.select?.name?.trim() ?? "";
 }
 
-/** Chinese posts and comics use the original title/body; other entries use translations. */
+/** Chinese posts use the original title/body; other entries use translations. */
 function usesOriginalContent(properties: NotionPage["properties"]): boolean {
-  return selectProperty(properties, "原文语言") === "中文"
-    || selectProperty(properties, "内容形态") === "漫画";
+  return selectProperty(properties, "原文语言") === "中文";
 }
 
 /** Source language is also needed for original titles alongside Chinese translations. */
