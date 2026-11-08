@@ -14,11 +14,15 @@ Cloudflare Worker 从 Notion「书籍推荐」数据库读取最近编辑的前 
 
 推送到 `main` 后，GitHub Actions 会运行 `npm test`，再执行 `wrangler deploy`。部署任务使用 `production` 环境，因此 `CLOUDFLARE_API_TOKEN`（权限为 Edit Cloudflare Workers，且只限本账号）和 `CLOUDFLARE_ACCOUNT_ID` 要放在该环境的 Secrets 中。
 
-`NOTION_TOKEN` 只保存在 Cloudflare Worker Secret 中。Worker 上还没有这个密钥时，Actions 会拒绝部署；先在本地执行一次 `npx wrangler deploy --secrets-file .dev.vars`。不要再把这个仓库接到 Cloudflare Worker 的 Builds，否则每次推送会部署两次。
+`NOTION_TOKEN` 和 Instapaper 凭据保存在 Cloudflare Worker Secret 中。Worker 上还没有所需密钥时，Actions 会拒绝部署；先在本地执行一次 `npx wrangler deploy --secrets-file .dev.vars`。不要再把这个仓库接到 Cloudflare Worker 的 Builds，否则每次推送会部署两次。
 
 部署成功后的订阅地址为 `https://my-cloudflare.lichcode.workers.dev/book/rss`。接口返回 RSS 2.0，按 Notion 的最后编辑时间排序，为每本书使用稳定的 Notion 页面 ID 作为 GUID，每次最多输出 30 条。
 
-所有 RSS 接口在 Cloudflare 边缘和浏览器中缓存 5 分钟。缓存过期后必须重新读取 Notion；刷新失败时明确返回错误，不再继续返回过期内容。RSS 阅读器自身的抓取间隔仍由阅读器决定。图片缓存为 5 分钟。
+Notion 的书籍推荐和阅读节选 RSS 在 Cloudflare 边缘和浏览器中缓存 5 分钟。缓存过期后必须重新读取 Notion；刷新失败时明确返回错误，不再继续返回过期内容。RSS 阅读器自身的抓取间隔仍由阅读器决定。图片缓存为 5 分钟。
+
+## Instapaper 稍后读 RSS
+
+`/read/later/rss` 输出 Instapaper 书签的 RSS，默认读取 25 条未读书签；可使用 `limit` 和 `folder_id` 查询参数调整，例如 `/read/later/rss?limit=50&folder_id=starred`。Worker 需要配置 `INSTAPAPER_CONSUMER_ID`、`INSTAPAPER_CONSUMER_SECRET`、`INSTAPAPER_OAUTH_TOKEN` 和 `INSTAPAPER_OAUTH_TOKEN_SECRET` 四个 Secret，本地开发可填写到 `.dev.vars`。订阅地址无需登录即可读取书签，请妥善保管；接口不缓存内容。
 
 ## 阅读节选 RSS
 

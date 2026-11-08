@@ -1,1 +1,5 @@
 NOTION_TOKEN=secret_your_notion_integration_token
+INSTAPAPER_CONSUMER_ID=your_consumer_id
+INSTAPAPER_CONSUMER_SECRET=your_consumer_secret
+INSTAPAPER_OAUTH_TOKEN=your_oauth_token
+INSTAPAPER_OAUTH_TOKEN_SECRET=your_oauth_token_secret

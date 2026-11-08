@@ -1,5 +1,6 @@
 import { generateRssFeed, type RssFeed } from "feedsmith";
 import { formatText } from "./format-text.ts";
+import { readLaterFeed } from "./read-later.ts";
 
 const NOTION_VERSION = "2026-03-11";
 const FEED_TITLE = "书籍推荐";
@@ -121,6 +122,10 @@ type NotionProperty = {
 };
 
 type WorkerBindings = {
+  INSTAPAPER_CONSUMER_ID?: string;
+  INSTAPAPER_CONSUMER_SECRET?: string;
+  INSTAPAPER_OAUTH_TOKEN?: string;
+  INSTAPAPER_OAUTH_TOKEN_SECRET?: string;
   NOTION_TOKEN?: string;
   NOTION_DATA_SOURCE_ID?: string;
   NOTION_EXCERPTS_DATA_SOURCE_ID?: string;
@@ -1051,6 +1056,12 @@ function htmlResponse(body: string | null, method: string, vary?: string): Respo
 const worker = {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/read/later/rss") {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
+      }
+      return readLaterFeed(request, env);
+    }
     const category = readCategory(url.searchParams.get("tab") ?? url.searchParams.get("category"));
     const pageParam = url.searchParams.get("page");
     const page = pageParam && /^[1-9]\d{0,2}$/.test(pageParam) ? Number(pageParam) : 1;

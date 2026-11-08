@@ -9,7 +9,7 @@
     "enabled": true
   },
   "secrets": {
-    "required": ["NOTION_TOKEN"]
+    "required": ["NOTION_TOKEN", "INSTAPAPER_CONSUMER_ID", "INSTAPAPER_CONSUMER_SECRET", "INSTAPAPER_OAUTH_TOKEN", "INSTAPAPER_OAUTH_TOKEN_SECRET"]
   },
   "keep_vars": true,
   "vars": {
