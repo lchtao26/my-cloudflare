@@ -997,7 +997,7 @@ test("e-ink list loads more within its category and keeps the expanded list on r
   const get = async (path: string, headers?: HeadersInit) => (await worker.fetch(new Request(`https://example.com${path}`, { headers }), env)).text();
   const first = await get("/read?tab=weekly");
   assert.equal((first.match(/<li id=/g) ?? []).length, 30);
-  assert.match(first, /<div class="list-actions"><a class="btn" href="#">返回顶部<\/a><a class="btn"[^>]*>加载更多<\/a><\/div>/);
+  assert.match(first, /<div class="list-actions" id="list-actions"><a class="btn" id="back-to-top" href="#" hidden>返回顶部<\/a><a class="btn" id="load-more"[^>]*>加载更多<\/a><\/div>/);
   assert.match(first, /tab=weekly&amp;page=2[^\"]*">加载更多/);
   const second = await get("/read?tab=weekly&page=2");
   assert.equal((second.match(/<li id=/g) ?? []).length, 60);
@@ -1010,7 +1010,7 @@ test("e-ink list loads more within its category and keeps the expanded list on r
   assert.match(detail, new RegExp(`/read/d/${code(41)}\\?tab=weekly&amp;page=2`));
   const last = await get("/read?tab=weekly&page=3");
   assert.equal((last.match(/<li id=/g) ?? []).length, 65);
-  assert.match(last, /<a class="btn" href="#">返回顶部<\/a>/);
+  assert.match(last, /<a class="btn" id="back-to-top" href="#" hidden>返回顶部<\/a>/);
   assert.doesNotMatch(last, />加载更多<\/a>/);
 });
 
@@ -1035,6 +1035,58 @@ test("e-ink list displays every category without interaction", () => {
   assert.match(navigation, /href="\/read\?tab=later" class="category-later"/);
   assert.deepEqual(Array.from(navigation.matchAll(/<a [^>]*>([^<]+)<\/a>/g), (match) => match[1]),
     ["全部", "收藏", "稍后阅读", "新闻", "周刊", "文春", "小说"]);
+});
+
+test("back-to-top appears only when the remaining list content needs scrolling", () => {
+  const html = renderEinkList([], "/read", "all", 1, true);
+  const scripts = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), (match) => match[1]);
+  const script = scripts[2];
+  assert.ok(script);
+  let contentHeight = 700;
+  let viewportHeight = 800;
+  let hasMore = false;
+  const top = { hidden: true };
+  const more = { offsetHeight: 48 };
+  const main = {};
+  const rowHeight = () => top.hidden && !hasMore ? 0 : 72;
+  const actions = { get offsetHeight() { return rowHeight(); } };
+  const root = {
+    get scrollHeight() { return Math.max(viewportHeight, contentHeight + rowHeight()); },
+    get clientHeight() { return viewportHeight; },
+  };
+  const handlers = new Map<string, () => void>();
+  let resized = () => {};
+  class FakeResizeObserver {
+    constructor(callback: () => void) { resized = callback; }
+    observe(target: unknown) { assert.equal(target, main); }
+  }
+  const nodes: Record<string, unknown> = { "back-to-top": top, "list-actions": actions, "load-more": more };
+  const context = {
+    document: { documentElement: root, getElementById: (id: string) => id === "load-more" && !hasMore ? null : nodes[id], querySelector: () => main },
+    window: { addEventListener: (name: string, handler: () => void) => handlers.set(name, handler), getComputedStyle: () => ({ marginTop: "12px", marginBottom: "12px" }) },
+    ResizeObserver: FakeResizeObserver,
+  };
+  runInNewContext(script, context);
+  assert.equal(top.hidden, true);
+  contentHeight = 820;
+  resized();
+  assert.equal(top.hidden, false);
+  resized();
+  assert.equal(top.hidden, false, "the button's own height must not cause oscillation");
+  contentHeight = 790;
+  handlers.get("resize")?.();
+  assert.equal(top.hidden, true, "the button must not create the overflow that keeps it visible");
+  viewportHeight = 700;
+  handlers.get("resize")?.();
+  assert.equal(top.hidden, false);
+  hasMore = true;
+  contentHeight = 650;
+  top.hidden = true;
+  runInNewContext(script, context);
+  assert.equal(top.hidden, false, "the load-more link itself can make the page scrollable");
+  contentHeight = 600;
+  resized();
+  assert.equal(top.hidden, true);
 });
 
 test("e-ink list updates its return anchor only for normal article navigation", () => {
@@ -1219,7 +1271,7 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
   assert.match(html, /来源：某出版社/);
   assert.match(html, /章节：第一章/);
   assert.match(html, /日期：2025-06-12/);
-  assert.match(html, /<p class="other"><a class="other-link" id="favorite-link" data-favorite="false" href="\/read\/favorite\/[A-Za-z0-9]{6}\?favorite=1"><span id="favorite-status" role="status">收藏<\/span><\/a> <a class="other-link" href="https:\/\/www\.notion\.so\/excerpt-1">管理<\/a> <button type="button" class="other-link" id="share-copy"[^>]*><span id="share-status" role="status">分享<\/span><\/button><\/p>/);
+  assert.match(html, /<p class="other">其他：<a class="other-link" id="favorite-link" data-favorite="false" href="\/read\/favorite\/[A-Za-z0-9]{6}\?favorite=1"><span id="favorite-status" role="status">收藏<\/span><\/a> <a class="other-link" href="https:\/\/www\.notion\.so\/excerpt-1">管理<\/a> <button type="button" class="other-link" id="share-copy"[^>]*><span id="share-status" role="status">分享<\/span><\/button><\/p>/);
   assert.match(html, /<dialog id="favorite-dialog" aria-label="收藏验证">/);
   assert.doesNotMatch(html, /数据来源：|分享链接：/);
   assert.match(html, new RegExp(`src="https://example\\.workers\\.dev/read/p/${pageId}/${blockId}"`));

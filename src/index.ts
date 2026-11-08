@@ -465,7 +465,7 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: 
     ...(body ? [`<div class="excerpt-body" lang="${htmlText(excerpt.lang)}">\n${body}\n</div>`] : []),
     "<hr />",
     `<p class="detail-metadata">${details.join("<br />\n")}</p>`,
-    ...(showActions ? [`<p class="other"><a class="other-link" id="favorite-link" data-favorite="${excerpt.favorite ? "true" : "false"}" href="${htmlText(favoriteUrl)}"><span id="favorite-status" role="status">${excerpt.favorite ? "取消收藏" : "收藏"}</span></a> <a class="other-link" href="${htmlText(excerpt.link)}">管理</a> <button type="button" class="other-link" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}"><span id="share-status" role="status">分享</span></button></p><p id="favorite-message" role="status"></p><dialog id="favorite-dialog" aria-label="收藏验证"><form id="favorite-form" method="post" action="${htmlText(favoriteUrl)}">${PIN_FIELD}<p id="favorite-error" role="alert"></p></form><form method="dialog"><button type="submit" class="favorite-close">取消</button></form></dialog>`] : []),
+    ...(showActions ? [`<p class="other">其他：<a class="other-link" id="favorite-link" data-favorite="${excerpt.favorite ? "true" : "false"}" href="${htmlText(favoriteUrl)}"><span id="favorite-status" role="status">${excerpt.favorite ? "取消收藏" : "收藏"}</span></a> <a class="other-link" href="${htmlText(excerpt.link)}">管理</a> <button type="button" class="other-link" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}"><span id="share-status" role="status">分享</span></button></p><p id="favorite-message" role="status"></p><dialog id="favorite-dialog" aria-label="收藏验证"><form id="favorite-form" method="post" action="${htmlText(favoriteUrl)}">${PIN_FIELD}<p id="favorite-error" role="alert"></p></form><form method="dialog"><button type="submit" class="favorite-close">取消</button></form></dialog>`] : []),
     ...(terms ? ["<hr />", `<p>${einkText("名词解释")}</p>`, terms] : []),
   ].join("\n");
 }
@@ -532,6 +532,7 @@ const EINK_STYLE = [
   "#favorite-dialog p:first-child{margin-top:0;}#favorite-error:empty,#favorite-message:empty{display:none;}.favorite-close{display:block;margin:1rem auto 0;border:0;background:none;color:inherit;font:inherit;text-decoration:underline;cursor:pointer;min-height:3rem;min-width:3rem;}.favorite-close:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".list-actions{display:flex;gap:0.5rem;}",
   ".list-actions .btn{flex:1;min-width:0;}",
+  ".list-actions .btn[hidden]{display:none;}",
   "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
   // Mobile article images may extend beyond the reading column to the screen edges.
   "@media (max-width:440px){@supports (container-type:inline-size) and (width:100cqw){html{container-type:inline-size;}.excerpt-body img{width:100cqw;max-width:none;margin-left:calc(50% - 50cqw);}}}",
@@ -651,6 +652,32 @@ const EINK_LIST_PAGING = [
   "</script>",
 ].join("\n");
 
+// Exclude the return button's own row when deciding whether content overflows.
+const EINK_LIST_BACK_TO_TOP = [
+  "<script>",
+  "(function(){",
+  "var top=document.getElementById('back-to-top');",
+  "var actions=document.getElementById('list-actions');",
+  "var more=document.getElementById('load-more');",
+  "var main=document.querySelector('main');",
+  "if(!top||!actions||!main)return;",
+  "function update(){",
+  "var extra=0;",
+  "if(!top.hidden){",
+  "var moreHeight=0;",
+  "if(more){var style=window.getComputedStyle(more);moreHeight=more.offsetHeight+(parseFloat(style.marginTop)||0)+(parseFloat(style.marginBottom)||0);}",
+  "extra=Math.max(0,actions.offsetHeight-moreHeight);",
+  "}",
+  "top.hidden=document.documentElement.scrollHeight-extra<=document.documentElement.clientHeight;",
+  "}",
+  "update();",
+  "window.addEventListener('load',update,false);",
+  "window.addEventListener('resize',update,false);",
+  "if(typeof ResizeObserver==='function')new ResizeObserver(update).observe(main);",
+  "})();",
+  "</script>",
+].join("\n");
+
 export function renderEinkList(excerpts: Excerpt[], listPath: string, category: ReadCategory = "all", page = 1, hasMore = false): string {
   const items = excerpts.map((excerpt) => {
     const href = htmlText(`${listPath}/d/${excerpt.code}${categorySearch(category, page)}`);
@@ -672,9 +699,9 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
     ).join("")}</nav>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
     ...((items || hasMore) ? [
-      `<div class="list-actions"><a class="btn" href="#">返回顶部</a>${hasMore ? `<a class="btn" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}${excerpts.length ? `#${excerpts[excerpts.length - 1]!.code}` : ""}`)}">加载更多</a>` : ""}</div>`,
+      `<div class="list-actions" id="list-actions"><a class="btn" id="back-to-top" href="#" hidden>返回顶部</a>${hasMore ? `<a class="btn" id="load-more" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}${excerpts.length ? `#${excerpts[excerpts.length - 1]!.code}` : ""}`)}">加载更多</a>` : ""}</div>`,
     ] : []),
-  ].join("\n"), false, EINK_LIST_NAV + "\n" + EINK_LIST_PAGING);
+  ].join("\n"), false, EINK_LIST_NAV + "\n" + EINK_LIST_PAGING + "\n" + EINK_LIST_BACK_TO_TOP);
 }
 
 export type EinkNeighbors = {
