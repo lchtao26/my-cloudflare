@@ -22,23 +22,29 @@ Notion 的书籍推荐和阅读节选 RSS 在 Cloudflare 边缘和浏览器中�
 
 ## Instapaper 稍后读 RSS
 
-`/read/later/rss` 输出 Instapaper 书签的 RSS，默认读取 25 条未读书签；可使用 `limit` 和 `folder_id` 查询参数调整，例如 `/read/later/rss?limit=50&folder_id=starred`。Worker 需要配置 `INSTAPAPER_CONSUMER_ID`、`INSTAPAPER_CONSUMER_SECRET`、`INSTAPAPER_OAUTH_TOKEN` 和 `INSTAPAPER_OAUTH_TOKEN_SECRET` 四个 Secret，本地开发可填写到 `.dev.vars`。订阅地址无需登录即可读取书签，请妥善保管；接口不缓存内容。
+`/read/later.xml` 输出 Instapaper 书签的 RSS，默认读取 25 条未读书签；可使用 `limit` 和 `folder_id` 查询参数调整，例如 `/read/later.xml?limit=50&folder_id=starred`。Worker 需要配置 `INSTAPAPER_CONSUMER_ID`、`INSTAPAPER_CONSUMER_SECRET`、`INSTAPAPER_OAUTH_TOKEN` 和 `INSTAPAPER_OAUTH_TOKEN_SECRET` 四个 Secret，本地开发可填写到 `.dev.vars`。订阅地址无需登录即可读取书签，请妥善保管；接口不缓存内容。
 
 ## 阅读节选 RSS
 
-`/read/rss` 从 Notion「阅读节选」的 **RSS** 视图读取条目：Worker 会读取该视图保存的 filter、列头 quick filter 和 sort。quick filter 与 filter 按 AND 合并后再查询对应 data source，使订阅源与视图列表一致。支持书籍、杂志和网页文章。中文条目使用「标题」；其他语言优先使用「标题翻译」，为空时回退到「标题」。标题仍为空时显示“无标题”。
+`/read.xml` 从 Notion「阅读节选」的 **RSS** 视图读取条目：Worker 会读取该视图保存的 filter、列头 quick filter 和 sort。quick filter 与 filter 按 AND 合并后再查询对应 data source，使订阅源与视图列表一致。支持书籍、杂志和网页文章。中文条目使用「标题」；其他语言优先使用「标题翻译」，为空时回退到「标题」。标题仍为空时显示“无标题”。
 
 RSS 条目只输出标题、指向水墨屏详情页 `/read/d/{6 位短码}` 的链接，以及稳定的 Notion 页面 ID 作为 GUID，不再附带 `description` 正文。正文、出处、术语等内容只在详情页呈现。中文条目使用「标题」与「正文」；其他语言优先「标题翻译」与「正文翻译」，标题为空时回退到「标题」，仍为空时显示“无标题”。视图设置了 sort 时按该顺序输出；未设置时保持 Notion 表格本身的顺序，不再改成最后编辑时间倒序。条目的 pubDate 使用页面创建时间。每次只读取视图的前 30 条记录。不满足视图条件、对应正文为空、没有有效链接或缺少 `ID` 编号的记录不会输出。
 
 正文字段中的 `notion-file-block` 图片引用会在详情页转换为图片，并由 Worker 通过 `/read/p/...` 转发，避免使用会过期的文件地址。同时支持自闭合标签与带说明文字的 `<image>...</image>` 写法；标签内的说明文字会被忽略，不写入 `alt`，也不显示在图片下方。440px 及以下的视口中，支持容器查询单位的浏览器会将正文图片按原比例铺满屏幕宽度；其他情况保持正文栏宽度。图片块需属于对应节选页面，且仍被该条目使用的正文字段引用。无法解析的其他图片引用会保留为文字。
 
-`NOTION_EXCERPTS_DATA_SOURCE_ID` 与 `NOTION_EXCERPTS_VIEW_ID`（RSS 视图）已在 `wrangler.jsonc` 中配置。请在「阅读节选」数据库的“连接”中添加与书籍推荐相同的 Notion 集成，并确保其有读取权限。部署后订阅地址为 `https://my-cloudflare.lichcode.workers.dev/read/rss`。RSS 地址无需登录即可读取内容；打开 Notion 页面仍需相应的页面访问权限。
+`NOTION_EXCERPTS_DATA_SOURCE_ID` 与 `NOTION_EXCERPTS_VIEW_ID`（RSS 视图）已在 `wrangler.jsonc` 中配置。请在「阅读节选」数据库的“连接”中添加与书籍推荐相同的 Notion 集成，并确保其有读取权限。部署后订阅地址为 `https://my-cloudflare.lichcode.workers.dev/read.xml`。RSS 地址无需登录即可读取内容；打开 Notion 页面仍需相应的页面访问权限。
 
 ## 阅读节选水墨屏页面
 
-`/read` 与 `/read/d/{6 位短码}` 为水墨屏设备提供极简 HTML 阅读页。详情页呈现出处、作者、正文、元数据与术语。有有效「原文链接」时，点按「阅读原文」一行的标题可打开原文。普通详情页直接显示「数据来源：Notion」和分享链接的复制按钮，日期缺失时显示「—」。分享页隐藏数据来源、分享按钮和名词解释。分享链接为 `/s/{6 位短码}`，与详情页使用同一个短码。短码由「阅读节选」数据库中名为 `ID` 的 ID 属性（Notion 自增编号）经带密钥的 Feistel 置换和 base62 编码得到，相邻编号的短码互不相似；Worker 可直接解码，无需存储。编号须小于 2^20，没有编号的条目不出现在列表与 RSS 中。旧的 `/read/d/{pageId}` 与 `/read/s/{pageId}` 地址已停用。修改 `SHARE_CODE_KEYS` 或 `SHARE_CODE_ALPHABET` 会使已有的详情与分享链接全部失效，浏览器保存的阅读进度也会对不上。短码只解析自己数据源内的条目，不能跳转到外部网址；随机猜测的短码约 4096 个中才有 1 个能解码出编号，其余直接返回 404，不请求 Notion，查无条目的 404 也缓存 5 分钟。这只是混淆，不是加密：仓库公开时，看过代码的人可以算出编号。分享页打开后隐藏文章底部导航，不读取或保存阅读进度；其他详情页在底部显示导航。 这些入口适用于所有设备。列表页的标题、出处和作者，以及详情页全部可见文本都经 `pangu` 调整中英文与数字间距，不改动 HTML 标签与图片代理地址。页面使用纯黑白、衬线大字号、固定行宽、实线分隔与大触控目标，无动画。图片继续复用 `/read/p/...` 代理。缓存 5 分钟。
+`/read` 与 `/read/d/{6 位短码}` 为水墨屏设备提供极简 HTML 阅读页。详情页呈现出处、作者、正文、元数据与术语。有有效「原文链接」时，点按「原文」一行的标题可打开原文。普通详情页的「其他」默认收起，展开后可通过「管理」打开 Notion 条目、「分享」复制分享链接，或通过「收藏」保存文章；日期缺失时显示「—」。分享页隐藏「其他」和名词解释。分享链接为 `/s/{6 位短码}`，与详情页使用同一个短码。短码由「阅读节选」数据库中名为 `ID` 的 ID 属性（Notion 自增编号）经带密钥的 Feistel 置换和 base62 编码得到，相邻编号的短码互不相似；Worker 可直接解码，无需存储。编号须小于 2^20，没有编号的条目不出现在列表与 RSS 中。旧的 `/read/d/{pageId}` 与 `/read/s/{pageId}` 地址已停用。修改 `SHARE_CODE_KEYS` 或 `SHARE_CODE_ALPHABET` 会使已有的详情与分享链接全部失效，浏览器保存的阅读进度也会对不上。短码只解析自己数据源内的条目，不能跳转到外部网址；随机猜测的短码约 4096 个中才有 1 个能解码出编号，其余直接返回 404，不请求 Notion，查无条目的 404 也缓存 5 分钟。这只是混淆，不是加密：仓库公开时，看过代码的人可以算出编号。分享页打开后隐藏文章底部导航，不读取或保存阅读进度；其他详情页在底部显示导航。 这些入口适用于所有设备。列表页的标题、出处和作者，以及详情页全部可见文本都经 `pangu` 调整中英文与数字间距，不改动 HTML 标签与图片代理地址。页面使用纯黑白、衬线大字号、固定行宽、实线分隔与大触控目标，无动画。图片继续复用 `/read/p/...` 代理。缓存 5 分钟。
 
-分类栏显示「全部、收藏、新闻、周刊、文春、小说」。「全部、周刊、文春、小说、新闻」在 RSS 视图范围内筛选。周刊按原文链接或备注中的 `bunshun.jp/denshiban/articles/` 识别，文春按 `bunshun.jp/articles/` 识别；小说按「提取来源」为 epub 识别，新闻按 Hacker News 原文链接或以 `HN ` 开头的备注识别。「收藏」读取 `NOTION_EXCERPTS_FAVORITES_VIEW_ID` 配置的「已收藏」视图，沿用该视图的筛选和排序。每个分类先读取前 30 条，有更多条目时可继续加载。详情页的上一篇、下一篇和返回列表保留当前分类与已加载的条目。
+分类栏显示「全部、收藏、稍后阅读、新闻、周刊、文春、小说」。「全部、周刊、文春、小说、新闻」在 RSS 视图范围内筛选。周刊按原文链接或备注中的 `bunshun.jp/denshiban/articles/` 识别，文春按 `bunshun.jp/articles/` 识别；小说按「提取来源」为 epub 识别，新闻按 Hacker News 原文链接或以 `HN ` 开头的备注识别。「收藏」读取 `NOTION_EXCERPTS_FAVORITES_VIEW_ID` 配置的「已收藏」视图，沿用该视图的筛选和排序。「稍后阅读」查询「提取来源」为 Instapaper 的条目，不受 RSS 视图筛选条件限制，沿用页面的正文和编号要求。每个分类先读取前 30 条，有更多条目时可继续加载。详情页的上一篇、下一篇和返回列表保留当前分类与已加载的条目。
+
+普通详情页的「其他」中可以收藏文章，将 Notion「已收藏」设为选中。首次输入六位密码验证，成功后浏览器使用有效期 30 天的 Secure、HttpOnly、SameSite=Strict Cookie 记住验证；更改密码或签名密钥会使已有验证失效。分享页没有收藏入口。收藏列表有 5 分钟缓存，新增条目可能不会立即出现。
+
+启用收藏前，在 Cloudflare Worker 的 **Settings → Variables and Secrets** 中新增两个 Secret：`FAVORITE_PIN` 填六位随机数字（保留前导零），`FAVORITE_SESSION_SECRET` 填至少 32 字符的独立随机密钥（可用 `openssl rand -hex 32` 生成）。不要把实际值写进代码或聊天；本地开发只写入被 Git 忽略的 `.dev.vars`。Notion 集成除读取权限外，还需要在 Notion 开发者门户启用 **Update content** 权限，并保持连接到「阅读节选」数据库。新配置需要部署后生效。
+
+六位密码只有 100 万种组合，因此使用 SQLite Durable Object 对所有来源合并限速：15 分钟最多 5 次有效格式的密码尝试，包括成功的尝试。这个限制可降低分布式猜测风险，但恶意访问者也可能耗尽额度，暂时阻止本人登录；已有有效会话不受登录限速影响。需要更强身份保护时，可考虑针对收藏路径配置 Cloudflare Access，而不要直接保护整个 Worker，否则公开的阅读页和 RSS 也会受影响。
 
 正文使用 1.75 倍行高、左对齐与随字号缩放的段距；标题使用 1.35 倍行高，并在大屏上放大。按默认根字号 16px 换算，小于 440px 的视口正文与按钮为 17px，440px 至小于 720px 为 18px；小于 720px 的文章标题为 24px、列表元信息为 16px。720px 及以上正文与按钮、文章标题、列表元信息分别为 20px、26.4px、17px。实际字号均使用 rem 设置。小于 440px 的视口左右留白为 1.625rem，440px 及以上为 1.25rem。正文在所有设备上统一使用 400 字重，标题与按钮使用 700。中文和日文优先使用系统自带的宋体（Songti SC）／明朝体（Hiragino Mincho、Yu Mincho），再回退到 Android、Linux 自带的 Noto Serif CJK 和 Windows 字体；英文原文使用 Georgia 等衬线字体。字体栈只列系统自带字体：Safari 不向网页提供用户自装字体，而自装字体只装了部分字重时，Chrome 会用错误字重渲染正文。不下载网页字体，Kindle 等不认识这些字体名的设备回退到 `serif`。
 

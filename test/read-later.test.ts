@@ -30,7 +30,7 @@ test("read-later feed signs the Instapaper request and renders bookmarks", async
     assert.equal(signature, createHmac("sha1", "consumer%20secret&token%20secret").update(base).digest("base64"));
     return Response.json([{ type: "meta" }, { type: "bookmark", bookmark_id: 42, title: "A & B", url: "https://example.com/?x=1&y=2", description: "<hello>", time: 1700000000 }]);
   }) as typeof fetch;
-  const response = await worker.fetch(new Request("https://chui.dev/read/later/rss?limit=7&folder_id=starred"), env);
+  const response = await worker.fetch(new Request("https://chui.dev/read/later.xml?limit=7&folder_id=starred"), env);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   const xml = await response.text();
@@ -39,15 +39,22 @@ test("read-later feed signs the Instapaper request and renders bookmarks", async
   const feed = parseRssFeed(xml);
   assert.equal(feed.items?.length, 1);
   assert.equal(feed.items?.[0]?.guid?.value, "42");
-  const head = await worker.fetch(new Request("https://chui.dev/read/later/rss?limit=7&folder_id=starred", { method: "HEAD" }), env);
+  const head = await worker.fetch(new Request("https://chui.dev/read/later.xml?limit=7&folder_id=starred", { method: "HEAD" }), env);
   assert.equal(head.status, 200);
   assert.equal(await head.text(), "");
 });
 
 test("read-later feed handles missing credentials and unsupported methods", async () => {
-  const missing = await worker.fetch(new Request("https://chui.dev/read/later/rss"), {});
+  const missing = await worker.fetch(new Request("https://chui.dev/read/later.xml"), {});
   assert.equal(missing.status, 503);
-  const method = await worker.fetch(new Request("https://chui.dev/read/later/rss", { method: "POST" }), env);
+  const method = await worker.fetch(new Request("https://chui.dev/read/later.xml", { method: "POST" }), env);
   assert.equal(method.status, 405);
   assert.equal(method.headers.get("allow"), "GET, HEAD");
+});
+
+test("the former RSS paths no longer match", async () => {
+  for (const path of ["/read/rss", "/read/later/rss"]) {
+    const response = await worker.fetch(new Request(`https://chui.dev${path}`), env);
+    assert.equal(response.status, 404);
+  }
 });

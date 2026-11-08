@@ -1,6 +1,7 @@
 import { generateRssFeed, type RssFeed } from "feedsmith";
 import { formatText } from "./format-text.ts";
 import { readLaterFeed } from "./read-later.ts";
+import { favoriteRequest, type FavoriteBindings } from "./favorite.ts";
 
 const NOTION_VERSION = "2026-03-11";
 const FEED_TITLE = "书籍推荐";
@@ -10,7 +11,7 @@ const BOOK_FEED_PATH = "/book/rss";
 const BOOK_ASSET_PREFIX = "/book/p";
 const READ_LIST_PATH = "/read";
 const READ_DETAIL_PREFIX = "/read/d";
-const READ_FEED_PATH = "/read/rss";
+const READ_FEED_PATH = "/read.xml";
 const READ_ASSET_PREFIX = "/read/p";
 const SHORT_SHARE_PREFIX = "/s";
 // Notion ID property whose auto-increment number becomes the detail and share code.
@@ -27,6 +28,7 @@ const FEED_ITEM_LIMIT = 30;
 const READ_CATEGORIES = [
   { id: "all", label: "全部" },
   { id: "favorites", label: "收藏" },
+  { id: "later", label: "稍后阅读" },
   { id: "news", label: "新闻" },
   { id: "weekly", label: "周刊" },
   { id: "bunshun", label: "文春" },
@@ -86,6 +88,7 @@ function categorySearch(category: ReadCategory, page = 1): string {
 }
 
 function categoryFilter(category: ReadCategory): object | undefined {
+  if (category === "later") return { property: "提取来源", select: { equals: "Instapaper" } };
   if (category === "novel") return { property: "提取来源", select: { equals: "epub" } };
   if (category === "weekly" || category === "bunshun") {
     const path = category === "weekly" ? "bunshun.jp/denshiban/articles/" : "bunshun.jp/articles/";
@@ -121,7 +124,7 @@ type NotionProperty = {
   unique_id?: { number?: number | null } | null;
 };
 
-type WorkerBindings = {
+type WorkerBindings = FavoriteBindings & {
   INSTAPAPER_CONSUMER_ID?: string;
   INSTAPAPER_CONSUMER_SECRET?: string;
   INSTAPAPER_OAUTH_TOKEN?: string;
@@ -431,7 +434,7 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
 function einkOriginalTitle(excerpt: Excerpt): string {
   if (!excerpt.originalUrl && (!excerpt.originalTitle || excerpt.originalTitle === excerpt.title)) return "";
 
-  const label = einkText("阅读原文：");
+  const label = einkText("原文：");
   const lang = htmlText(excerpt.originalTitle ? excerpt.originalLang : excerpt.titleLang);
   const title = einkText(excerpt.originalTitle || excerpt.title);
   return excerpt.originalUrl
@@ -439,24 +442,16 @@ function einkOriginalTitle(excerpt: Excerpt): string {
     : `${label}<span lang="${lang}">${title}</span>`;
 }
 
-function einkPublication(excerpt: Excerpt, showActions: boolean): string {
-  const date = einkText(`发布日期：${excerpt.publishedDate || "—"}`);
-  return [
-    `<span>${date}</span>`,
-    ...(showActions ? [`<span id="data-source"><br />${einkText("数据来源：")}<a class="metadata-link" lang="en" href="${htmlText(excerpt.link)}">Notion</a><br />分享链接：<button type="button" class="share-copy" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}">点击复制</button><span id="share-status" role="status"></span></span>`] : []),
-  ].join("");
-}
-
-function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: boolean): string {
+function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: boolean, category: ReadCategory, page: number): string {
   const source = [
     excerpt.sourceTitle ? `<cite>${einkText(excerpt.sourceTitle)}</cite>` : "",
     excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
   ].filter(Boolean).join(" · ");
   const details = [
     einkOriginalTitle(excerpt),
-    excerpt.publisher ? einkText(`出版方：${excerpt.publisher}`) : "",
+    excerpt.publisher ? einkText(`来源：${excerpt.publisher}`) : "",
     excerpt.chapter ? einkText(`章节：${excerpt.chapter}`) : "",
-    einkPublication(excerpt, showActions),
+    einkText(`日期：${excerpt.publishedDate || "—"}`),
   ].filter(Boolean);
   const body = excerpt.body ? einkParagraphs(excerpt.body, excerpt.id, imageBaseUrl) : "";
   const terms = showActions && excerpt.terms ? einkParagraphs(excerpt.terms, excerpt.id, imageBaseUrl) : "";
@@ -464,7 +459,8 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: 
     ...(source ? [`<p>${source}</p>`] : []),
     ...(body ? [`<div class="excerpt-body" lang="${htmlText(excerpt.lang)}">\n${body}\n</div>`] : []),
     "<hr />",
-    `<p>${details.join("<br />\n")}</p>`,
+    `<p class="detail-metadata">${details.join("<br />\n")}</p>`,
+    ...(showActions ? [`<details class="other"><summary>其他</summary><div class="other-actions"><a class="btn" href="${htmlText(excerpt.link)}">管理</a><button type="button" class="btn" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}"><span id="share-status" role="status">分享</span></button><a class="btn" href="${htmlText(`/read/favorite/${excerpt.code}${categorySearch(category, page)}`)}">收藏</a></div></details>`] : []),
     ...(terms ? ["<hr />", `<p>${einkText("名词解释")}</p>`, terms] : []),
   ].join("\n");
 }
@@ -501,10 +497,10 @@ const EINK_STYLE = [
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".item-link{display:block;font-weight:700;}",
   ".categories{display:flex;flex-wrap:wrap;gap:0.25rem;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:0 0 1rem;}",
-  ".categories h1,.categories a{min-width:0;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.5rem 0.15rem;border:2px solid #000;font-weight:700;text-align:center;}",
-  ".categories h1{flex:0 0 calc(50% - 0.125rem);grid-column:span 2;margin:0;font-size:inherit;line-height:inherit;}",
+  ".visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}",
+  ".categories a{min-width:0;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.5rem 0.15rem;border:2px solid #000;font-weight:700;text-align:center;}",
   ".categories a{flex:0 0 calc(25% - 0.1875rem);}",
-  ".categories a:nth-of-type(-n+2){order:-1;}",
+  ".categories a.category-later{flex-basis:calc(50% - 0.125rem);grid-column:span 2;}",
   ".categories a[aria-current=page]{background:#000;color:#fff;}",
   ".meta{font-size:1rem;margin:0.65em 0 0;}",
   // Responsive type must follow the base heading/meta rules to win the cascade.
@@ -515,11 +511,17 @@ const EINK_STYLE = [
   ".nav-row a,.nav-row span{flex:1;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.75rem 0.35rem;font-weight:700;text-align:center;}",
   ".nav-row .is-disabled{opacity:0.4;}",
   ".nav-row a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
-  "a.metadata-link,.share-copy{text-decoration:underline;text-decoration-thickness:1px;text-decoration-skip-ink:none;text-underline-offset:0.28em;}",
-  ".share-copy{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;}",
-  ".share-copy:focus-visible{outline:3px solid #000;outline-offset:3px;}",
+  "a.metadata-link{text-decoration:underline;text-decoration-thickness:1px;text-decoration-skip-ink:none;text-underline-offset:0.28em;}",
   ".btn{display:block;border:2px solid #000;padding:0.85rem 1rem;margin:0.75rem 0;text-align:center;text-decoration:none;font-weight:700;min-height:3rem;}",
   ".btn:focus-visible{outline:3px solid #000;outline-offset:3px;}",
+  ".detail-metadata{margin-bottom:0;}",
+  ".other summary{min-height:3rem;list-style:none;cursor:pointer;}",
+  ".other summary::-webkit-details-marker{display:none;}",
+  ".other summary::after{content:'▶';display:inline-block;margin-left:0.4em;font-size:0.75em;}",
+  ".other[open] summary::after{content:'▼';}",
+  ".other summary:focus-visible{outline:3px solid #000;outline-offset:3px;}",
+  ".other-actions{display:flex;gap:0.5rem;}",
+  ".other-actions .btn{flex:0 1 6rem;min-width:0;padding:0.5rem 0.25rem;margin:0.25rem 0 0.5rem;font:inherit;font-weight:700;color:inherit;background:#fff;cursor:pointer;}",
   ".list-actions{display:flex;gap:0.5rem;}",
   ".list-actions .btn{flex:1;min-width:0;}",
   "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
@@ -656,8 +658,9 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
     ].join("");
   }).join("\n");
   return einkDocument("阅读节选", [
-    `<nav class="categories" aria-label="阅读分类"><h1>${displayText("阅读节选")}</h1>${READ_CATEGORIES.map((item) =>
-      `<a href="${htmlText(`${listPath}${categorySearch(item.id)}`)}"${item.id === category ? ' aria-current="page"' : ""}>${item.label}</a>`
+    `<h1 class="visually-hidden">${displayText("阅读节选")}</h1>`,
+    `<nav class="categories" aria-label="阅读分类">${READ_CATEGORIES.map((item) =>
+      `<a href="${htmlText(`${listPath}${categorySearch(item.id)}`)}"${item.id === "later" ? ' class="category-later"' : ""}${item.id === category ? ' aria-current="page"' : ""}>${item.label}</a>`
     ).join("")}</nav>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
     ...((items || hasMore) ? [
@@ -737,10 +740,10 @@ const EINK_DETAIL_CHROME = [
   "function fallback(){",
   "var input=document.createElement('textarea');input.value=link;input.style.position='fixed';input.style.left='-9999px';document.body.appendChild(input);input.select();",
   "var copied=false;try{copied=document.execCommand('copy');}catch(err){}document.body.removeChild(input);",
-  "if(shareStatus)shareStatus.textContent=copied?' 已复制':' 复制失败';",
+  "if(shareStatus)shareStatus.textContent=copied?'已复制':'复制失败';",
   "}",
   "if(window.navigator&&window.navigator.clipboard&&window.navigator.clipboard.writeText){",
-  "window.navigator.clipboard.writeText(link).then(function(){if(shareStatus)shareStatus.textContent=' 已复制';},fallback);",
+  "window.navigator.clipboard.writeText(link).then(function(){if(shareStatus)shareStatus.textContent='已复制';},fallback);",
   "}else fallback();",
   "},false);",
   "function go(dir){window.scrollBy(0,dir*step());progress();saveNow();}",
@@ -808,7 +811,7 @@ export function renderEinkDetail(
   return einkDocument(excerpt.title, [
     "<article>",
     `<h1 lang="${htmlText(excerpt.titleLang)}">${einkText(excerpt.title)}</h1>`,
-    excerptDetailBody(excerpt, imageBaseUrl, showNavigation),
+    excerptDetailBody(excerpt, imageBaseUrl, showNavigation, category, page),
     "</article>",
     nav,
   ].join("\n"), true, EINK_DETAIL_CHROME, "detail");
@@ -950,7 +953,8 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string, catego
   if (!dataSourceId) throw new Error("Notion view is missing a data source");
 
   const pages: NotionPage[] = [];
-  const viewFilter = viewQueryFilter(view);
+  // The read-later category includes Instapaper entries outside the RSS view's filters.
+  const viewFilter = category === "later" ? undefined : viewQueryFilter(view);
   const selectedFilter = categoryFilter(category);
   const filter = viewFilter && selectedFilter
     ? { and: [...("and" in viewFilter && Array.isArray(viewFilter.and) ? viewFilter.and : [viewFilter]), selectedFilter] }
@@ -1056,7 +1060,24 @@ function htmlResponse(body: string | null, method: string, vary?: string): Respo
 const worker = {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/read/later/rss") {
+    if (url.pathname.startsWith("/read/favorite/")) {
+      const code = url.pathname.slice("/read/favorite/".length);
+      const shortId = shareCodeId(code);
+      if (shortId === null) return new Response("Not found", { status: 404 });
+      return favoriteRequest(request, env, code, async () => {
+        if (!env.NOTION_TOKEN || !env.NOTION_EXCERPTS_DATA_SOURCE_ID) throw new Error("Notion is not configured");
+        const excerpt = await fetchExcerptByShortId({ NOTION_TOKEN: env.NOTION_TOKEN, NOTION_DATA_SOURCE_ID: env.NOTION_EXCERPTS_DATA_SOURCE_ID }, shortId);
+        if (!excerpt || !NOTION_PAGE_ID.test(excerpt.id)) return false;
+        const response = await fetchNotionJson(`https://api.notion.com/v1/pages/${encodeURIComponent(excerpt.id)}`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${env.NOTION_TOKEN}`, "Notion-Version": NOTION_VERSION, "Content-Type": "application/json" },
+          body: JSON.stringify({ properties: { "已收藏": { checkbox: true } } }),
+        });
+        if (!response.ok) throw new Error(`Notion returned ${response.status}`);
+        return true;
+      }, einkDocument);
+    }
+    if (url.pathname === "/read/later.xml") {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
       }

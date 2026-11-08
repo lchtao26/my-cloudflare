@@ -2,15 +2,19 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "my-cloudflare",
   "account_id": "9d43af5ca1b5b8bdf48701c030ed2d52",
-  "main": "src/index.ts",
+  "main": "src/worker.ts",
   "compatibility_date": "2026-10-13",
   "workers_dev": true,
   "cache": {
     "enabled": true
   },
   "secrets": {
-    "required": ["NOTION_TOKEN", "INSTAPAPER_CONSUMER_ID", "INSTAPAPER_CONSUMER_SECRET", "INSTAPAPER_OAUTH_TOKEN", "INSTAPAPER_OAUTH_TOKEN_SECRET"]
+    "required": ["NOTION_TOKEN", "INSTAPAPER_CONSUMER_ID", "INSTAPAPER_CONSUMER_SECRET", "INSTAPAPER_OAUTH_TOKEN", "INSTAPAPER_OAUTH_TOKEN_SECRET", "FAVORITE_PIN", "FAVORITE_SESSION_SECRET"]
   },
+  "durable_objects": {
+    "bindings": [{ "name": "FAVORITE_LOGIN_LIMIT", "class_name": "FavoriteLoginLimit" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FavoriteLoginLimit"] }],
   "keep_vars": true,
   "vars": {
     "NOTION_DATA_SOURCE_ID": "102a59ab-8748-4725-a2f4-48d5ceeef1b6",
