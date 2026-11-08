@@ -10,6 +10,9 @@ const SESSION_COOKIE = "__Host-read-session";
 const CSRF_COOKIE = "__Host-read-csrf";
 const encoder = new TextEncoder();
 
+export const PIN_FIELD = '<p><label for="pin">请输入 6 位密码</label></p><div class="pin-wrap"><input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" pattern="[0-9]{6}" minlength="6" maxlength="6" required /><div class="pin-slots" aria-hidden="true"><span class="active"></span><span></span><span></span><span></span><span></span><span></span></div></div>';
+export const PIN_STYLE = '.pin-wrap{position:relative}input#pin{box-sizing:border-box;display:block;font:1.25rem/1.75 monospace;width:100%;min-height:3rem;padding:0.5rem;border:2px solid #000;border-radius:0;background:#fff;color:#000}input#pin:focus-visible{outline:3px solid #000;outline-offset:3px}.pin-slots{display:none}.pin-enhanced input#pin{position:absolute;inset:0;z-index:1;height:100%;opacity:0}.pin-enhanced .pin-slots{display:flex;height:3rem;pointer-events:none}.pin-slots span{display:flex;align-items:center;justify-content:center;flex:1;min-width:0;border:2px solid #000}.pin-slots span+span{margin-left:0.5rem}.pin-slots span.filled::after{content:"";display:block;width:0.5rem;height:0.5rem;border-radius:50%;background:#000}.pin-enhanced input#pin:focus-visible + .pin-slots span.active{outline:2px solid #000;outline-offset:2px}@media (forced-colors:active){.pin-enhanced input#pin{position:static;opacity:1}.pin-enhanced .pin-slots{display:none}}';
+
 function cookie(request: Request, name: string): string {
   for (const part of (request.headers.get("Cookie") || "").split(";")) {
     const [key, ...value] = part.trim().split("=");
@@ -59,18 +62,16 @@ function backLink(code: string, query: string): string {
   return `<p><a class="btn" href="/read/d/${code}${query}">返回文章</a></p>`;
 }
 
-function form(code: string, query: string, token: string, authenticated: boolean, error = ""): string {
+function form(code: string, query: string, token: string, authenticated: boolean, error = "", desired = true): string {
   return [
-    "<h1>收藏</h1>",
     error ? `<p role="alert">${error}</p>` : "",
     `<form id="favorite-form" method="post" action="/read/favorite/${code}${query}">`,
     `<input type="hidden" name="csrf" value="${token}" />`,
-    authenticated ? "<p>正在收藏…</p>" : '<p><label for="pin">请输入 6 位密码</label></p><p><input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" pattern="[0-9]{6}" minlength="6" maxlength="6" required /></p>',
-    '<button type="submit" class="btn">收藏</button>',
+    authenticated ? `<p>${desired ? "正在收藏…" : "正在取消收藏…"}</p>` : PIN_FIELD,
+    `<noscript><button type="submit" class="btn">${desired ? "收藏" : "取消收藏"}</button></noscript>`,
     "</form>",
-    authenticated ? `<script nonce="${token}">document.getElementById('favorite-form').submit();</script>` : "",
-    backLink(code, query),
-    '<style>input#pin{font:1.25rem/1.75 monospace;letter-spacing:1.25rem;width:12rem;max-width:100%;min-height:3rem;padding:0.5rem 0 0.5rem 0.625rem;border:2px solid #000;border-radius:0;background:#fff;background-image:linear-gradient(to right,transparent calc(100% - 2px),#000 0);background-size:calc(100% / 6) 100%;color:#000}input#pin:focus-visible{outline:3px solid #000;outline-offset:3px}form .btn{font:inherit;font-weight:700;color:inherit;background:#fff;cursor:pointer;width:100%}</style>',
+    `<script nonce="${token}">(function(){var form=document.getElementById('favorite-form');var pin=document.getElementById('pin');if(!pin){form.submit();return}var slots=pin.nextElementSibling.children;var submitted=false;function mark(){var active=Math.min(pin.selectionStart||0,5);for(var i=0;i<slots.length;i++){slots[i].classList.toggle('active',i===active);slots[i].classList.toggle('filled',i<pin.value.length)}}function check(e){mark();if(!submitted&&!(e&&e.isComposing)&&/^[0-9]{6}$/.test(pin.value)){submitted=true;form.submit()}}pin.addEventListener('focus',mark);pin.addEventListener('click',mark);pin.addEventListener('keyup',mark);pin.addEventListener('select',mark);pin.addEventListener('input',check);pin.addEventListener('change',check);pin.addEventListener('compositionend',check);mark();pin.parentElement.classList.add('pin-enhanced')})();</script>`,
+    `<style>body{padding-top:28vh}${PIN_STYLE}form .btn{font:inherit;font-weight:700;color:inherit;background:#fff;cursor:pointer;width:100%}</style>`,
   ].join("\n");
 }
 
@@ -97,54 +98,68 @@ export async function favoriteRequest(
   request: Request,
   env: FavoriteBindings,
   code: string,
-  favorite: () => Promise<boolean>,
+  favorite: (desired: boolean) => Promise<boolean>,
   render: DocumentRenderer,
 ): Promise<Response> {
   const url = new URL(request.url);
   const params = new URLSearchParams();
   const tab = url.searchParams.get("tab");
   const page = url.searchParams.get("page");
+  const requested = url.searchParams.get("favorite");
   if (tab && ["likes", "later", "news", "weekly", "bunshun", "novel"].includes(tab)) params.set("tab", tab);
   if (page && /^[1-9]\d{0,2}$/.test(page) && page !== "1") params.set("page", page);
+  const returnQuery = params.size ? `?${params.toString().replaceAll("&", "&amp;")}` : "";
+  if (requested === "0" || requested === "1") params.set("favorite", requested);
   const query = params.size ? `?${params.toString().replaceAll("&", "&amp;")}` : "";
+  const json = request.headers.get("Accept")?.includes("application/json") ?? false;
+  function reply(body: string, status = 200, cookies: string[] = [], nonce = "", data: object = {}): Response {
+    if (!json) return response(render, body, status, cookies, nonce);
+    const headers = new Headers({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+    for (const value of cookies) headers.append("Set-Cookie", value);
+    return Response.json(data, { status, headers });
+  }
   if (request.method !== "GET" && request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, POST", "Cache-Control": "no-store" } });
   if (!env.FAVORITE_PIN || !/^\d{6}$/.test(env.FAVORITE_PIN) || !env.FAVORITE_SESSION_SECRET || env.FAVORITE_SESSION_SECRET.length < 32 || !env.FAVORITE_LOGIN_LIMIT) {
-    return response(render, `<h1>收藏暂不可用</h1><p>请先完成配置。</p>${backLink(code, query)}`, 503);
+    return reply(`<h1>收藏暂不可用</h1><p>请先完成配置。</p>${backLink(code, returnQuery)}`, 503, [], "", { error: "收藏暂不可用，请先完成配置。" });
   }
   const key = await hmacKey(env.FAVORITE_SESSION_SECRET);
   const authenticated = await sessionValid(request, key, env.FAVORITE_PIN);
   if (request.method === "GET") {
     const token = hex(crypto.getRandomValues(new Uint8Array(32)));
-    return response(render, form(code, query, token, authenticated), 200, [`${CSRF_COOKIE}=${token}; Path=/; Secure; HttpOnly; SameSite=Strict`], authenticated ? token : "");
+    return reply(form(code, query, token, authenticated, "", requested !== "0"), 200, [`${CSRF_COOKIE}=${token}; Path=/; Secure; HttpOnly; SameSite=Strict`], token, { authenticated, csrf: token });
   }
-  if (request.headers.get("Origin") !== new URL(request.url).origin) return response(render, `<h1>请求无效</h1>${backLink(code, query)}`, 403);
+  if (request.headers.get("Origin") !== new URL(request.url).origin) return reply(`<h1>请求无效</h1>${backLink(code, returnQuery)}`, 403, [], "", { error: "请求无效，请重试。" });
   const data = await readForm(request);
   const token = data?.get("csrf") || "";
   const cookieToken = cookie(request, CSRF_COOKIE);
   const signature = fromHex(cookieToken);
   if (!signature || !fromHex(token) || !await crypto.subtle.verify("HMAC", key, await sign(key, `csrf:${cookieToken}`), encoder.encode(`csrf:${token}`))) {
-    return response(render, `<h1>页面已过期</h1><p>请返回文章后重试。</p>${backLink(code, query)}`, 403);
+    return reply(`<h1>页面已过期</h1><p>请返回文章后重试。</p>${backLink(code, returnQuery)}`, 403, [], "", { error: "验证已过期，请重试。" });
   }
+  const target = data?.get("favorite") ?? requested ?? "1";
+  if (target !== "0" && target !== "1") return reply("<h1>请求无效</h1>", 400, [], "", { error: "请求无效，请重试。" });
+  const desired = target === "1";
   if (!authenticated) {
     const pin = data?.get("pin") || "";
-    if (!/^\d{6}$/.test(pin)) return response(render, form(code, query, token, false, "请输入 6 位数字。"), 400);
+    if (json && !pin) return reply("", 401, [], "", { requiresPin: true });
+    if (!/^\d{6}$/.test(pin)) return reply(form(code, query, token, false, "请输入 6 位数字。", desired), 400, [], token, { error: "请输入 6 位数字。" });
     try {
       if (!await env.FAVORITE_LOGIN_LIMIT.getByName("favorite-pin").attempt()) {
-        return response(render, form(code, query, token, false, "尝试次数过多，请稍后再试。"), 429);
+        return reply(form(code, query, token, false, "尝试次数过多，请稍后再试。", desired), 429, [], token, { error: "尝试次数过多，请稍后再试。" });
       }
     } catch {
-      return response(render, `<h1>收藏暂不可用</h1><p>请稍后再试。</p>${backLink(code, query)}`, 503);
+      return reply(`<h1>收藏暂不可用</h1><p>请稍后再试。</p>${backLink(code, returnQuery)}`, 503, [], "", { error: "收藏暂不可用，请稍后再试。" });
     }
     if (!await crypto.subtle.verify("HMAC", key, await sign(key, `pin:${env.FAVORITE_PIN}`), encoder.encode(`pin:${pin}`))) {
-      return response(render, form(code, query, token, false, "密码不正确。"), 401);
+      return reply(form(code, query, token, false, "密码不正确。", desired), 401, [], token, { error: "密码不正确。", requiresPin: true });
     }
   }
   try {
-    if (!await favorite()) return response(render, `<h1>未找到文章</h1>${backLink(code, query)}`, 404);
+    if (!await favorite(desired)) return reply(`<h1>未找到文章</h1>${backLink(code, returnQuery)}`, 404, [], "", { error: "未找到文章。" });
     const expiry = String(Math.floor(Date.now() / 1000) + SESSION_SECONDS);
     const session = `${expiry}.${hex(await sign(key, `session:${expiry}:${env.FAVORITE_PIN}`))}`;
-    return response(render, `<h1>已收藏</h1>${backLink(code, query)}`, 200, [`${SESSION_COOKIE}=${session}; Path=/; Max-Age=${SESSION_SECONDS}; Secure; HttpOnly; SameSite=Strict`]);
+    return reply(`<h1>${desired ? "已收藏" : "已取消收藏"}</h1>${backLink(code, returnQuery)}`, 200, [`${SESSION_COOKIE}=${session}; Path=/; Max-Age=${SESSION_SECONDS}; Secure; HttpOnly; SameSite=Strict`], "", { ok: true, favorite: desired });
   } catch {
-    return response(render, `<h1>收藏失败</h1><p>请稍后再试。</p>${backLink(code, query)}`, 502);
+    return reply(`<h1>收藏失败</h1><p>请稍后再试。</p>${backLink(code, returnQuery)}`, 502, [], "", { error: "收藏失败，请稍后再试。" });
   }
 }

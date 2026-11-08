@@ -1205,7 +1205,7 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
     { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
   );
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
   assert.equal(response.headers.get("Vary"), null);
   const html = await response.text();
   assert.match(html, /<body class="detail">/);
@@ -1219,7 +1219,8 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
   assert.match(html, /来源：某出版社/);
   assert.match(html, /章节：第一章/);
   assert.match(html, /日期：2025-06-12/);
-  assert.match(html, /<details class="other"><summary>其他<\/summary><div class="other-actions"><a class="btn" href="https:\/\/www\.notion\.so\/excerpt-1">管理<\/a><button type="button" class="btn" id="share-copy"[^>]*><span id="share-status" role="status">分享<\/span><\/button><a class="btn" href="\/read\/favorite\/[A-Za-z0-9]{6}">收藏<\/a><\/div><\/details>/);
+  assert.match(html, /<p class="other"><a class="other-link" id="favorite-link" data-favorite="false" href="\/read\/favorite\/[A-Za-z0-9]{6}\?favorite=1"><span id="favorite-status" role="status">收藏<\/span><\/a> <a class="other-link" href="https:\/\/www\.notion\.so\/excerpt-1">管理<\/a> <button type="button" class="other-link" id="share-copy"[^>]*><span id="share-status" role="status">分享<\/span><\/button><\/p>/);
+  assert.match(html, /<dialog id="favorite-dialog" aria-label="收藏验证">/);
   assert.doesNotMatch(html, /数据来源：|分享链接：/);
   assert.match(html, new RegExp(`src="https://example\\.workers\\.dev/read/p/${pageId}/${blockId}"`));
   assert.match(html, /名词解释/);
@@ -1417,7 +1418,7 @@ test("e-ink detail hides its bottom navigation only for shared links", async (co
 
   const shared = await open(`${origin}/read`, true);
   assert.equal(shared.match(/<nav class="nav-row" hidden>/g)?.length, 1);
-  assert.doesNotMatch(shared, /<summary>其他<\/summary>|id="share-copy"/);
+  assert.doesNotMatch(shared, /<p class="other">|id="share-copy"|<dialog id="favorite-dialog"/);
   assert.equal(viewRequests, 6);
 
   viewUnavailable = true;

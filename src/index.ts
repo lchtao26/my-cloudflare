@@ -1,7 +1,7 @@
 import { generateRssFeed, type RssFeed } from "feedsmith";
 import { formatText } from "./format-text.ts";
 import { readLaterFeed } from "./read-later.ts";
-import { favoriteRequest, type FavoriteBindings } from "./favorite.ts";
+import { favoriteRequest, PIN_FIELD, PIN_STYLE, type FavoriteBindings } from "./favorite.ts";
 
 const NOTION_VERSION = "2026-03-11";
 const FEED_TITLE = "书籍推荐";
@@ -115,6 +115,7 @@ type NotionFile = {
 
 type NotionProperty = {
   type?: string;
+  checkbox?: boolean;
   title?: RichText[];
   rich_text?: RichText[];
   url?: string | null;
@@ -188,6 +189,7 @@ type Excerpt = {
   pubDate: Date | null;
   /** Obfuscated Notion ID number used in detail and share URLs. */
   code: string;
+  favorite?: boolean;
 };
 
 export type Book = {
@@ -371,6 +373,7 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
     link,
     pubDate: Number.isNaN(date.getTime()) ? null : date,
     code: shareCode(shortId),
+    favorite: properties?.["已收藏"]?.type === "checkbox" && properties["已收藏"]?.checkbox === true,
   };
 }
 
@@ -443,6 +446,8 @@ function einkOriginalTitle(excerpt: Excerpt): string {
 }
 
 function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: boolean, category: ReadCategory, page: number): string {
+  const query = categorySearch(category, page);
+  const favoriteUrl = `/read/favorite/${excerpt.code}${query}${query ? "&" : "?"}favorite=${excerpt.favorite ? "0" : "1"}`;
   const source = [
     excerpt.sourceTitle ? `<cite>${einkText(excerpt.sourceTitle)}</cite>` : "",
     excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
@@ -460,7 +465,7 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: 
     ...(body ? [`<div class="excerpt-body" lang="${htmlText(excerpt.lang)}">\n${body}\n</div>`] : []),
     "<hr />",
     `<p class="detail-metadata">${details.join("<br />\n")}</p>`,
-    ...(showActions ? [`<details class="other"><summary>其他</summary><div class="other-actions"><a class="btn" href="${htmlText(excerpt.link)}">管理</a><button type="button" class="btn" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}"><span id="share-status" role="status">分享</span></button><a class="btn" href="${htmlText(`/read/favorite/${excerpt.code}${categorySearch(category, page)}`)}">收藏</a></div></details>`] : []),
+    ...(showActions ? [`<p class="other"><a class="other-link" id="favorite-link" data-favorite="${excerpt.favorite ? "true" : "false"}" href="${htmlText(favoriteUrl)}"><span id="favorite-status" role="status">${excerpt.favorite ? "取消收藏" : "收藏"}</span></a> <a class="other-link" href="${htmlText(excerpt.link)}">管理</a> <button type="button" class="other-link" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}"><span id="share-status" role="status">分享</span></button></p><p id="favorite-message" role="status"></p><dialog id="favorite-dialog" aria-label="收藏验证"><form id="favorite-form" method="post" action="${htmlText(favoriteUrl)}">${PIN_FIELD}<p id="favorite-error" role="alert"></p></form><form method="dialog"><button type="submit" class="favorite-close">取消</button></form></dialog>`] : []),
     ...(terms ? ["<hr />", `<p>${einkText("名词解释")}</p>`, terms] : []),
   ].join("\n");
 }
@@ -515,13 +520,16 @@ const EINK_STYLE = [
   ".btn{display:block;border:2px solid #000;padding:0.85rem 1rem;margin:0.75rem 0;text-align:center;text-decoration:none;font-weight:700;min-height:3rem;}",
   ".btn:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".detail-metadata{margin-bottom:0;}",
-  ".other summary{min-height:3rem;list-style:none;cursor:pointer;}",
-  ".other summary::-webkit-details-marker{display:none;}",
-  ".other summary::after{content:'▶';display:inline-block;margin-left:0.4em;font-size:0.75em;}",
-  ".other[open] summary::after{content:'▼';}",
-  ".other summary:focus-visible{outline:3px solid #000;outline-offset:3px;}",
-  ".other-actions{display:flex;gap:0.5rem;}",
-  ".other-actions .btn{flex:0 1 6rem;min-width:0;padding:0.5rem 0.25rem;margin:0.25rem 0 0.5rem;font:inherit;font-weight:700;color:inherit;background:#fff;cursor:pointer;}",
+  ".other{margin:0;}",
+  ".other-link{color:inherit;font:inherit;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:0.28em;}",
+  ".other-link + .other-link{margin-left:0.35em;}",
+  "button.other-link{padding:0;border:0;background:transparent;cursor:pointer;}",
+  "button.other-link:focus-visible{outline:3px solid #000;outline-offset:3px;}",
+  ".other-link[aria-disabled=true]{opacity:0.4;cursor:default;}",
+  PIN_STYLE,
+  "#favorite-dialog:not([open]){display:none;}#favorite-dialog{width:calc(100% - 3rem);max-width:24rem;padding:1.5rem;border:2px solid #000;background:#fff;color:#000;}",
+  "#favorite-dialog:modal{overscroll-behavior:contain;}#favorite-dialog::backdrop{background:rgba(0,0,0,0.45);overflow:hidden;overscroll-behavior:contain;}",
+  "#favorite-dialog p:first-child{margin-top:0;}#favorite-error:empty,#favorite-message:empty{display:none;}.favorite-close{display:block;margin:1rem auto 0;border:0;background:none;color:inherit;font:inherit;text-decoration:underline;cursor:pointer;min-height:3rem;min-width:3rem;}.favorite-close:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".list-actions{display:flex;gap:0.5rem;}",
   ".list-actions .btn{flex:1;min-width:0;}",
   "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
@@ -797,6 +805,52 @@ const EINK_DETAIL_CHROME = [
   "</script>",
 ].join("\n");
 
+const EINK_FAVORITE_CHROME = `<script>
+(function(){
+  var link=document.getElementById('favorite-link');
+  var dialog=document.getElementById('favorite-dialog');
+  var form=document.getElementById('favorite-form');
+  var pin=document.getElementById('pin');
+  var error=document.getElementById('favorite-error');
+  var message=document.getElementById('favorite-message');
+  var status=document.getElementById('favorite-status');
+  if(!link||!dialog||typeof dialog.showModal!=='function'||typeof window.fetch!=='function'||typeof URLSearchParams==='undefined')return;
+  var csrf='',busy=false,slots=pin.nextElementSibling.children;
+  function mark(){var active=Math.min(pin.selectionStart||0,5);for(var i=0;i<slots.length;i++){slots[i].classList.toggle('active',i===active);slots[i].classList.toggle('filled',i<pin.value.length)}}
+  function showPin(message){error.textContent=message||'';pin.value='';mark();if(!dialog.open)dialog.showModal();pin.focus()}
+  function label(){status.textContent=link.dataset.favorite==='true'?'取消收藏':'收藏'}
+  function setBusy(value){busy=value;if(value)link.setAttribute('aria-disabled','true');else link.removeAttribute('aria-disabled')}
+  function fail(text){if(dialog.open){error.textContent=text;pin.value='';mark();pin.focus()}else{label();message.textContent=text}}
+  function post(value){
+    var data=new URLSearchParams();data.set('csrf',csrf);data.set('favorite',link.dataset.favorite==='true'?'0':'1');if(value)data.set('pin',value);
+    return fetch(link.href,{method:'POST',headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded'},body:data.toString(),credentials:'same-origin'})
+      .then(function(response){return response.json().then(function(result){return {status:response.status,data:result}})})
+      .then(function(result){
+        if(result.status===200&&result.data.ok){if(dialog.open)dialog.close();pin.value='';link.dataset.favorite=result.data.favorite?'true':'false';var next=new URL(link.href);next.searchParams.set('favorite',result.data.favorite?'0':'1');link.href=next.toString();form.action=link.href;label();return}
+        if(result.data.requiresPin){if(value&&!dialog.open){label();return}showPin(result.data.error);return}
+        fail(result.status===403&&dialog.open?'验证已过期，请关闭后重试。':result.data.error||'收藏失败，请重试。');
+      });
+  }
+  function finish(){setBusy(false);pin.disabled=false;if(dialog.open)pin.focus()}
+  link.addEventListener('click',function(event){
+    if(busy){event.preventDefault();return}
+    if(event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
+    event.preventDefault();setBusy(true);message.textContent='';
+    fetch(link.href,{headers:{'Accept':'application/json'},credentials:'same-origin',cache:'no-store'})
+      .then(function(response){return response.json().then(function(result){if(!response.ok)throw new Error(result.error||'收藏失败，请重试。');return result})})
+      .then(function(result){csrf=result.csrf;if(result.authenticated)return post();showPin();label()})
+      .catch(function(err){fail(err.message||'收藏失败，请重试。')}).then(finish);
+  });
+  function submit(){if(busy||!dialog.open||!(/^[0-9]{6}$/).test(pin.value))return;setBusy(true);error.textContent='';var value=pin.value;pin.disabled=true;post(value).catch(function(){fail('收藏失败，请重试。')}).then(finish)}
+  form.addEventListener('submit',function(event){event.preventDefault();submit()});
+  pin.addEventListener('input',function(event){mark();if(!event.isComposing)submit()});
+  pin.addEventListener('compositionend',function(){mark();submit()});pin.addEventListener('change',function(){mark();submit()});
+  pin.addEventListener('focus',mark);pin.addEventListener('click',mark);pin.addEventListener('keyup',mark);pin.addEventListener('select',mark);
+  dialog.addEventListener('close',function(){pin.value='';mark();error.textContent='';label()});
+  mark();pin.parentElement.classList.add('pin-enhanced');
+})();
+</script>`;
+
 export function renderEinkDetail(
   excerpt: Excerpt,
   listPath: string,
@@ -814,7 +868,7 @@ export function renderEinkDetail(
     excerptDetailBody(excerpt, imageBaseUrl, showNavigation, category, page),
     "</article>",
     nav,
-  ].join("\n"), true, EINK_DETAIL_CHROME, "detail");
+  ].join("\n"), true, EINK_DETAIL_CHROME + (showNavigation ? EINK_FAVORITE_CHROME : ""), "detail");
 }
 
 async function fetchExcerptByShortId(env: ConfiguredBindings, shortId: number): Promise<Excerpt | null> {
@@ -1064,14 +1118,14 @@ const worker = {
       const code = url.pathname.slice("/read/favorite/".length);
       const shortId = shareCodeId(code);
       if (shortId === null) return new Response("Not found", { status: 404 });
-      return favoriteRequest(request, env, code, async () => {
+      return favoriteRequest(request, env, code, async (desired) => {
         if (!env.NOTION_TOKEN || !env.NOTION_EXCERPTS_DATA_SOURCE_ID) throw new Error("Notion is not configured");
         const excerpt = await fetchExcerptByShortId({ NOTION_TOKEN: env.NOTION_TOKEN, NOTION_DATA_SOURCE_ID: env.NOTION_EXCERPTS_DATA_SOURCE_ID }, shortId);
         if (!excerpt || !NOTION_PAGE_ID.test(excerpt.id)) return false;
         const response = await fetchNotionJson(`https://api.notion.com/v1/pages/${encodeURIComponent(excerpt.id)}`, {
           method: "PATCH",
           headers: { Authorization: `Bearer ${env.NOTION_TOKEN}`, "Notion-Version": NOTION_VERSION, "Content-Type": "application/json" },
-          body: JSON.stringify({ properties: { "已收藏": { checkbox: true } } }),
+          body: JSON.stringify({ properties: { "已收藏": { checkbox: desired } } }),
         });
         if (!response.ok) throw new Error(`Notion returned ${response.status}`);
         return true;
@@ -1138,7 +1192,7 @@ const worker = {
         // Cache misses too, so probing unused codes does not reach Notion on every request.
         if (!excerpt) return new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=300" } });
         const neighbors = neighborsFor(list, excerpt.code) ?? { prevCode: null, nextCode: null };
-        return htmlResponse(
+        const detailResponse = htmlResponse(
           renderEinkDetail(
             excerpt,
             READ_LIST_PATH,
@@ -1150,6 +1204,8 @@ const worker = {
           ),
           request.method,
         );
+        if (showNavigation) detailResponse.headers.set("Cache-Control", "no-store");
+        return detailResponse;
       }
 
       if (isEinkList) {
