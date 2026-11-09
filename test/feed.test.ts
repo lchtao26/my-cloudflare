@@ -1293,7 +1293,7 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
   assert.match(html, /来源：某出版社/);
   assert.match(html, /章节：第一章/);
   assert.match(html, /日期：2025-06-12/);
-  assert.match(html, /<p class="other">其他：<a class="other-link" id="favorite-link" data-favorite="false" href="\/read\/favorite\/[A-Za-z0-9]{6}\?favorite=1"><span id="favorite-status" role="status">收藏<\/span><\/a> <a class="other-link" href="https:\/\/www\.notion\.so\/excerpt-1">管理<\/a> <button type="button" class="other-link" id="share-copy"[^>]*><span id="share-status" role="status">分享<\/span><\/button><\/p>/);
+  assert.match(html, /<\/div>\n<p class="other"><a class="other-link" id="favorite-link" data-favorite="false" href="\/read\/favorite\/[A-Za-z0-9]{6}\?favorite=1"><span id="favorite-status" role="status">收藏<\/span><\/a> <a class="other-link" href="https:\/\/www\.notion\.so\/excerpt-1">管理<\/a> <button type="button" class="other-link" id="share-copy"[^>]*><span id="share-status" role="status">分享<\/span><\/button><\/p>[\s\S]*?<hr \/>\n<p class="detail-metadata">/);
   assert.match(html, /<dialog id="favorite-dialog" aria-label="收藏验证">/);
   assert.doesNotMatch(html, /数据来源：|分享链接：/);
   assert.match(html, new RegExp(`src="https://example\\.workers\\.dev/read/p/${pageId}/${blockId}"`));
@@ -1847,7 +1847,55 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
   assert.doesNotMatch(html, /https:\/\/example\.com \/book|AI时代的RSS|使用API处理|Hello世界|ABC出版社|张三AI/);
 });
 
-test("excerpt image proxy serves only images referenced by the language body field", async (context) => {
+test("detail toggles between translated and original bodies when both are present", () => {
+  const properties = {
+    ...idProperty(),
+    "原文语言": { type: "select" as const, select: { name: "日文" } },
+    "正文": { type: "rich_text" as const, rich_text: [{ plain_text: "原文<script>" }] },
+    "正文翻译": { type: "rich_text" as const, rich_text: [{ plain_text: "中文译文" }] },
+  };
+  const page = { id: "page", url: "https://notion.so/page", properties };
+  const excerpt = excerptFromPage(page);
+  assert.ok(excerpt);
+  const html = renderEinkDetail(excerpt, "/read", "/read/p");
+  assert.match(html, /id="translated-body" lang="zh-CN">\n<p>中文译文<\/p>/);
+  assert.match(html, /id="original-body" lang="ja" hidden>\n<p>原文 &lt;script&gt;<\/p>/);
+  assert.match(html, /id="body-toggle" hidden>显示原文<\/button>/);
+
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script);
+  let click: () => void = () => assert.fail("toggle listener was not registered");
+  const button = { hidden: true, textContent: "显示原文", addEventListener: (_name: string, handler: () => void) => { click = handler; } };
+  const translated = { hidden: false };
+  const original = { hidden: true };
+  const nodes: Record<string, unknown> = { "body-toggle": button, "translated-body": translated, "original-body": original };
+  runInNewContext(script, {
+    document: { documentElement: { scrollHeight: 600 }, querySelector: () => null, getElementById: (id: string) => nodes[id], addEventListener() {} },
+    window: { innerHeight: 600, addEventListener() {} },
+    location: { pathname: "/read/d/000000" },
+    localStorage: { getItem: () => null, setItem() {} },
+    setTimeout: () => 1,
+  });
+  assert.equal(button.hidden, false);
+  click();
+  assert.equal(translated.hidden, true);
+  assert.equal(original.hidden, false);
+  assert.equal(button.textContent, "显示译文");
+  click();
+  assert.equal(translated.hidden, false);
+  assert.equal(original.hidden, true);
+  assert.equal(button.textContent, "显示原文");
+
+  const noOriginal = excerptFromPage({ ...page, properties: { ...properties, "正文": { type: "rich_text", rich_text: [] } } });
+  assert.ok(noOriginal);
+  assert.doesNotMatch(renderEinkDetail(noOriginal, "/read", "/read/p"), /id="body-toggle"/);
+  const chinese = excerptFromPage({ ...page, properties: { ...properties, "原文语言": { type: "select", select: { name: "中文" } } } });
+  assert.ok(chinese);
+  assert.doesNotMatch(renderEinkDetail(chinese, "/read", "/read/p"), /id="body-toggle"/);
+  assert.doesNotMatch(renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, false), /id="body-toggle"|id="original-body"/);
+});
+
+test("excerpt image proxy serves images referenced by the displayed body fields", async (context) => {
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
   const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
   const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
@@ -1855,7 +1903,7 @@ test("excerpt image proxy serves only images referenced by the language body fie
   let referenced = true;
   let standalone = false;
   let correctParent = true;
-  let mode: "translated" | "chinese" = "translated";
+  let mode: "translated" | "chinese" | "original" = "translated";
   globalThis.fetch = (async (url: RequestInfo | URL) => {
     if (String(url).includes("/pages/")) {
       const useOriginal = mode !== "translated";
@@ -1865,6 +1913,7 @@ test("excerpt image proxy serves only images referenced by the language body fie
         properties: {
           "原文语言": { type: "select", select: { name: mode === "chinese" ? "中文" : "日文" } },
           [field]: { type: "rich_text", rich_text: [{ plain_text: referenced ? `<image source="notion-file-block://${blockId}/${fileId}" ${standalone ? ">" : "/>"}` : "无图片" }] },
+          ...(mode === "original" ? { "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "译文" }] } } : {}),
         },
       });
     }
@@ -1884,6 +1933,8 @@ test("excerpt image proxy serves only images referenced by the language body fie
   referenced = false;
   assert.equal((await worker.fetch(new Request(url), env)).status, 404);
   referenced = true;
+  mode = "original";
+  assert.equal((await worker.fetch(new Request(url), env)).status, 200);
   mode = "chinese";
   assert.equal((await worker.fetch(new Request(url), env)).status, 200);
   correctParent = false;

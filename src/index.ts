@@ -173,6 +173,7 @@ type Excerpt = {
   title: string;
   originalTitle: string;
   body: string;
+  originalBody?: string;
   chinese: boolean;
   /** BCP 47 tag for the displayed body (translations are Chinese). */
   lang: string;
@@ -359,6 +360,7 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
     title: translatedTitle || originalTitle || "无标题",
     originalTitle,
     body,
+    originalBody: useOriginal ? "" : textProperty(properties, "正文"),
     chinese,
     lang: useOriginal ? originalLang : "zh-CN",
     titleLang: translatedTitle || !originalTitle ? "zh-CN" : originalLang,
@@ -459,13 +461,16 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: 
     einkText(`日期：${excerpt.publishedDate || "—"}`),
   ].filter(Boolean);
   const body = excerpt.body ? einkParagraphs(excerpt.body, excerpt.id, imageBaseUrl) : "";
+  const originalBody = showActions && !excerpt.chinese && excerpt.body && excerpt.originalBody
+    ? einkParagraphs(excerpt.originalBody, excerpt.id, imageBaseUrl) : "";
   const terms = showActions && excerpt.terms ? einkParagraphs(excerpt.terms, excerpt.id, imageBaseUrl) : "";
   return [
     ...(source ? [`<p>${source}</p>`] : []),
-    ...(body ? [`<div class="excerpt-body" lang="${htmlText(excerpt.lang)}">\n${body}\n</div>`] : []),
+    ...(body ? [`<div class="excerpt-body"${originalBody ? ' id="translated-body"' : ""} lang="${htmlText(excerpt.lang)}">\n${body}\n</div>`] : []),
+    ...(originalBody ? [`<div class="excerpt-body" id="original-body" lang="${htmlText(excerpt.originalLang)}" hidden>\n${originalBody}\n</div>`] : []),
+    ...(showActions ? [`<p class="other"><a class="other-link" id="favorite-link" data-favorite="${excerpt.favorite ? "true" : "false"}" href="${htmlText(favoriteUrl)}"><span id="favorite-status" role="status">${excerpt.favorite ? "取消收藏" : "收藏"}</span></a> <a class="other-link" href="${htmlText(excerpt.link)}">管理</a> <button type="button" class="other-link" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}"><span id="share-status" role="status">分享</span></button>${originalBody ? ' <button type="button" class="other-link" id="body-toggle" hidden>显示原文</button>' : ""}</p><p id="favorite-message" role="status"></p><dialog id="favorite-dialog" aria-label="收藏验证"><form id="favorite-form" method="post" action="${htmlText(favoriteUrl)}">${PIN_FIELD}<p id="favorite-error" role="alert"></p></form><form method="dialog"><button type="submit" class="favorite-close">取消</button></form></dialog>`] : []),
     "<hr />",
     `<p class="detail-metadata">${details.join("<br />\n")}</p>`,
-    ...(showActions ? [`<p class="other">其他：<a class="other-link" id="favorite-link" data-favorite="${excerpt.favorite ? "true" : "false"}" href="${htmlText(favoriteUrl)}"><span id="favorite-status" role="status">${excerpt.favorite ? "取消收藏" : "收藏"}</span></a> <a class="other-link" href="${htmlText(excerpt.link)}">管理</a> <button type="button" class="other-link" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}"><span id="share-status" role="status">分享</span></button></p><p id="favorite-message" role="status"></p><dialog id="favorite-dialog" aria-label="收藏验证"><form id="favorite-form" method="post" action="${htmlText(favoriteUrl)}">${PIN_FIELD}<p id="favorite-error" role="alert"></p></form><form method="dialog"><button type="submit" class="favorite-close">取消</button></form></dialog>`] : []),
     ...(terms ? ["<hr />", `<p>${einkText("名词解释")}</p>`, terms] : []),
   ].join("\n");
 }
@@ -769,6 +774,15 @@ const EINK_DETAIL_CHROME = [
   "if(max>0)window.scrollTo(0,p*max);",
   "}",
   "var shareCopy=document.getElementById('share-copy');",
+  "var bodyToggle=document.getElementById('body-toggle');",
+  "var translatedBody=document.getElementById('translated-body');",
+  "var originalBody=document.getElementById('original-body');",
+  "if(bodyToggle&&translatedBody&&originalBody){",
+  "bodyToggle.addEventListener('click',function(){",
+  "var showOriginal=originalBody.hidden;originalBody.hidden=!showOriginal;translatedBody.hidden=showOriginal;",
+  "bodyToggle.textContent=showOriginal?'显示译文':'显示原文';progress();saveSoon();",
+  "},false);bodyToggle.hidden=false;",
+  "}",
   "var shareStatus=document.getElementById('share-status');",
   "if(shareCopy)shareCopy.addEventListener('click',function(){",
   "var link=location.origin+shareCopy.getAttribute('data-path');",
@@ -1111,11 +1125,11 @@ async function fetchExcerptImage(env: ConfiguredBindings, pageId: string, blockI
   if (!pageResponse.ok) throw new Error(`Notion API returned ${pageResponse.status}`);
   const page = await pageResponse.json() as NotionPage;
   if (page.parent?.type !== "data_source_id" || page.parent.data_source_id !== env.NOTION_DATA_SOURCE_ID) return null;
-  const body = usesOriginalContent(page.properties)
-    ? textProperty(page.properties, "正文")
-    : textProperty(page.properties, "正文翻译");
-  const referenced = Array.from(body.matchAll(IMAGE_TAG)).some((match) =>
-    match[1]?.toLowerCase() === blockId.toLowerCase() && NOTION_PAGE_ID.test(match[2] ?? ""));
+  const original = textProperty(page.properties, "正文");
+  const translation = textProperty(page.properties, "正文翻译");
+  const bodies = usesOriginalContent(page.properties) ? [original] : translation ? [translation, original] : [];
+  const referenced = bodies.some((body) => Array.from(body.matchAll(IMAGE_TAG)).some((match) =>
+    match[1]?.toLowerCase() === blockId.toLowerCase() && NOTION_PAGE_ID.test(match[2] ?? "")));
   if (!referenced) return null;
   const blockResponse = await fetch(`https://api.notion.com/v1/blocks/${blockId}`, { headers });
   if (blockResponse.status === 404) return null;
