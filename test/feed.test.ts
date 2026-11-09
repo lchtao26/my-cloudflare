@@ -947,7 +947,7 @@ test("e-ink categories filter the view and preserve navigation context", async (
   assert.match(JSON.stringify(queries.at(-1)?.filter), /bunshun\.jp\/denshiban\/articles\//);
 
   const fallback = await worker.fetch(new Request("https://example.com/read?tab=unknown"), env);
-  assert.equal(fallback.headers.get("Cache-Control"), "no-store");
+  assert.equal(fallback.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
   const fallbackHtml = await fallback.text();
   assert.match(fallbackHtml, /aria-current="page">全部<\/a>/);
   assert.match(fallbackHtml, /<a href="\/read\?tab=likes">收藏<\/a>/);

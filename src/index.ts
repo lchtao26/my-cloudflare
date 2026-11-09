@@ -1244,7 +1244,7 @@ const worker = {
           .map(excerptFromPage)
           .filter((item): item is Excerpt => item !== null);
         const listResponse = htmlResponse(renderEinkList(excerpts, READ_LIST_PATH, category, page, pages.length > limit && page < 999), request.method);
-        listResponse.headers.set("Cache-Control", "no-store");
+        if (category === "favorites") listResponse.headers.set("Cache-Control", "no-store");
         return listResponse;
       }
 
