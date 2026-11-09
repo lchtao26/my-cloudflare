@@ -886,11 +886,11 @@ test("e-ink categories filter the view and preserve navigation context", async (
   const queries: Array<{ filter?: object }> = [];
   const viewFilter = { property: "正文翻译", rich_text: { is_not_empty: true } };
   const favoritesFilter = { property: "收藏", checkbox: { equals: true } };
-  const favoritesSorts = [{ property: "发布日期", direction: "descending" }];
+  const favoritesSorts = [{ timestamp: "last_edited_time", direction: "descending" }];
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     const href = String(url);
     if (href.endsWith("/views/saved-view")) {
-      return Response.json({ data_source_id: "source", filter: favoritesFilter, sorts: favoritesSorts });
+      return Response.json({ data_source_id: "source", filter: favoritesFilter, sorts: [{ property: "发布日期", direction: "descending" }] });
     }
     if (href.includes("/views/")) return Response.json({ data_source_id: "source", filter: viewFilter });
     const query = JSON.parse(String(init?.body));
@@ -947,6 +947,7 @@ test("e-ink categories filter the view and preserve navigation context", async (
   assert.match(JSON.stringify(queries.at(-1)?.filter), /bunshun\.jp\/denshiban\/articles\//);
 
   const fallback = await worker.fetch(new Request("https://example.com/read?tab=unknown"), env);
+  assert.equal(fallback.headers.get("Cache-Control"), "no-store");
   const fallbackHtml = await fallback.text();
   assert.match(fallbackHtml, /aria-current="page">全部<\/a>/);
   assert.match(fallbackHtml, /<a href="\/read\?tab=likes">收藏<\/a>/);
@@ -954,6 +955,7 @@ test("e-ink categories filter the view and preserve navigation context", async (
 
   const favorites = await worker.fetch(new Request("https://example.com/read?tab=likes"), env);
   assert.equal(favorites.status, 200);
+  assert.equal(favorites.headers.get("Cache-Control"), "no-store");
   assert.match(await favorites.text(), /aria-current="page">收藏<\/a>/);
   assert.deepEqual(queries.at(-1), { page_size: 31, filter: favoritesFilter, sorts: favoritesSorts });
 

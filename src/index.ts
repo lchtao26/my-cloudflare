@@ -1047,8 +1047,10 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string, catego
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
         page_size: Math.min(100, limit - pages.length),
-        // No saved sort means the table's own order. Don't replace it with last_edited_time.
-        ...(view.sorts?.length ? { sorts: view.sorts } : {}),
+        // Favorites are ordered by the most recently edited page, regardless of the view's saved sort.
+        ...(category === "favorites"
+          ? { sorts: [{ timestamp: "last_edited_time", direction: "descending" }] }
+          : view.sorts?.length ? { sorts: view.sorts } : {}),
         ...(filter ? { filter } : {}),
         ...(cursor ? { start_cursor: cursor } : {}),
       }),
@@ -1241,7 +1243,9 @@ const worker = {
         const excerpts = pages.slice(0, limit)
           .map(excerptFromPage)
           .filter((item): item is Excerpt => item !== null);
-        return htmlResponse(renderEinkList(excerpts, READ_LIST_PATH, category, page, pages.length > limit && page < 999), request.method);
+        const listResponse = htmlResponse(renderEinkList(excerpts, READ_LIST_PATH, category, page, pages.length > limit && page < 999), request.method);
+        listResponse.headers.set("Cache-Control", "no-store");
+        return listResponse;
       }
 
       const feedUrl = `${url.origin}${url.pathname}`;
