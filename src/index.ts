@@ -381,8 +381,8 @@ function excerptDetailUrl(feedUrl: string, code: string): string {
   return `${new URL(feedUrl).origin}${READ_DETAIL_PREFIX}/${code}`;
 }
 
-// Self-closing tags and captioned <image>...</image> wrappers both count.
-const IMAGE_TAG = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\?[^"<>]*)?"\s*(?:\/>|>([\s\S]*?)<\/image>)/gi;
+// Stop a caption at the next image so a standalone opening tag cannot consume it.
+const IMAGE_TAG = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\?[^"<>]*)?"\s*(?:\/>|>(?:((?:(?!<image\b)[\s\S])*?)<\/image>)?)/gi;
 // RSS only needs the first source ids; skip matching the rest of the tag or caption body.
 const IMAGE_SOURCE = /<image\s+source="notion-file-block:\/\/([0-9a-f-]{36})\/([0-9a-f-]{36})/gi;
 const HTML_IMG = /<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>/gi;

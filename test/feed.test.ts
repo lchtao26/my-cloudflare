@@ -674,6 +674,26 @@ test("detail pages turn captioned notion image wrappers into proxied images and 
   assert.doesNotMatch(detail, /©文藝春秋|notion-file-block|<image|<\/image>/);
 });
 
+test("standalone notion image tags preserve following text and later captioned images", () => {
+  const pageId = "413e75a1-639c-811e-b723-f98e9deb067e";
+  const first = "0cfe35b2-127f-44b3-b050-1ce3de6956bc";
+  const second = "fd282f61-6630-4624-ad35-a02c1d7ed87b";
+  const body = [
+    `<image source="notion-file-block://${first}/7f16420b-4308-49ca-8dc8-dcb211aa5755?space_id=e9cde029-df5b-4155-b1ef-e48feea5c573&name=bunshun-93410-img1.jpg">`,
+    "图片后正文",
+    `<image source="notion-file-block://${second}/5527d07f-bcf7-43bc-8558-badb3c0ad981">不显示的说明</image>`,
+    "后续正文",
+  ].join("<br /><br />");
+  const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: { ...idProperty(), "正文翻译": { type: "rich_text", rich_text: [{ plain_text: body }] } } });
+  assert.ok(excerpt);
+  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
+  assert.match(detail, new RegExp(`src="https://example.com/read/p/${pageId}/${first}"`));
+  assert.match(detail, new RegExp(`src="https://example.com/read/p/${pageId}/${second}"`));
+  assert.match(detail, /图片后正文/);
+  assert.match(detail, /后续正文/);
+  assert.doesNotMatch(detail, /不显示的说明|notion-file-block/);
+});
+
 test("text formatting handles nested quotes, markup, and English apostrophes", () => {
   assert.equal(formatText("他说：“使用‘AI工具’。”"), "他说：「使用『AI 工具』。」");
   assert.equal(formatText("‘单独引用’和\"中文\""), "「单独引用」和「中文」");
@@ -1833,6 +1853,7 @@ test("excerpt image proxy serves only images referenced by the language body fie
   const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
   const token = globalThis.fetch;
   let referenced = true;
+  let standalone = false;
   let correctParent = true;
   let mode: "translated" | "chinese" = "translated";
   globalThis.fetch = (async (url: RequestInfo | URL) => {
@@ -1843,7 +1864,7 @@ test("excerpt image proxy serves only images referenced by the language body fie
         parent: { type: "data_source_id", data_source_id: correctParent ? "source" : "other" },
         properties: {
           "原文语言": { type: "select", select: { name: mode === "chinese" ? "中文" : "日文" } },
-          [field]: { type: "rich_text", rich_text: [{ plain_text: referenced ? `<image source="notion-file-block://${blockId}/${fileId}" />` : "无图片" }] },
+          [field]: { type: "rich_text", rich_text: [{ plain_text: referenced ? `<image source="notion-file-block://${blockId}/${fileId}" ${standalone ? ">" : "/>"}` : "无图片" }] },
         },
       });
     }
@@ -1858,6 +1879,8 @@ test("excerpt image proxy serves only images referenced by the language body fie
   assert.equal(response.headers.get("Content-Type"), "image/jpeg");
   assert.equal(await response.text(), "image bytes");
   assert.equal((await worker.fetch(new Request(url, { method: "HEAD" }), env)).status, 200);
+  standalone = true;
+  assert.equal((await worker.fetch(new Request(url), env)).status, 200);
   referenced = false;
   assert.equal((await worker.fetch(new Request(url), env)).status, 404);
   referenced = true;
