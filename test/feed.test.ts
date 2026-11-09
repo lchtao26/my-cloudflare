@@ -1847,7 +1847,7 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
   assert.doesNotMatch(html, /https:\/\/example\.com \/book|AI时代的RSS|使用API处理|Hello世界|ABC出版社|张三AI/);
 });
 
-test("detail toggles between translated and original bodies when both are present", () => {
+test("five quick body taps toggle translations without counting scrolls or drags", () => {
   const properties = {
     ...idProperty(),
     "原文语言": { type: "select" as const, select: { name: "日文" } },
@@ -1860,39 +1860,82 @@ test("detail toggles between translated and original bodies when both are presen
   const html = renderEinkDetail(excerpt, "/read", "/read/p");
   assert.match(html, /id="translated-body" lang="zh-CN">\n<p>中文译文<\/p>/);
   assert.match(html, /id="original-body" lang="ja" hidden>\n<p>原文 &lt;script&gt;<\/p>/);
-  assert.match(html, /id="body-toggle" hidden>显示原文<\/button>/);
+  assert.doesNotMatch(html, /id="body-toggle"/);
 
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   assert.ok(script);
-  let click: () => void = () => assert.fail("toggle listener was not registered");
-  const button = { hidden: true, textContent: "显示原文", addEventListener: (_name: string, handler: () => void) => { click = handler; } };
-  const translated = { hidden: false };
-  const original = { hidden: true };
-  const nodes: Record<string, unknown> = { "body-toggle": button, "translated-body": translated, "original-body": original };
+  type Event = { touches: Array<{ clientX: number; clientY: number }>; changedTouches: Array<{ clientX: number; clientY: number }>; target: object; clientX: number; clientY: number; button: number };
+  function body(hidden: boolean) {
+    const handlers = new Map<string, (event: Event) => void>();
+    return { hidden, handlers, addEventListener: (name: string, handler: (event: Event) => void) => handlers.set(name, handler) };
+  }
+  const translated = body(false);
+  const original = body(true);
+  const nodes: Record<string, unknown> = { "translated-body": translated, "original-body": original };
+  let now = 1000;
+  let scrollY = 0;
+  const windowHandlers = new Map<string, Array<() => void>>();
   runInNewContext(script, {
     document: { documentElement: { scrollHeight: 600 }, querySelector: () => null, getElementById: (id: string) => nodes[id], addEventListener() {} },
-    window: { innerHeight: 600, addEventListener() {} },
+    window: { innerHeight: 600, get scrollY() { return scrollY; }, addEventListener(name: string, handler: () => void) { windowHandlers.set(name, [...windowHandlers.get(name) ?? [], handler]); } },
     location: { pathname: "/read/d/000000" },
     localStorage: { getItem: () => null, setItem() {} },
+    Date: { now: () => now },
     setTimeout: () => 1,
   });
-  assert.equal(button.hidden, false);
-  click();
+  function touch(target: ReturnType<typeof body>, endX = 10, move = false) {
+    const point = { clientX: 10, clientY: 10 };
+    const event = { touches: [point], changedTouches: [point], target, ...point, button: 0 };
+    target.handlers.get("touchstart")!(event);
+    if (move) target.handlers.get("touchmove")!({ ...event, touches: [{ ...point, clientX: endX }] });
+    target.handlers.get("touchend")!({ ...event, touches: [], changedTouches: [{ ...point, clientX: endX }] });
+    now += 150;
+  }
+  for (let i = 0; i < 4; i++) touch(translated);
+  assert.equal(original.hidden, true);
+  touch(translated, 40, true);
+  for (let i = 0; i < 4; i++) touch(translated);
+  assert.equal(original.hidden, true, "a swipe resets the tap sequence");
+  scrollY += 30;
+  for (const handler of windowHandlers.get("scroll") ?? []) handler();
+  for (let i = 0; i < 4; i++) touch(translated);
+  assert.equal(original.hidden, true, "scrolling resets the tap sequence");
+  touch(translated);
   assert.equal(translated.hidden, true);
   assert.equal(original.hidden, false);
-  assert.equal(button.textContent, "显示译文");
-  click();
+  for (let i = 0; i < 5; i++) touch(original);
   assert.equal(translated.hidden, false);
   assert.equal(original.hidden, true);
-  assert.equal(button.textContent, "显示原文");
+  for (let i = 0; i < 5; i++) {
+    touch(translated);
+    now += 600;
+  }
+  assert.equal(original.hidden, true, "slow taps do not toggle the body");
+  now += 1000;
+  const point = { clientX: 10, clientY: 10 };
+  const event = { touches: [point], changedTouches: [point], target: translated, ...point, button: 0 };
+  translated.handlers.get("touchstart")!(event);
+  now += 700;
+  translated.handlers.get("touchend")!({ ...event, touches: [] });
+  for (let i = 0; i < 4; i++) touch(translated);
+  assert.equal(original.hidden, true, "a long press is not a tap");
+  windowHandlers.get("scroll")?.[0]?.();
+  now += 1000;
+  for (let i = 0; i < 5; i++) {
+    const event = { touches: [], changedTouches: [], target: translated, clientX: 10, clientY: 10, button: 0 };
+    translated.handlers.get("mousedown")!(event);
+    translated.handlers.get("click")!(event);
+    now += 150;
+  }
+  assert.equal(original.hidden, false, "mouse clicks also toggle the body");
 
   const noOriginal = excerptFromPage({ ...page, properties: { ...properties, "正文": { type: "rich_text", rich_text: [] } } });
   assert.ok(noOriginal);
-  assert.doesNotMatch(renderEinkDetail(noOriginal, "/read", "/read/p"), /id="body-toggle"/);
+  assert.doesNotMatch(renderEinkDetail(noOriginal, "/read", "/read/p"), /id="original-body"/);
   const chinese = excerptFromPage({ ...page, properties: { ...properties, "原文语言": { type: "select", select: { name: "中文" } } } });
   assert.ok(chinese);
-  assert.doesNotMatch(renderEinkDetail(chinese, "/read", "/read/p"), /id="body-toggle"/);
-  assert.doesNotMatch(renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, false), /id="body-toggle"|id="original-body"/);
+  assert.doesNotMatch(renderEinkDetail(chinese, "/read", "/read/p"), /id="original-body"/);
+  assert.doesNotMatch(renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, false), /id="original-body"/);
 });
 
 test("excerpt image proxy serves images referenced by the displayed body fields", async (context) => {
