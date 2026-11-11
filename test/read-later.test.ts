@@ -42,6 +42,9 @@ test("read-later feed signs the Instapaper request and renders bookmarks", async
   const head = await worker.fetch(new Request("https://chui.dev/read/later.xml?limit=7&folder_id=starred", { method: "HEAD" }), env);
   assert.equal(head.status, 200);
   assert.equal(await head.text(), "");
+  const alias = await worker.fetch(new Request("https://chui.dev/r/later.xml?limit=7&folder_id=starred"), env);
+  assert.equal(alias.status, 200);
+  assert.equal(await alias.text(), xml);
 });
 
 test("read-later feed handles missing credentials and unsupported methods", async () => {

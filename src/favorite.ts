@@ -59,7 +59,7 @@ function response(render: DocumentRenderer, body: string, status = 200, cookies:
 }
 
 function backLink(code: string, query: string): string {
-  return `<p><a class="btn" href="/read/d/${code}${query}">返回文章</a></p>`;
+  return `<p><a class="btn" href="/read/${code}${query}">返回文章</a></p>`;
 }
 
 function form(code: string, query: string, token: string, authenticated: boolean, error = "", desired = true): string {

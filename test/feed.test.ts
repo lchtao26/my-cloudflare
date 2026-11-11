@@ -40,20 +40,20 @@ test("RSS item has exactly the requested fields and escapes XML", () => {
   const book = bookFromPage(page);
   assert.ok(book);
   assert.equal(book.pubDate?.toISOString(), "2026-10-01T08:00:00.000Z");
-  const feed = renderFeed([book], "https://example.workers.dev/book/rss");
+  const feed = renderFeed([book], "https://example.workers.dev/book.xml");
   assert.match(feed, /<link>\s*<!\[CDATA\[https:\/\/book\.douban\.com\/subject\/123\/\?a=1&b=2\]\]>/);
   assert.match(feed, /<title>\s*<!\[CDATA\[甲 & 乙\]\]>/);
   assert.match(feed, /<!\[CDATA\[作者：张三 \| 写过 &amp; 小说<br \/>\n简介：一部 &lt;书&gt;<br \/>\n出版社：三联 &amp; 书店<br \/>\n<img src="https:\/\/example\.workers\.dev\/book\/p\/book-1" alt="封面" \/>\]\]>/);
   const withoutIntro = bookFromPage({ ...page, properties: { ...page.properties, "作者介绍": { type: "rich_text", rich_text: [] } } });
-  assert.match(renderFeed(withoutIntro ? [withoutIntro] : [], "https://example.workers.dev/book/rss"), /作者：张三<br \/>/);
-  assert.doesNotMatch(renderFeed(withoutIntro ? [withoutIntro] : [], "https://example.workers.dev/book/rss"), /作者：张三 \|/);
+  assert.match(renderFeed(withoutIntro ? [withoutIntro] : [], "https://example.workers.dev/book.xml"), /作者：张三<br \/>/);
+  assert.doesNotMatch(renderFeed(withoutIntro ? [withoutIntro] : [], "https://example.workers.dev/book.xml"), /作者：张三 \|/);
   assert.doesNotMatch(feed, /书名：|width=|style=|<category>|files\.example|来源：/);
   assert.match(feed, /<guid isPermaLink="false">notion:book-1<\/guid>/);
-  assert.match(feed, /<atom:link href="https:\/\/example\.workers\.dev\/book\/rss" rel="self" type="application\/rss\+xml"\/>/);
+  assert.match(feed, /<atom:link href="https:\/\/example\.workers\.dev\/book\.xml" rel="self" type="application\/rss\+xml"\/>/);
   assert.match(feed, /<language>zh-CN<\/language>/);
   const withoutCover = bookFromPage({ ...page, properties: { ...page.properties, "封面": { type: "files", files: [] } } });
   assert.equal(withoutCover?.hasCover, false);
-  assert.doesNotMatch(renderFeed(withoutCover ? [withoutCover] : [], "https://example.workers.dev/book/rss"), /<img /);
+  assert.doesNotMatch(renderFeed(withoutCover ? [withoutCover] : [], "https://example.workers.dev/book.xml"), /<img /);
 });
 
 test("source name links to the recommendation URL", () => {
@@ -66,7 +66,7 @@ test("source name links to the recommendation URL", () => {
     },
   });
   assert.ok(sourced);
-  const feed = renderFeed([sourced], "https://example.workers.dev/book/rss");
+  const feed = renderFeed([sourced], "https://example.workers.dev/book.xml");
   assert.match(feed, /简介：一部 &lt;书&gt;<br \/>\n出版社：三联 &amp; 书店<br \/>\n来源：<a href="https:\/\/example\.com\/review\?a=1&amp;b=2">新京报 &amp; 周刊<\/a>/);
 
   const plain = bookFromPage({
@@ -78,7 +78,7 @@ test("source name links to the recommendation URL", () => {
     },
   });
   assert.ok(plain);
-  const plainFeed = renderFeed([plain], "https://example.workers.dev/book/rss");
+  const plainFeed = renderFeed([plain], "https://example.workers.dev/book.xml");
   assert.match(plainFeed, /来源：周刊/);
   assert.doesNotMatch(plainFeed, /<a href/);
 });
@@ -106,7 +106,8 @@ test("worker paginates Notion results and exposes only the feed path", async (co
   const env = { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source" };
   const missing = await worker.fetch(new Request("https://example.workers.dev/"), env);
   assert.equal(missing.status, 404);
-  const response = await worker.fetch(new Request("https://example.workers.dev/book/rss"), env);
+  assert.equal((await worker.fetch(new Request("https://example.workers.dev/book/rss"), env)).status, 404);
+  const response = await worker.fetch(new Request("https://example.workers.dev/book.xml"), env);
   assert.equal(response.status, 200);
   assert.match(response.headers.get("Content-Type") ?? "", /application\/rss\+xml/);
   assert.equal(response.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
@@ -114,10 +115,10 @@ test("worker paginates Notion results and exposes only the feed path", async (co
   assert.deepEqual(requests[0]?.sorts, [{ timestamp: "last_edited_time", direction: "descending" }]);
   assert.equal(requests[1]?.start_cursor, "next");
 
-  const head = await worker.fetch(new Request("https://example.workers.dev/book/rss", { method: "HEAD" }), env);
+  const head = await worker.fetch(new Request("https://example.workers.dev/book.xml", { method: "HEAD" }), env);
   assert.equal(head.status, 200);
   assert.equal(await head.text(), "");
-  const method = await worker.fetch(new Request("https://example.workers.dev/book/rss", { method: "POST" }), env);
+  const method = await worker.fetch(new Request("https://example.workers.dev/book.xml", { method: "POST" }), env);
   assert.equal(method.status, 405);
   assert.equal(method.headers.get("Allow"), "GET, HEAD");
 });
@@ -126,7 +127,7 @@ test("both feeds query and render only the first 30 records, preserving their or
   const originalFetch = globalThis.fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
   const env = { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
-  for (const path of ["/book/rss", "/read.xml"]) {
+  for (const path of ["/book.xml", "/read.xml"]) {
     const requests: Array<{ page_size: number; start_cursor?: string }> = [];
     globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
       if (String(url).includes("/views/")) return Response.json({ data_source_id: "source" });
@@ -170,8 +171,9 @@ test("both feeds revalidate and rebuild when Notion content changes", async (con
   }) as typeof fetch;
   const env = { NOTION_TOKEN: "test", NOTION_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
   const cases = [
-    { path: "/book/rss", marker: "正文版本" },
+    { path: "/book.xml", marker: "正文版本" },
     { path: "/read.xml", marker: "标题版本" },
+    { path: "/r.xml", marker: "标题版本" },
   ] as const;
   for (const { path, marker } of cases) {
     const request = new Request(`https://example.workers.dev${path}`);
@@ -230,7 +232,7 @@ test("cover image is loaded from the Notion page and proxied", async (context) =
 });
 
 test("missing configuration and Notion failures return explicit errors", async (context) => {
-  const request = new Request("https://example.workers.dev/book/rss");
+  const request = new Request("https://example.workers.dev/book.xml");
   assert.equal((await worker.fetch(request, {})).status, 503);
 
   const originalFetch = globalThis.fetch;
@@ -324,7 +326,7 @@ test("excerpt feed uses the Notion RSS view filter, paginates, and links to e-in
   assert.equal(parsed.items?.length, 2);
   const item = parsed.items?.[0];
   assert.equal(item?.title, "第一节 & 开始");
-  assert.equal(item?.link, `https://example.workers.dev/read/d/${shareCode(7)}`);
+  assert.equal(item?.link, `https://example.workers.dev/read/${shareCode(7)}`);
   assert.equal(item?.guid?.value, "notion:407e75a1-639c-81ca-8919-f4bff2a57884");
   assert.equal(item?.description, undefined);
   assert.doesNotMatch(feed, /<item>[\s\S]*?<description>|一行 &lt;文字&gt;|原文：|名词解释/);
@@ -447,7 +449,7 @@ test("magazine and web excerpts use neutral source labels and link to e-ink deta
     });
     assert.ok(excerpt);
     const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read.xml")).items?.[0];
-    assert.equal(item?.link, `https://example.com/read/d/${shareCode(1)}`);
+    assert.equal(item?.link, `https://example.com/read/${shareCode(1)}`);
     assert.equal(item?.guid?.value, "notion:article");
     assert.equal(item?.description, undefined);
     const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
@@ -619,7 +621,7 @@ test("Chinese excerpt feed uses the body property without fetching page blocks",
   const item = parseRssFeed(feed).items?.[0];
   assert.equal(item?.title, "中文节选");
   assert.equal(item?.description, undefined);
-  assert.equal(item?.link, `https://example.workers.dev/read/d/${shareCode(1)}`);
+  assert.equal(item?.link, `https://example.workers.dev/read/${shareCode(1)}`);
   assert.equal(requests.some((href) => href.includes("/blocks/")), false);
 });
 
@@ -720,14 +722,14 @@ test("RSS item titles are formatted; descriptions keep original spacing", () => 
   const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read.xml")).items?.[0];
   assert.equal(item?.title, "「AI 时代的 RSS」");
   assert.equal(item?.description, undefined);
-  assert.equal(item?.link, `https://example.com/read/d/${shareCode(1)}`);
+  assert.equal(item?.link, `https://example.com/read/${shareCode(1)}`);
   const book = bookFromPage({ ...page, properties: {
     ...page.properties,
     "书名": { type: "title", title: [{ plain_text: "“AI时代的RSS”" }] },
     "简介": { type: "rich_text", rich_text: [{ plain_text: "保留API与2026年之间的原始排版 & <文字>" }] },
   } });
   assert.ok(book);
-  const bookItem = parseRssFeed(renderFeed([book], "https://example.com/book/rss")).items?.[0];
+  const bookItem = parseRssFeed(renderFeed([book], "https://example.com/book.xml")).items?.[0];
   assert.equal(bookItem?.title, "「AI 时代的 RSS」");
   assert.match(bookItem?.description ?? "", /保留API与2026年之间的原始排版 &amp; &lt;文字&gt;/);
 });
@@ -877,11 +879,16 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
   assert.match(response.headers.get("Content-Type") ?? "", /text\/html/);
   const html = await response.text();
   assert.match(html, /<title>阅读节选<\/title>/);
-  assert.match(html, new RegExp(`href="/read/d/${shareCode(1)}"`));
+  assert.match(html, new RegExp(`href="/read/${shareCode(1)}"`));
   assert.match(html, new RegExp(`<li id="${shareCode(1)}" lang="zh-CN" tabindex="-1">`));
   assert.match(html, /AI 时代的 RSS/);
   assert.match(html, /科技 News · 作者：张三 AI/);
   assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
+  const aliasList = await worker.fetch(new Request("https://example.workers.dev/r?tab=all"), {
+    NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source", NOTION_EXCERPTS_VIEW_ID: viewId,
+  });
+  assert.equal(aliasList.status, 200);
+  assert.match(await aliasList.text(), new RegExp(`href="/read/${shareCode(1)}"`));
   assert.equal((await worker.fetch(new Request("https://example.workers.dev/read"), {
     NOTION_TOKEN: "test",
     NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
@@ -935,7 +942,7 @@ test("e-ink categories filter the view and preserve navigation context", async (
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.match(html, new RegExp(`aria-current="page">${label}</a>`));
-    assert.match(html, new RegExp(`/read/d/${code}\\?tab=${category}`));
+    assert.match(html, new RegExp(`/read/${code}\\?tab=${category}`));
     assert.match(JSON.stringify(queries.at(-1)?.filter), new RegExp(marker.replaceAll(".", "\\.")));
     assert.match(JSON.stringify(queries.at(-1)?.filter), /正文翻译/);
     if (category === "weekly" || category === "bunshun") {
@@ -949,21 +956,21 @@ test("e-ink categories filter the view and preserve navigation context", async (
   assert.equal(later.status, 200);
   const laterHtml = await later.text();
   assert.match(laterHtml, /aria-current="page">稍后阅读<\/a>/);
-  assert.match(laterHtml, new RegExp(`/read/d/${code}\\?tab=later`));
+  assert.match(laterHtml, new RegExp(`/read/${code}\\?tab=later`));
   assert.deepEqual(queries.at(-1)?.filter, { property: "提取来源", select: { equals: "Instapaper" } });
-  const laterDetail = await worker.fetch(new Request(`https://example.com/read/d/${code}?tab=later`, {
+  const laterDetail = await worker.fetch(new Request(`https://example.com/read/${code}?tab=later`, {
     headers: { Referer: "https://example.com/read?tab=later" },
   }), env);
   const laterDetailHtml = await laterDetail.text();
   assert.match(laterDetailHtml, new RegExp(`/read\\?tab=later#${code}`));
-  assert.match(laterDetailHtml, new RegExp(`/read/d/${nextCode}\\?tab=later`));
+  assert.match(laterDetailHtml, new RegExp(`/read/${nextCode}\\?tab=later`));
   assert.deepEqual(queries.at(-1)?.filter, { property: "提取来源", select: { equals: "Instapaper" } });
-  const detail = await worker.fetch(new Request(`https://example.com/read/d/${code}?tab=weekly`, {
+  const detail = await worker.fetch(new Request(`https://example.com/read/${code}?tab=weekly`, {
     headers: { Referer: "https://example.com/read?tab=weekly" },
   }), env);
   const html = await detail.text();
   assert.match(html, new RegExp(`/read\\?tab=weekly#${code}`));
-  assert.match(html, new RegExp(`/read/d/${nextCode}\\?tab=weekly`));
+  assert.match(html, new RegExp(`/read/${nextCode}\\?tab=weekly`));
   assert.match(JSON.stringify(queries.at(-1)?.filter), /bunshun\.jp\/denshiban\/articles\//);
 
   const fallback = await worker.fetch(new Request("https://example.com/read?tab=unknown"), env);
@@ -979,12 +986,12 @@ test("e-ink categories filter the view and preserve navigation context", async (
   assert.match(await favorites.text(), /aria-current="page">收藏<\/a>/);
   assert.deepEqual(queries.at(-1), { page_size: 31, filter: favoritesFilter, sorts: favoritesSorts });
 
-  const favoriteDetail = await worker.fetch(new Request(`https://example.com/read/d/${code}?tab=likes`, {
+  const favoriteDetail = await worker.fetch(new Request(`https://example.com/read/${code}?tab=likes`, {
     headers: { Referer: "https://example.com/read?tab=likes" },
   }), env);
   const favoriteHtml = await favoriteDetail.text();
   assert.match(favoriteHtml, new RegExp(`/read\\?tab=likes#${code}`));
-  assert.match(favoriteHtml, new RegExp(`/read/d/${nextCode}\\?tab=likes`));
+  assert.match(favoriteHtml, new RegExp(`/read/${nextCode}\\?tab=likes`));
   assert.deepEqual(queries.at(-1), { page_size: 30, filter: favoritesFilter, sorts: favoritesSorts });
 
   const rss = await worker.fetch(new Request("https://example.com/read.xml?tab=likes"), env);
@@ -1024,12 +1031,12 @@ test("e-ink list loads more within its category and keeps the expanded list on r
   const second = await get("/read?tab=weekly&page=2");
   assert.equal((second.match(/<li id=/g) ?? []).length, 60);
   assert.match(second, /tab=weekly&amp;page=3[^\"]*">加载更多/);
-  assert.match(second, new RegExp(`/read/d/${code(40)}\\?tab=weekly&amp;page=2`));
-  const detail = await get(`/read/d/${code(40)}?tab=weekly&page=2`, {
+  assert.match(second, new RegExp(`/read/${code(40)}\\?tab=weekly&amp;page=2`));
+  const detail = await get(`/read/${code(40)}?tab=weekly&page=2`, {
     Referer: "https://example.com/read?tab=weekly&page=2",
   });
   assert.match(detail, new RegExp(`/read\\?tab=weekly&amp;page=2#${code(40)}`));
-  assert.match(detail, new RegExp(`/read/d/${code(41)}\\?tab=weekly&amp;page=2`));
+  assert.match(detail, new RegExp(`/read/${code(41)}\\?tab=weekly&amp;page=2`));
   const last = await get("/read?tab=weekly&page=3");
   assert.equal((last.match(/<li id=/g) ?? []).length, 65);
   assert.match(last, /<a class="btn" id="back-to-top" href="#" hidden>返回顶部<\/a>/);
@@ -1275,7 +1282,7 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
   context.after(() => { globalThis.fetch = originalFetch; });
 
   const response = await worker.fetch(
-    new Request(`https://example.workers.dev/read/d/${code}`),
+    new Request(`https://example.workers.dev/read/${code}`),
     { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
   );
   assert.equal(response.status, 200);
@@ -1301,6 +1308,12 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
   assert.match(html, /术语 A/);
   assert.doesNotMatch(html, /相关链接|class="actions"/);
   assert.doesNotMatch(html, /@media \(update: slow\)/);
+  const aliasDetail = await worker.fetch(
+    new Request(`https://example.workers.dev/r/${code}`),
+    { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
+  );
+  assert.equal(aliasDetail.status, 200);
+  assert.equal(await aliasDetail.text(), html);
 
   const shareResponse = await worker.fetch(
     new Request(`https://example.workers.dev/s/${code}`),
@@ -1314,13 +1327,13 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
 
   for (const userAgent of ["Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", "Mozilla/5.0 (Linux; Kindle) Silk/3.0"]) {
     const deviceResponse = await worker.fetch(
-      new Request(`https://example.workers.dev/read/d/${code}`, { headers: { "User-Agent": userAgent } }),
+      new Request(`https://example.workers.dev/read/${code}`, { headers: { "User-Agent": userAgent } }),
       { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
     );
     assert.equal(await deviceResponse.text(), html);
   }
 
-  for (const path of ["/read/d/not-a-page-id", `/read/d/${pageId}`, `/read/s/${pageId}`, `/read/s/${code}`]) {
+  for (const path of ["/read/not-a-page-id", `/read/${pageId}`, `/read/s/${pageId}`, `/read/s/${code}`]) {
     assert.equal((await worker.fetch(
       new Request(`https://example.workers.dev${path}`),
       { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
@@ -1415,9 +1428,9 @@ test("e-ink detail nav links previous and next excerpts beside back to list", ()
     prevCode: first,
     nextCode: last,
   });
-  assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
+  assert.match(html, new RegExp(`href="/read/${first}"[^>]*>上一篇`));
   assert.match(html, new RegExp(`href="/read#${middle}"[^>]*>返回列表`));
-  assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
+  assert.match(html, new RegExp(`href="/read/${last}"[^>]*>下一篇`));
   assert.ok(html.indexOf("</article>") < html.indexOf('<nav class="nav-row">'));
   assert.equal((html.match(/<nav class="nav-row">/g) ?? []).length, 1);
   assert.doesNotMatch(html, /原文：|@media \(update: slow\)/);
@@ -1466,18 +1479,18 @@ test("e-ink detail hides its bottom navigation only for shared links", async (co
     NOTION_EXCERPTS_VIEW_ID: viewId,
   };
   const open = async (referer?: string, shared = false) => {
-    const response = await worker.fetch(new Request(`${origin}${shared ? "/s" : "/read/d"}/${middle}`, {
+    const response = await worker.fetch(new Request(`${origin}${shared ? "/s" : "/read"}/${middle}`, {
       headers: referer ? { Referer: referer } : {},
     }), env);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("Vary"), null);
     return response.text();
   };
-  for (const source of [`${origin}/read`, `${origin}/read/d/${first}`]) {
+  for (const source of [`${origin}/read`, `${origin}/read/${first}`]) {
     const html = await open(source);
     assert.equal(html.match(/<nav class="nav-row">/g)?.length, 1);
-    assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
-    assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
+    assert.match(html, new RegExp(`href="/read/${first}"[^>]*>上一篇`));
+    assert.match(html, new RegExp(`href="/read/${last}"[^>]*>下一篇`));
   }
   assert.equal(viewRequests, 2);
 
@@ -1485,8 +1498,8 @@ test("e-ink detail hides its bottom navigation only for shared links", async (co
     const html = await open(source);
     assert.equal(html.match(/<nav class="nav-row">/g)?.length, 1);
     assert.match(html, /<p>正文<\/p>/);
-    assert.match(html, new RegExp(`href="/read/d/${first}"[^>]*>上一篇`));
-    assert.match(html, new RegExp(`href="/read/d/${last}"[^>]*>下一篇`));
+    assert.match(html, new RegExp(`href="/read/${first}"[^>]*>上一篇`));
+    assert.match(html, new RegExp(`href="/read/${last}"[^>]*>下一篇`));
   }
   assert.equal(viewRequests, 6);
 
@@ -1539,7 +1552,7 @@ test("short share links resolve the Notion ID property and are copied from detai
 
   const code = shareCode(42);
   const lookup = { page_size: 1, filter: { property: "ID", unique_id: { equals: 42 } } };
-  const detail = await (await worker.fetch(new Request(`${origin}/read/d/${code}`), env)).text();
+  const detail = await (await worker.fetch(new Request(`${origin}/read/${code}`), env)).text();
   assert.match(detail, new RegExp(`id="share-copy" data-path="/s/${code}"`));
   assert.match(detail, new RegExp(`href="/read#${code}"[^>]*>返回列表`));
   assert.deepEqual(queries, [lookup]);
@@ -1552,14 +1565,14 @@ test("short share links resolve the Notion ID property and are copied from detai
   assert.doesNotMatch(html, /id="share-copy"/);
   assert.deepEqual(queries, [lookup, lookup]);
 
-  for (const prefix of ["/s", "/read/d"]) {
+  for (const prefix of ["/s", "/read"]) {
     const missing = await worker.fetch(new Request(`${origin}${prefix}/${shareCode(7)}`), env);
     assert.equal(missing.status, 404);
     assert.equal(missing.headers.get("Cache-Control"), "public, max-age=300");
   }
   assert.equal(queries.length, 4);
 
-  for (const path of ["/s/42", "/read/d/42", `/s/${code}/x`, `/s/${code}0`, "/s/abc-ef", "/s/zzzzzz", `/read/d/${pageId}`]) {
+  for (const path of ["/s/42", "/read/42", `/s/${code}/x`, `/s/${code}0`, "/s/abc-ef", "/s/zzzzzz", `/read/${pageId}`, `/read/d/${code}`]) {
     assert.equal((await worker.fetch(new Request(`${origin}${path}`), env)).status, 404);
   }
   assert.equal(queries.length, 4, "malformed codes never reach Notion");
@@ -1623,7 +1636,7 @@ test("e-ink detail pages only when the blank margins are tapped", async () => {
 
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
   assert.ok(script);
-  function setupPaging(desktop: boolean, pointerEvents = true, shared = false) {
+  function setupPaging(desktop: boolean, pointerEvents = true, shared = false, alias = false) {
     const handlers = new Map<string, (event: object) => void>();
     const scrolls: number[] = [];
     const body = {};
@@ -1656,7 +1669,7 @@ test("e-ink detail pages only when the blank margins are tapped", async () => {
       addEventListener: () => {},
     };
     runInNewContext(script, {
-      window, document, location: { origin: "https://example.com", pathname: `${shared ? "/s" : "/read/d"}/${code}`, search: "?tab=weekly&page=2" },
+      window, document, location: { origin: "https://example.com", pathname: `${shared ? "/s" : alias ? "/r" : "/read"}/${code}`, search: "?tab=weekly&page=2" },
       Date: { now: () => now },
       localStorage: { getItem: () => { storageCalls.push("read"); return null; }, setItem: () => { storageCalls.push("write"); } },
     });
@@ -1795,6 +1808,7 @@ test("e-ink detail pages only when the blank margins are tapped", async () => {
   await Promise.resolve();
   assert.equal(normalPage.shareStatus.textContent, "已复制");
   assert.ok(normalPage.storageCalls.includes("read"), "detail pages restore progress keyed by their code");
+  assert.ok(setupPaging(false, true, false, true).storageCalls.includes("read"), "short detail URLs restore progress too");
 
   const hybrid = setupPaging(true);
   hybrid.startTouch();
