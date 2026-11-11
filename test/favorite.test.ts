@@ -59,9 +59,6 @@ test("favorites require a valid PIN and CSRF token, then reuse a secure session"
   t.after(() => { globalThis.fetch = oldFetch; });
 
   const page = await open(env);
-  const alias = await worker.fetch(new Request(`${origin}/r/favorite/${code}?tab=weekly&page=2`, { headers: { Accept: "application/json" } }), env);
-  assert.equal(alias.status, 200);
-  assert.equal((await alias.json() as { authenticated: boolean }).authenticated, false);
   assert.equal(page.response.headers.get("Cache-Control"), "no-store");
   assert.match(page.csrf, new RegExp(`^${csrfName}=`));
   assert.match(page.html, /type="password" inputmode="numeric" autocomplete="current-password"/);
@@ -84,7 +81,7 @@ test("favorites require a valid PIN and CSRF token, then reuse a secure session"
   assert.equal(success.status, 200);
   const successHtml = await success.text();
   assert.match(successHtml, /已收藏/);
-  assert.ok(successHtml.includes(`href="/read/${code}?tab=weekly&amp;page=2"`));
+  assert.ok(successHtml.includes(`href="/r/${code}?tab=weekly&amp;page=2"`));
   assert.equal(calls.length, 2);
   assert.equal(calls[1]?.init?.method, "PATCH");
   assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), { properties: { "已收藏": { checkbox: true } } });

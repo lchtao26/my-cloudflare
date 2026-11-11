@@ -10,7 +10,7 @@ const NOTION_PAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 const BOOK_FEED_PATH = "/book.xml";
 const BOOK_ASSET_PREFIX = "/book/p";
 const READ_LIST_PATH = "/read";
-const READ_DETAIL_PREFIX = "/read";
+const READ_DETAIL_PREFIX = "/r";
 const READ_FEED_PATH = "/read.xml";
 const READ_ASSET_PREFIX = "/read/p";
 const SHORT_SHARE_PREFIX = "/s";
@@ -685,7 +685,7 @@ const EINK_LIST_BACK_TO_TOP = [
 
 export function renderEinkList(excerpts: Excerpt[], listPath: string, category: ReadCategory = "all", page = 1, hasMore = false): string {
   const items = excerpts.map((excerpt) => {
-    const href = htmlText(`${listPath}/${excerpt.code}${categorySearch(category, page)}`);
+    const href = htmlText(`${READ_DETAIL_PREFIX}/${excerpt.code}${categorySearch(category, page)}`);
     const meta = [
       excerpt.sourceTitle ? einkText(excerpt.sourceTitle) : "",
       excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
@@ -725,10 +725,10 @@ export function neighborsFor(excerpts: Excerpt[], code: string): EinkNeighbors |
 
 function einkNav(listPath: string, code: string, neighbors: EinkNeighbors, category: ReadCategory, page: number, hidden = false): string {
   const prev = neighbors.prevCode
-    ? `<a href="${htmlText(`${listPath}/${neighbors.prevCode}${categorySearch(category, page)}`)}">${einkText("上一篇")}</a>`
+    ? `<a href="${htmlText(`${READ_DETAIL_PREFIX}/${neighbors.prevCode}${categorySearch(category, page)}`)}">${einkText("上一篇")}</a>`
     : `<span class="is-disabled">${einkText("上一篇")}</span>`;
   const next = neighbors.nextCode
-    ? `<a href="${htmlText(`${listPath}/${neighbors.nextCode}${categorySearch(category, page)}`)}">${einkText("下一篇")}</a>`
+    ? `<a href="${htmlText(`${READ_DETAIL_PREFIX}/${neighbors.nextCode}${categorySearch(category, page)}`)}">${einkText("下一篇")}</a>`
     : `<span class="is-disabled">${einkText("下一篇")}</span>`;
   const back = `<a href="${htmlText(`${listPath}${categorySearch(category, page)}#${code}`)}">${einkText("返回列表")}</a>`;
   return `<nav class="nav-row"${hidden ? " hidden" : ""}>\n${prev}\n${back}\n${next}\n</nav>`;
@@ -747,7 +747,7 @@ const EINK_DETAIL_CHROME = [
   "var bounds=main.getBoundingClientRect();",
   "return x<bounds.left?-1:x>bounds.right?1:0;",
   "}",
-  "function pageKey(){var m=location.pathname.match(/^\\/r(?:ead)?\\/([0-9A-Za-z]{6})$/);return m?'eink-progress:'+m[1]:null;}",
+  "function pageKey(){var m=location.pathname.match(/^\\/r\\/([0-9A-Za-z]{6})$/);return m?'eink-progress:'+m[1]:null;}",
   "function scrollMax(){return document.documentElement.scrollHeight-window.innerHeight;}",
   "function scrollRatio(){var max=scrollMax();return max>0?Math.min(1,Math.max(0,(window.scrollY||window.pageYOffset||0)/max)):1;}",
   "function progress(){",
@@ -1169,9 +1169,6 @@ function htmlResponse(body: string | null, method: string, vary?: string): Respo
 const worker = {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/r" || url.pathname === "/r.xml" || url.pathname.startsWith("/r/")) {
-      url.pathname = `/read${url.pathname.slice(2)}`;
-    }
     if (url.pathname.startsWith("/read/favorite/")) {
       const code = url.pathname.slice("/read/favorite/".length);
       const shortId = shareCodeId(code);
