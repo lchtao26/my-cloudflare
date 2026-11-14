@@ -31,7 +31,7 @@ const READ_CATEGORIES = [
   { id: "favorites", label: "收藏" },
   { id: "highlights", label: "划线" },
   { id: "later", label: "稍后阅读" },
-  { id: "news", label: "新闻" },
+  { id: "news", label: "博客" },
   { id: "weekly", label: "周刊" },
   { id: "bunshun", label: "文春" },
   { id: "novel", label: "小说" },
