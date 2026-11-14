@@ -517,11 +517,11 @@ const EINK_STYLE = [
   ".categories{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0.2rem;margin:0 0 1rem;}",
   ".visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}",
   ".categories a{min-width:0;display:flex;align-items:center;justify-content:center;min-height:2.2rem;padding:0.2rem 0.1rem;border:1px solid #000;font-size:0.85em;font-weight:700;text-align:center;}",
-  ".categories{position:fixed;z-index:2;left:1.625rem;right:1.625rem;bottom:0;width:auto;max-width:365px;margin:0 auto;padding:0.65rem 0 max(0.65rem,env(safe-area-inset-bottom));background:#fff;border-top:1px solid #000;box-sizing:border-box;}",
+  ".categories{position:fixed;z-index:2;left:1.625rem;right:1.625rem;bottom:0;width:auto;max-width:365px;margin:0 auto;padding:0.65rem 0;padding-bottom:calc(0.65rem + env(safe-area-inset-bottom, 0px));background:#fff;border-top:1px solid #000;box-sizing:border-box;}",
   ".categories::after{content:'';position:absolute;top:100%;left:0;right:0;height:100vh;background:#fff;pointer-events:none;}",
   "@media (min-width:440px){.categories{left:1.25rem;right:1.25rem;}}",
   "@media (min-width:720px){.categories{left:1.25rem;right:1.25rem;max-width:36rem;}}",
-  "body:has(.categories){padding-bottom:6.5rem;}",
+  "body.read-list{padding-top:max(1.25rem,env(safe-area-inset-top, 0px));padding-bottom:calc(8rem + env(safe-area-inset-bottom, 0px));}",
 
   ".categories a[aria-current=page]{background:#000;color:#fff;}",
   ".meta{font-size:1rem;margin:0.65em 0 0;}",
@@ -585,7 +585,7 @@ function einkDocument(
     '<html lang="zh-CN">',
     "<head>",
     '<meta charset="utf-8" />',
-    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+    `<meta name="viewport" content="width=device-width, initial-scale=1${bodyClass === "read-list" ? ", viewport-fit=cover" : ""}" />`,
     '<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />',
     '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />',
     '<link rel="manifest" href="/manifest.webmanifest" />',
@@ -735,7 +735,7 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
     ...((items || hasMore) ? [
       `<div class="list-actions" id="list-actions"><a class="btn" id="back-to-top" href="#" hidden>返回顶部</a>${hasMore ? `<a class="btn" id="load-more" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}${excerpts.length ? `#${excerpts[excerpts.length - 1]!.code}` : ""}`)}">加载更多</a>` : ""}</div>`,
     ] : []),
-  ].join("\n"), false, EINK_LIST_NAV + "\n" + EINK_LIST_PAGING + "\n" + EINK_LIST_BACK_TO_TOP);
+  ].join("\n"), false, EINK_LIST_NAV + "\n" + EINK_LIST_PAGING + "\n" + EINK_LIST_BACK_TO_TOP, "read-list");
 }
 
 export type EinkNeighbors = {
