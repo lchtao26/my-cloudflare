@@ -1884,6 +1884,7 @@ test("two paragraph taps open actions and request the matching original paragrap
   const excerpt = excerptFromPage(page)!;
   const html = renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, true, [], true);
   assert.match(html, /id="body-toggle"[^>]*>显示原文/);
+  assert.match(html, /id="body-view-toggle"[^>]*>显示原文<\/button>\s*<a class="other-link" id="favorite-link"/);
   assert.doesNotMatch(html, /<p>正文操作<\/p>|id="body-actions-cancel"/);
   const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
   type Handler = (event?: any) => void;
@@ -1892,7 +1893,10 @@ test("two paragraph taps open actions and request the matching original paragrap
     return { hidden, handlers, textContent: "", addEventListener: (name: string, handler: Handler) => handlers.set(name, handler), focus() {} };
   }
   const translated = element(), original = element(true), actions = { ...element(true), contains: () => false }, toggle = element(), highlight = element(true), preview = element();
-  const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight, "body-preview": preview };
+  toggle.textContent = "显示原文";
+  const viewAttributes = new Map<string, string>();
+  const viewToggle = { ...element(true), setAttribute: (name: string, value: string) => viewAttributes.set(name, value) };
+  const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-view-toggle": viewToggle, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight, "body-preview": preview };
   const translatedP = { tagName: "P", textContent: "中文译文", parentNode: translated, contains: (node: unknown) => node === translatedP };
   let now = 1000, scrollY = 0;
   const windowHandlers = new Map<string, Array<() => void>>();
@@ -1903,6 +1907,14 @@ test("two paragraph taps open actions and request the matching original paragrap
     window: { innerHeight: 600, get scrollY() { return scrollY; }, performParagraphAction: (...args: unknown[]) => { requested.push(args); }, addEventListener(name: string, handler: () => void) { windowHandlers.set(name, [...windowHandlers.get(name) ?? [], handler]); } },
     location: { pathname: "/r/000000" }, localStorage: { getItem: () => null, setItem() {} }, Date: { now: () => now }, setTimeout: () => 1,
   });
+  assert.equal(viewToggle.hidden, false);
+  assert.equal(viewToggle.textContent, "显示原文");
+  viewToggle.handlers.get("click")!();
+  assert.equal(original.hidden, false); assert.equal(translated.hidden, true);
+  assert.equal(viewToggle.textContent, "显示译文"); assert.equal(viewAttributes.get("aria-expanded"), "true");
+  viewToggle.handlers.get("click")!();
+  assert.equal(original.hidden, true); assert.equal(translated.hidden, false);
+  assert.equal(viewToggle.textContent, "显示原文"); assert.equal(viewAttributes.get("aria-expanded"), "false");
   function tap(body: typeof translated, target = translatedP, endX = 10) {
     const point = { clientX: 10, clientY: 10 };
     const event = { touches: [point], changedTouches: [point], target, ...point, button: 0 };
@@ -1942,6 +1954,8 @@ test("two paragraph taps open actions and request the matching original paragrap
   assert.equal(actions.hidden, true, "slow taps do not open the menu");
   const noOriginal = excerptFromPage({ ...page, properties: { ...properties, "正文": { type: "rich_text", rich_text: [] } } })!;
   assert.doesNotMatch(renderEinkDetail(noOriginal, "/read", "/read/p"), /id="original-body"/);
+  assert.doesNotMatch(renderEinkDetail(noOriginal, "/read", "/read/p"), /id="body-view-toggle"/);
+  assert.doesNotMatch(renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, false), /id="body-view-toggle"/);
   assert.doesNotMatch(renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, false), /id="original-body"/);
 });
 

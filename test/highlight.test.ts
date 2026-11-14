@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import test from "node:test";
 import { Script, runInNewContext } from "node:vm";
-import worker, { shareCode } from "../src/index.ts";
+import worker, { excerptFromPage, renderEinkDetail, shareCode } from "../src/index.ts";
 
 const origin = "https://example.com", code = shareCode(42), pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
 const url = `${origin}/read/highlight/${code}`;
@@ -439,6 +439,22 @@ test("paragraph actions send the entire paragraph and keep PIN and service error
   window.performParagraphAction!(paragraph, body, "explain");
   assert.equal(elements.get("explanation-text")!.textContent, "解释最多 1500 字。");
 
+});
+
+test("jumping to an original highlight synchronizes the whole-body toggle", () => {
+  const html = renderEinkDetail(excerptFromPage(page)!, "/read", "/read/p", undefined, "all", 1, true, [], true);
+  const script = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), m => m[1]!).find(s => s.includes("var rows="))!;
+  const id = "11111111-1111-4111-8111-111111111111";
+  const original = { className: "excerpt-body", hidden: true };
+  const translation = { hidden: false };
+  const target = { parentNode: original, scrollIntoView() {} };
+  let syncCalls = 0;
+  const document = { getElementById: (name: string) => name === `hl-${id}` ? target : null, querySelector: (selector: string) => selector === ".excerpt-body:not([hidden])" ? translation : null };
+  const window = { addEventListener() {}, syncBodyViewToggle() { syncCalls++; } };
+  runInNewContext(script, { document, window, location: { hash: `#hl-${id}` } });
+  assert.equal(original.hidden, false);
+  assert.equal(translation.hidden, true);
+  assert.equal(syncCalls, 1);
 });
 
 test("tapping either side of the explanation backdrop pages its content without reacting to swipes", async t => {
