@@ -1867,9 +1867,9 @@ test("two paragraph taps open actions and switch the displayed language", () => 
     const handlers = new Map<string, Handler>();
     return { hidden, handlers, textContent: "", addEventListener: (name: string, handler: Handler) => handlers.set(name, handler), focus() {} };
   }
-  const translated = element(), original = element(true), actions = { ...element(true), contains: () => false }, toggle = element(), highlight = element(true);
-  const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight };
-  const translatedP = { tagName: "P", parentNode: translated, contains: (node: unknown) => node === translatedP }, originalP = { tagName: "P", parentNode: original, contains: (node: unknown) => node === originalP };
+  const translated = element(), original = element(true), actions = { ...element(true), contains: () => false }, toggle = element(), highlight = element(true), preview = element();
+  const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight, "body-preview": preview };
+  const translatedP = { tagName: "P", textContent: "中文译文", parentNode: translated, contains: (node: unknown) => node === translatedP }, originalP = { tagName: "P", textContent: "原文", parentNode: original, contains: (node: unknown) => node === originalP };
   let now = 1000, scrollY = 0;
   const windowHandlers = new Map<string, Array<() => void>>();
   const documentHandlers = new Map<string, Array<Handler>>();
@@ -1890,7 +1890,7 @@ test("two paragraph taps open actions and switch the displayed language", () => 
   assert.equal(actions.hidden, true, "drag resets the tap sequence");
   scrollY += 30; for (const handler of windowHandlers.get("scroll") ?? []) handler();
   tap(translated); assert.equal(actions.hidden, true); tap(translated);
-  assert.equal(actions.hidden, false); assert.equal(original.hidden, true); assert.equal(toggle.textContent, "显示原文");
+  assert.equal(actions.hidden, false); assert.equal(preview.textContent, "中文译文"); assert.equal(original.hidden, true); assert.equal(toggle.textContent, "显示原文");
   toggle.handlers.get("click")!();
   assert.equal(original.hidden, true, "synthetic clicks immediately after a double tap are ignored");
   now += 600; toggle.handlers.get("click")!();
@@ -1954,7 +1954,7 @@ test("tapping a highlight opens cancel on the bottom right and does not page or 
     innerHeight: 600,
     scrollY: 0,
     removeHighlight: (id: string) => { removed.push(id); },
-    openHighlightPicker: (...args: unknown[]) => { explained.push(args); },
+    performParagraphAction: (...args: unknown[]) => { explained.push(args); },
     getSelection: undefined as undefined | (() => { rangeCount: number; isCollapsed: boolean }),
     addEventListener(name: string, handler: () => void) { windowHandlers.set(name, [...windowHandlers.get(name) ?? [], handler]); },
   };
