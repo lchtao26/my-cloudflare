@@ -929,7 +929,7 @@ test("e-ink categories filter the view and preserve navigation context", async (
   for (const [category, label, marker] of [
     ["weekly", "周刊", "bunshun.jp/denshiban/articles/"],
     ["bunshun", "文春", "bunshun.jp/articles/"],
-    ["novel", "小说", "epub"],
+    ["novel", "连载", "epub"],
     ["news", "IT", "news.ycombinator.com"],
   ]) {
     const response = await worker.fetch(new Request(`https://example.com/read?tab=${category}`), env);
@@ -1873,7 +1873,7 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
   assert.doesNotMatch(html, /https:\/\/example\.com \/book|AI时代的RSS|使用API处理|Hello世界|ABC出版社|张三AI/);
 });
 
-test("two paragraph taps open actions and switch the displayed language", () => {
+test("two paragraph taps open actions and request the matching original paragraph", () => {
   const properties = {
     ...idProperty(),
     "原文语言": { type: "select" as const, select: { name: "日文" } },
@@ -1882,7 +1882,7 @@ test("two paragraph taps open actions and switch the displayed language", () => 
   };
   const page = { id: "page", url: "https://notion.so/page", properties };
   const excerpt = excerptFromPage(page)!;
-  const html = renderEinkDetail(excerpt, "/read", "/read/p");
+  const html = renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, true, [], true);
   assert.match(html, /id="body-toggle"[^>]*>显示原文/);
   assert.doesNotMatch(html, /<p>正文操作<\/p>|id="body-actions-cancel"/);
   const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
@@ -1893,13 +1893,14 @@ test("two paragraph taps open actions and switch the displayed language", () => 
   }
   const translated = element(), original = element(true), actions = { ...element(true), contains: () => false }, toggle = element(), highlight = element(true), preview = element();
   const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight, "body-preview": preview };
-  const translatedP = { tagName: "P", textContent: "中文译文", parentNode: translated, contains: (node: unknown) => node === translatedP }, originalP = { tagName: "P", textContent: "原文", parentNode: original, contains: (node: unknown) => node === originalP };
+  const translatedP = { tagName: "P", textContent: "中文译文", parentNode: translated, contains: (node: unknown) => node === translatedP };
   let now = 1000, scrollY = 0;
   const windowHandlers = new Map<string, Array<() => void>>();
   const documentHandlers = new Map<string, Array<Handler>>();
+  const requested: unknown[][] = [];
   runInNewContext(script, {
     document: { documentElement: { scrollHeight: 600 }, querySelector: () => null, querySelectorAll: () => [translated, original], getElementById: (id: string) => nodes[id], addEventListener(name: string, handler: Handler) { documentHandlers.set(name, [...documentHandlers.get(name) ?? [], handler]); } },
-    window: { innerHeight: 600, get scrollY() { return scrollY; }, addEventListener(name: string, handler: () => void) { windowHandlers.set(name, [...windowHandlers.get(name) ?? [], handler]); } },
+    window: { innerHeight: 600, get scrollY() { return scrollY; }, performParagraphAction: (...args: unknown[]) => { requested.push(args); }, addEventListener(name: string, handler: () => void) { windowHandlers.set(name, [...windowHandlers.get(name) ?? [], handler]); } },
     location: { pathname: "/r/000000" }, localStorage: { getItem: () => null, setItem() {} }, Date: { now: () => now }, setTimeout: () => 1,
   });
   function tap(body: typeof translated, target = translatedP, endX = 10) {
@@ -1916,12 +1917,14 @@ test("two paragraph taps open actions and switch the displayed language", () => 
   tap(translated); assert.equal(actions.hidden, true); tap(translated);
   assert.equal(actions.hidden, false); assert.equal(preview.textContent, "中文译文"); assert.equal(original.hidden, true); assert.equal(toggle.textContent, "显示原文");
   toggle.handlers.get("click")!();
-  assert.equal(original.hidden, true, "synthetic clicks immediately after a double tap are ignored");
+  assert.equal(requested.length, 0, "synthetic clicks immediately after a double tap are ignored");
   now += 600; toggle.handlers.get("click")!();
-  assert.equal(actions.hidden, true); assert.equal(original.hidden, false); assert.equal(translated.hidden, true);
-  tap(original, originalP); tap(original, originalP);
-  assert.equal(toggle.textContent, "显示译文"); now += 600; toggle.handlers.get("click")!();
-  assert.equal(original.hidden, true); assert.equal(translated.hidden, false);
+  assert.deepEqual(requested[0]!.slice(0, 3), [translatedP, translated, "original"]);
+  assert.equal(actions.hidden, false); assert.equal(original.hidden, true); assert.equal(translated.hidden, false);
+  toggle.handlers.get("click")!();
+  assert.equal(requested.length, 1, "repeated activation is ignored while authorization is pending");
+  (requested[0]![3] as () => void)();
+  assert.equal(actions.hidden, true);
   tap(translated); tap(translated);
   assert.equal(actions.hidden, false);
   let prevented = false, stopped = false;
