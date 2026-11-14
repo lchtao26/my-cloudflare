@@ -11,12 +11,14 @@
     "test": "tsc --noEmit && node --test"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.6.5",
     "typescript": "^7.0.2",
     "wrangler": "^4.0.0"
   },
   "dependencies": {
     "feedsmith": "^3.0.1",
+    "markdown-it": "^15.0.3",
     "pangu": "^10.4.1"
   }
 }

@@ -1929,6 +1929,8 @@ test("tapping a highlight opens cancel on the bottom right and does not page or 
   const excerpt = excerptFromPage(page)!;
   const html = renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, true, [], true);
   assert.match(html, /id="body-unhighlight">取消划线/);
+  assert.match(html, /id="body-toggle"[^>]*>显示原文<\/button>.*id="body-explain"[^>]*>解释<\/button>.*id="body-highlight"[^>]*>划线<\/button>.*id="body-unhighlight"/);
+  assert.doesNotMatch(html, /#body-actions\[data-mode=mark\] #body-explain\{display:none\}/);
   assert.match(html, /#body-actions\[data-mode=mark\] #body-toggle/);
   assert.doesNotMatch(renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, false, [], true), /id="body-unhighlight"/);
   const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
@@ -1937,20 +1939,22 @@ test("tapping a highlight opens cancel on the bottom right and does not page or 
     const handlers = new Map<string, Handler>();
     return { hidden, handlers, textContent: "", focus() {}, addEventListener: (name: string, handler: Handler) => handlers.set(name, handler) };
   }
-  const translated = element(), original = element(true), toggle = element(), highlight = element(true), unhighlight = element();
+  const translated = element(), original = element(true), toggle = element(), highlight = element(true), explain = element(), unhighlight = element();
   const attributes = new Map<string, string>();
   const actions = { ...element(true), contains: () => false, setAttribute: (name: string, value: string) => attributes.set(name, value), getAttribute: (name: string) => attributes.get(name) ?? null, removeAttribute: (name: string) => attributes.delete(name) };
-  const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight, "body-unhighlight": unhighlight };
+  const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight, "body-explain": explain, "body-unhighlight": unhighlight };
   const translatedP = { tagName: "P", parentNode: translated, contains: (node: unknown) => node === translatedP };
   const mark = { tagName: "MARK", className: "hl", parentNode: translatedP, getAttribute: (name: string) => name === "data-hl" ? "11111111-1111-4111-8111-111111111111" : null };
   let now = 1000;
   const windowHandlers = new Map<string, Array<() => void>>();
   const documentHandlers = new Map<string, Array<Handler>>();
   const removed: string[] = [];
+  const explained: unknown[][] = [];
   const window = {
     innerHeight: 600,
     scrollY: 0,
     removeHighlight: (id: string) => { removed.push(id); },
+    openHighlightPicker: (...args: unknown[]) => { explained.push(args); },
     getSelection: undefined as undefined | (() => { rangeCount: number; isCollapsed: boolean }),
     addEventListener(name: string, handler: () => void) { windowHandlers.set(name, [...windowHandlers.get(name) ?? [], handler]); },
   };
@@ -1978,6 +1982,11 @@ test("tapping a highlight opens cancel on the bottom right and does not page or 
   assert.equal(actions.hidden, true);
   assert.equal(actions.getAttribute("data-mode"), null);
   assert.deepEqual(removed, ["11111111-1111-4111-8111-111111111111"]);
+  now += 600;
+  tap(mark); now += 600;
+  explain.handlers.get("click")!();
+  assert.equal(actions.hidden, true);
+  assert.deepEqual(explained, [[translatedP, translated, "explain"]]);
   now += 600;
   assert.equal(tap(), false);
   assert.equal(actions.hidden, true, "one paragraph tap after cancel does not open the bar");
