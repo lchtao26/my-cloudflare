@@ -15,6 +15,12 @@
     "bindings": [{ "name": "FAVORITE_LOGIN_LIMIT", "class_name": "FavoriteLoginLimit" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FavoriteLoginLimit"] }],
+  "d1_databases": [{
+    "binding": "HIGHLIGHTS_DB",
+    "database_name": "my-cloudflare-highlights",
+    "database_id": "9cd174e3-cf5d-4216-8296-43b9d3b20bdf",
+    "migrations_dir": "migrations"
+  }],
   "keep_vars": true,
   "vars": {
     "NOTION_DATA_SOURCE_ID": "102a59ab-8748-4725-a2f4-48d5ceeef1b6",

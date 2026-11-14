@@ -1055,9 +1055,10 @@ test("e-ink list displays every category without interaction", () => {
   assert.ok(navigation);
   assert.doesNotMatch(navigation, /hidden/);
   assert.doesNotMatch(navigation, /阅读节选/);
-  assert.match(navigation, /href="\/read\?tab=later" class="category-later"/);
+  assert.match(navigation, /href="\/read\?tab=later"/);
+  assert.match(navigation, /href="\/read\?tab=highlights"/);
   assert.deepEqual(Array.from(navigation.matchAll(/<a [^>]*>([^<]+)<\/a>/g), (match) => match[1]),
-    ["全部", "收藏", "稍后阅读", "新闻", "周刊", "文春", "小说"]);
+    ["全部", "收藏", "划线", "稍后阅读", "新闻", "周刊", "文春", "小说"]);
 });
 
 test("back-to-top appears only when the remaining list content needs scrolling", () => {
@@ -1848,94 +1849,72 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
   assert.doesNotMatch(html, /https:\/\/example\.com \/book|AI时代的RSS|使用API处理|Hello世界|ABC出版社|张三AI/);
 });
 
-test("five quick body taps toggle translations without counting scrolls or drags", () => {
+test("two paragraph taps open actions and switch the displayed language", () => {
   const properties = {
     ...idProperty(),
     "原文语言": { type: "select" as const, select: { name: "日文" } },
-    "正文": { type: "rich_text" as const, rich_text: [{ plain_text: "原文<script>" }] },
+    "正文": { type: "rich_text" as const, rich_text: [{ plain_text: "原文" }] },
     "正文翻译": { type: "rich_text" as const, rich_text: [{ plain_text: "中文译文" }] },
   };
   const page = { id: "page", url: "https://notion.so/page", properties };
-  const excerpt = excerptFromPage(page);
-  assert.ok(excerpt);
+  const excerpt = excerptFromPage(page)!;
   const html = renderEinkDetail(excerpt, "/read", "/read/p");
-  assert.match(html, /id="translated-body" lang="zh-CN">\n<p>中文译文<\/p>/);
-  assert.match(html, /id="original-body" lang="ja" hidden>\n<p>原文 &lt;script&gt;<\/p>/);
-  assert.doesNotMatch(html, /id="body-toggle"/);
-
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
-  assert.ok(script);
-  type Event = { touches: Array<{ clientX: number; clientY: number }>; changedTouches: Array<{ clientX: number; clientY: number }>; target: object; clientX: number; clientY: number; button: number };
-  function body(hidden: boolean) {
-    const handlers = new Map<string, (event: Event) => void>();
-    return { hidden, handlers, addEventListener: (name: string, handler: (event: Event) => void) => handlers.set(name, handler) };
+  assert.match(html, /id="body-toggle"[^>]*>显示原文/);
+  assert.doesNotMatch(html, /<p>正文操作<\/p>|id="body-actions-cancel"/);
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
+  type Handler = (event?: any) => void;
+  function element(hidden = false) {
+    const handlers = new Map<string, Handler>();
+    return { hidden, handlers, textContent: "", addEventListener: (name: string, handler: Handler) => handlers.set(name, handler), focus() {} };
   }
-  const translated = body(false);
-  const original = body(true);
-  const nodes: Record<string, unknown> = { "translated-body": translated, "original-body": original };
-  let now = 1000;
-  let scrollY = 0;
+  const translated = element(), original = element(true), actions = { ...element(true), contains: () => false }, toggle = element(), highlight = element(true);
+  const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight };
+  const translatedP = { tagName: "P", parentNode: translated, contains: (node: unknown) => node === translatedP }, originalP = { tagName: "P", parentNode: original, contains: (node: unknown) => node === originalP };
+  let now = 1000, scrollY = 0;
   const windowHandlers = new Map<string, Array<() => void>>();
+  const documentHandlers = new Map<string, Array<Handler>>();
   runInNewContext(script, {
-    document: { documentElement: { scrollHeight: 600 }, querySelector: () => null, getElementById: (id: string) => nodes[id], addEventListener() {} },
+    document: { documentElement: { scrollHeight: 600 }, querySelector: () => null, querySelectorAll: () => [translated, original], getElementById: (id: string) => nodes[id], addEventListener(name: string, handler: Handler) { documentHandlers.set(name, [...documentHandlers.get(name) ?? [], handler]); } },
     window: { innerHeight: 600, get scrollY() { return scrollY; }, addEventListener(name: string, handler: () => void) { windowHandlers.set(name, [...windowHandlers.get(name) ?? [], handler]); } },
-    location: { pathname: "/r/000000" },
-    localStorage: { getItem: () => null, setItem() {} },
-    Date: { now: () => now },
-    setTimeout: () => 1,
+    location: { pathname: "/r/000000" }, localStorage: { getItem: () => null, setItem() {} }, Date: { now: () => now }, setTimeout: () => 1,
   });
-  function touch(target: ReturnType<typeof body>, endX = 10, move = false) {
+  function tap(body: typeof translated, target = translatedP, endX = 10) {
     const point = { clientX: 10, clientY: 10 };
     const event = { touches: [point], changedTouches: [point], target, ...point, button: 0 };
-    target.handlers.get("touchstart")!(event);
-    if (move) target.handlers.get("touchmove")!({ ...event, touches: [{ ...point, clientX: endX }] });
-    target.handlers.get("touchend")!({ ...event, touches: [], changedTouches: [{ ...point, clientX: endX }] });
+    body.handlers.get("touchstart")!(event);
+    if (endX !== 10) body.handlers.get("touchmove")!({ ...event, touches: [{ ...point, clientX: endX }] });
+    body.handlers.get("touchend")!({ ...event, touches: [], changedTouches: [{ ...point, clientX: endX }] });
     now += 150;
   }
-  for (let i = 0; i < 4; i++) touch(translated);
-  assert.equal(original.hidden, true);
-  touch(translated, 40, true);
-  for (let i = 0; i < 4; i++) touch(translated);
-  assert.equal(original.hidden, true, "a swipe resets the tap sequence");
-  scrollY += 30;
-  for (const handler of windowHandlers.get("scroll") ?? []) handler();
-  for (let i = 0; i < 4; i++) touch(translated);
-  assert.equal(original.hidden, true, "scrolling resets the tap sequence");
-  touch(translated);
-  assert.equal(translated.hidden, true);
-  assert.equal(original.hidden, false);
-  for (let i = 0; i < 5; i++) touch(original);
-  assert.equal(translated.hidden, false);
-  assert.equal(original.hidden, true);
-  for (let i = 0; i < 5; i++) {
-    touch(translated);
-    now += 600;
-  }
-  assert.equal(original.hidden, true, "slow taps do not toggle the body");
-  now += 1000;
-  const point = { clientX: 10, clientY: 10 };
-  const event = { touches: [point], changedTouches: [point], target: translated, ...point, button: 0 };
-  translated.handlers.get("touchstart")!(event);
-  now += 700;
-  translated.handlers.get("touchend")!({ ...event, touches: [] });
-  for (let i = 0; i < 4; i++) touch(translated);
-  assert.equal(original.hidden, true, "a long press is not a tap");
-  windowHandlers.get("scroll")?.[0]?.();
-  now += 1000;
-  for (let i = 0; i < 5; i++) {
-    const event = { touches: [], changedTouches: [], target: translated, clientX: 10, clientY: 10, button: 0 };
-    translated.handlers.get("mousedown")!(event);
-    translated.handlers.get("click")!(event);
-    now += 150;
-  }
-  assert.equal(original.hidden, false, "mouse clicks also toggle the body");
-
-  const noOriginal = excerptFromPage({ ...page, properties: { ...properties, "正文": { type: "rich_text", rich_text: [] } } });
-  assert.ok(noOriginal);
+  tap(translated); tap(translated, translatedP, 40); tap(translated);
+  assert.equal(actions.hidden, true, "drag resets the tap sequence");
+  scrollY += 30; for (const handler of windowHandlers.get("scroll") ?? []) handler();
+  tap(translated); assert.equal(actions.hidden, true); tap(translated);
+  assert.equal(actions.hidden, false); assert.equal(original.hidden, true); assert.equal(toggle.textContent, "显示原文");
+  toggle.handlers.get("click")!();
+  assert.equal(original.hidden, true, "synthetic clicks immediately after a double tap are ignored");
+  now += 600; toggle.handlers.get("click")!();
+  assert.equal(actions.hidden, true); assert.equal(original.hidden, false); assert.equal(translated.hidden, true);
+  tap(original, originalP); tap(original, originalP);
+  assert.equal(toggle.textContent, "显示译文"); now += 600; toggle.handlers.get("click")!();
+  assert.equal(original.hidden, true); assert.equal(translated.hidden, false);
+  tap(translated); tap(translated);
+  assert.equal(actions.hidden, false);
+  let prevented = false, stopped = false;
+  const outside = { target: translatedP, touches: [{ clientX: 10, clientY: 10 }], cancelable: true, preventDefault() { prevented = true; }, stopImmediatePropagation() { stopped = true; } };
+  documentHandlers.get("touchstart")![0]!(outside);
+  assert.equal(actions.hidden, true, "touching the paragraph dismisses the toolbar");
+  assert.ok(prevented && stopped, "the dismissing touch must not reach the article");
+  prevented = stopped = false;
+  documentHandlers.get("touchend")![0]!({ ...outside, touches: [] });
+  assert.ok(prevented && stopped, "a dismissing swipe must not trigger paging");
+  prevented = stopped = false;
+  documentHandlers.get("click")![0]!(outside);
+  assert.ok(prevented && stopped, "the synthetic click must not reach the page");
+  for (let i = 0; i < 2; i++) { tap(translated); now += 600; }
+  assert.equal(actions.hidden, true, "slow taps do not open the menu");
+  const noOriginal = excerptFromPage({ ...page, properties: { ...properties, "正文": { type: "rich_text", rich_text: [] } } })!;
   assert.doesNotMatch(renderEinkDetail(noOriginal, "/read", "/read/p"), /id="original-body"/);
-  const chinese = excerptFromPage({ ...page, properties: { ...properties, "原文语言": { type: "select", select: { name: "中文" } } } });
-  assert.ok(chinese);
-  assert.doesNotMatch(renderEinkDetail(chinese, "/read", "/read/p"), /id="original-body"/);
   assert.doesNotMatch(renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, false), /id="original-body"/);
 });
 

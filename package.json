@@ -6,6 +6,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "check": "tsc --noEmit",
+    "hooks:install": "git config core.hooksPath .githooks",
     "types": "wrangler types",
     "test": "tsc --noEmit && node --test"
   },

@@ -1,0 +1,325 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import test from "node:test";
+import { Script, runInNewContext } from "node:vm";
+import worker, { shareCode } from "../src/index.ts";
+
+const origin = "https://example.com", code = shareCode(42), pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+const url = `${origin}/read/highlight/${code}`;
+const page = {
+  id: pageId, url: `https://notion.so/${pageId}`,
+  properties: { ID: { type: "unique_id", unique_id: { number: 42 } },
+    "标题": { type: "rich_text", rich_text: [{ plain_text: "测试" }] },
+    "原文语言": { type: "select", select: { name: "英文" } },
+    "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "甲 重复乙<br>丙重复丁<script>" }] },
+    "正文": { type: "rich_text", rich_text: [{ plain_text: "Original text" }] },
+    "专有名词与术语": { type: "rich_text", rich_text: [{ plain_text: "API。释义。" }] } },
+};
+function database() {
+  const sql = new DatabaseSync(":memory:");
+  sql.exec(readFileSync("migrations/0001_highlights.sql", "utf8"));
+  sql.exec(readFileSync("migrations/0002_highlight_terms.sql", "utf8"));
+  const db = { prepare(query: string) { return { bind(...args: SQLInputValue[]) { return {
+    async run() { return sql.prepare(query).run(...args); },
+    async first() { return sql.prepare(query).get(...args) ?? null; },
+    async all() { return { results: sql.prepare(query).all(...args) }; },
+  }; } }; } } as unknown as D1Database;
+  return { db, sql };
+}
+
+test("highlight writes reuse PIN and CSRF, validate rendered text and render only on detail pages", async t => {
+  const { db, sql } = database();
+  t.after(() => sql.close());
+  const originalFetch = globalThis.fetch;
+  let activePage = structuredClone(page);
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes("/data_sources/source/query")) return Response.json({ results: [activePage] });
+    if (String(input).includes("/views/")) return Response.json({ data_source_id: "source" });
+    throw new Error(`unexpected fetch ${input}`);
+  }) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const env = { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
+  const get = await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), env);
+  assert.equal(get.status, 200);
+  const token = (await get.json() as { csrf: string }).csrf;
+  const cookie = get.headers.get("set-cookie")!.split(";")[0]!;
+  function post(changes: Record<string, string> = {}, requestOrigin = origin, session = "") {
+    return worker.fetch(new Request(url, { method: "POST", headers: { Origin: requestOrigin, Cookie: [cookie, session].filter(Boolean).join("; "), Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf: token, field: "translation", start: "5", end: "7", quote: "重复", ...changes }) }), env);
+  }
+  assert.equal((await post({}, "https://evil.example")).status, 403);
+  assert.equal((await post({ csrf: "0".repeat(64) })).status, 403);
+  assert.equal((await post({ pin: "012345", quote: " ".repeat(17000) })).status, 403);
+  assert.equal((await post()).status, 401);
+  assert.equal((await post({ pin: "999999" })).status, 401);
+  assert.equal((await post({ pin: "012345", quote: "伪造" })).status, 409);
+  assert.equal((await post({ pin: "012345", field: "invalid" })).status, 400);
+  const saved = await post({ pin: "012345" });
+  assert.equal(saved.status, 200);
+  assert.match(saved.headers.get("set-cookie") || "", /__Host-read-session=/);
+  const session = saved.headers.get("set-cookie")!.split(";")[0]!;
+  const value = await saved.json() as { highlight: { id: string } };
+  assert.ok(value.highlight.id);
+  const duplicate = await post({ pin: "012345" });
+  assert.equal((await duplicate.json() as { highlight: { id: string } }).highlight.id, value.highlight.id);
+  assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights").get() as { n: number }).n, 1);
+  const terms = await post({ field: "terms", start: "0", end: "4", quote: "API。", pin: "012345" }, origin, session);
+  assert.equal(terms.status, 200, "the glossary can be highlighted");
+  assert.equal((sql.prepare("SELECT field FROM highlights WHERE field='terms'").get() as { field: string }).field, "terms");
+  const original = await post({ field: "original", start: "0", end: "8", quote: "Original" }, origin, session);
+  assert.equal(original.status, 200);
+  const injection = await post({ start: "8", end: "16", quote: "<script>" }, origin, session);
+  assert.equal(injection.status, 200);
+  const detail = await worker.fetch(new Request(`${origin}/r/${code}`), env);
+  const detailHtml = await detail.text();
+  assert.match(detailHtml, new RegExp(value.highlight.id));
+  assert.match(detailHtml, /id="highlight-save"/);
+  for (const script of detailHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Script(script[1]!);
+  const uiScript = Array.from(detailHtml.matchAll(/<script>([\s\S]*?)<\/script>/g), match => match[1]!).find(text => text.includes("var rows="))!;
+  const handlers = new Map<string, (event?: any) => void>();
+  const body = { hidden: false, getAttribute: () => "translation", closest: () => body };
+  const selection = { rangeCount: 1, isCollapsed: false, getRangeAt: () => ({ startContainer: { nodeType: 1, closest: () => body }, endContainer: { nodeType: 1, closest: () => body }, startOffset: 0, cloneRange: () => ({ selectNodeContents() {}, setEnd() {}, toString: () => "甲 重复乙\n丙" }), toString: () => "重复" }) };
+  const elements = new Map<string, any>();
+  for (const id of ["highlight-bar", "highlight-save", "highlight-message", "favorite-dialog", "favorite-form", "pin", "favorite-error"]) elements.set(id, { hidden: false, open: false, showModal() { this.open = true; }, addEventListener(name: string, fn: (event?: any) => void) { handlers.set(`${id}:${name}`, fn); } });
+  const document = { getElementById: (id: string) => elements.get(id) || null, querySelector: () => null, createTreeWalker: () => ({ nextNode: () => null }), addEventListener: (name: string, fn: (event?: any) => void) => handlers.set(name, fn) };
+  const sent: string[] = [];
+  const fakeFetch = async (_url: string, init?: { body?: string }) => { if (init?.body) { sent.push(init.body); return new Response(JSON.stringify({ error: "正文已更新" }), { status: 409 }); } return Response.json({ authenticated: true, csrf: "token" }); };
+  const window = { getSelection: () => selection, fetch: fakeFetch, promptForReadPin: (resume: (value: string) => Promise<unknown>) => { void resume("012345"); }, addEventListener() {} };
+  runInNewContext(uiScript.replace(/var rows=.*?, bar=/, "var rows=[], bar="), { document, window, fetch: fakeFetch, URLSearchParams, location: { hash: "" }, setTimeout, NodeFilter: { SHOW_TEXT: 4 } });
+  handlers.get("selectionchange")!();
+  assert.equal(elements.get("highlight-bar").hidden, false);
+  handlers.get("highlight-save:click")!();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const sentForm = new URLSearchParams(sent[0]);
+  assert.equal(sentForm.get("start"), "5");
+  assert.equal(sentForm.get("end"), "7");
+  assert.equal(elements.get("highlight-message").textContent, "正文已更新");
+  assert.equal(detail.headers.get("cache-control"), "no-store");
+  const share = await worker.fetch(new Request(`${origin}/s/${code}`), env);
+  const shareHtml = await share.text();
+  assert.doesNotMatch(shareHtml, /id="highlight-save"/);
+  assert.doesNotMatch(shareHtml, new RegExp(value.highlight.id));
+  const list = await worker.fetch(new Request(`${origin}/read?tab=highlights`), env);
+  assert.equal(list.headers.get("cache-control"), "no-store");
+  const listHtml = await list.text();
+  assert.match(listHtml, new RegExp(`/r/${code}\\?tab=highlights#hl-${value.highlight.id}`));
+  assert.match(listHtml, /&lt;script&gt;/);
+  activePage.properties["正文翻译"].rich_text[0]!.plain_text = "甲 重复乙";
+  const changed = await worker.fetch(new Request(`${origin}/read?tab=highlights`), env);
+  assert.match(await changed.text(), /正文已变动，未能定位/);
+  const changedDetail = await worker.fetch(new Request(`${origin}/r/${code}`), env);
+  assert.doesNotMatch(await changedDetail.text(), new RegExp(value.highlight.id));
+  const failedDb = { prepare() { throw new Error("D1 unavailable"); } } as unknown as D1Database;
+  // A database read failure must not take down the article.
+  // The Promise chain below expects a prepared statement; use an asynchronous failure.
+  const rejectedDb = { prepare() { return { bind() { return { all: async () => { throw new Error("D1 unavailable"); } }; } }; } } as unknown as D1Database;
+  const oldError = console.error; console.error = () => {};
+  try { for (const badDb of [failedDb, rejectedDb]) assert.equal((await worker.fetch(new Request(`${origin}/r/${code}`), { ...env, HIGHLIGHTS_DB: badDb })).status, 200); } finally { console.error = oldError; }
+  assert.equal((await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), { ...env, HIGHLIGHTS_DB: undefined })).status, 503);
+});
+
+test("highlight article navigation returns to an existing unique list anchor", async t => {
+  const { db, sql } = database();
+  t.after(() => sql.close());
+  const second = structuredClone(page);
+  second.id = "408e75a1-639c-8152-ab6f-f35a59ab2d28";
+  second.url = `https://notion.so/${second.id}`;
+  second.properties.ID.unique_id.number = 43;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (!String(input).includes("/data_sources/source/query")) throw new Error(`unexpected fetch ${input}`);
+    const query = JSON.parse(String(init?.body)) as { filter: { unique_id?: { equals: number } } };
+    const all = [page, second];
+    return Response.json({ results: query.filter.unique_id ? all.filter(item => item.properties.ID.unique_id.number === query.filter.unique_id!.equals) : all });
+  }) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const insert = sql.prepare('INSERT INTO highlights (id, excerpt_number, excerpt_page_id, field, start, "end", quote, prefix, suffix, body_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  // Orphans are still list items and must also provide a return target.
+  insert.run("a", 42, page.id, "translation", 0, 1, "不存在", "", "", "old", "2026-01-03");
+  insert.run("b", 43, second.id, "translation", 0, 1, "不存在", "", "", "old", "2026-01-02");
+  insert.run("c", 43, second.id, "original", 1, 2, "不存在", "", "", "old", "2026-01-01");
+  const env = { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source" };
+  const firstDetail = await worker.fetch(new Request(`${origin}/r/${code}?tab=highlights`), env);
+  const firstHtml = await firstDetail.text();
+  const nextCode = shareCode(43);
+  assert.match(firstHtml, new RegExp(`/r/${nextCode}\\?tab=highlights`));
+  const nextDetail = await worker.fetch(new Request(`${origin}/r/${nextCode}?tab=highlights`), env);
+  const nextHtml = await nextDetail.text();
+  assert.match(nextHtml, new RegExp(`/read\\?tab=highlights#${nextCode}`));
+  const list = await worker.fetch(new Request(`${origin}/read?tab=highlights`), env);
+  const listHtml = await list.text();
+  assert.equal((listHtml.match(new RegExp(`id="${nextCode}"`, "g")) || []).length, 1);
+  assert.match(listHtml, new RegExp(`<li id="hl-b"><span id="${nextCode}"></span>`));
+});
+
+test("saved marks are painted without selection, fetch, dialog or TreeWalker support", async t => {
+  const { db, sql } = database();
+  t.after(() => sql.close());
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({ results: [page] })) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const { hashText } = await import("../src/highlight-anchor.ts");
+  const text = "甲重复乙丙重复丁<script>";
+  sql.prepare('INSERT INTO highlights (id, excerpt_number, excerpt_page_id, field, start, "end", quote, prefix, suffix, body_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run("aabb", 42, pageId, "translation", 1, 3, "重复", "甲", "乙丙重复丁<script>", await hashText(text), "2026-01-01");
+  const env = { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source" };
+  const response = await worker.fetch(new Request(`${origin}/r/${code}`), env);
+  const html = await response.text();
+  const script = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), match => match[1]!).find(value => value.includes("var rows="))!;
+
+  class FakeNode {
+    nodeType: number;
+    nodeValue: string;
+    className = "";
+    id = "";
+    parentNode: FakeNode | null = null;
+    children: FakeNode[] = [];
+    constructor(nodeType: number, nodeValue = "") { this.nodeType = nodeType; this.nodeValue = nodeValue; }
+    get firstChild(): FakeNode | null { return this.children[0] || null; }
+    get nextSibling(): FakeNode | null { if (!this.parentNode) return null; return this.parentNode.children[this.parentNode.children.indexOf(this) + 1] || null; }
+    insertBefore(child: FakeNode, reference: FakeNode) { if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1); child.parentNode = this; this.children.splice(this.children.indexOf(reference), 0, child); }
+    appendChild(child: FakeNode) { if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1); child.parentNode = this; this.children.push(child); }
+    splitText(offset: number) { const rest = new FakeNode(3, this.nodeValue.slice(offset)); this.nodeValue = this.nodeValue.slice(0, offset); const parent = this.parentNode!; rest.parentNode = parent; parent.children.splice(parent.children.indexOf(this) + 1, 0, rest); return rest; }
+  }
+  const body = new FakeNode(1); body.className = "excerpt-body";
+  body.appendChild(new FakeNode(3, "甲重复乙丙重复丁<script>"));
+  const document = {
+    getElementById: (_id: string) => null,
+    querySelector: (selector: string) => selector === '.excerpt-body[data-field="translation"]' ? body : null,
+    createElement: (_tag: string) => new FakeNode(1),
+  };
+  const window = { addEventListener() {} };
+  runInNewContext(script, { document, window, location: { hash: "" } });
+  const mark = body.children.find(node => node.className === "hl");
+  assert.ok(mark);
+  assert.equal(mark.firstChild?.nodeValue, "重复");
+  assert.ok(body.children.some(node => node.id === "hl-aabb"));
+});
+
+test("distant duplicate deletion leaves the saved highlight orphaned until the body is restored", async t => {
+  const { db, sql } = database();
+  t.after(() => sql.close());
+  const unit = "甲乙丙丁首次观点戊己庚辛";
+  const original = "前文" + unit + "隔".repeat(80) + unit + "后文";
+  const fixture = structuredClone(page);
+  fixture.properties.ID.unique_id.number = 44;
+  fixture.properties["正文翻译"].rich_text[0]!.plain_text = original;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({ results: [fixture] })) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const env = { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
+  const fixtureCode = shareCode(44);
+  const endpoint = `${origin}/read/highlight/${fixtureCode}`;
+  const opened = await worker.fetch(new Request(endpoint, { headers: { Accept: "application/json" } }), env);
+  const cookie = opened.headers.get("set-cookie")!.split(";")[0]!;
+  const { csrf } = await opened.json() as { csrf: string };
+  const saved = await worker.fetch(new Request(endpoint, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, pin: "012345", field: "translation", start: "6", end: "10", quote: "首次观点" }) }), env);
+  assert.equal(saved.status, 200);
+  const { highlight } = await saved.json() as { highlight: { id: string } };
+  const stored = sql.prepare("SELECT prefix, suffix, body_hash FROM highlights WHERE id = ?").get(highlight.id) as { prefix: string; suffix: string; body_hash: string };
+  assert.equal(stored.prefix, "前文甲乙丙丁");
+  assert.equal(stored.suffix, "戊己庚辛" + "隔".repeat(28));
+  assert.equal(stored.body_hash, "78780698edc0c9f27429d1ca0377a7464793d85537fd67d8313f6899ce80f4b2");
+  const readDetail = async () => (await worker.fetch(new Request(`${origin}/r/${fixtureCode}`), env)).text();
+  assert.ok((await readDetail()).includes(highlight.id));
+  fixture.properties["正文翻译"].rich_text[0]!.plain_text = "隔".repeat(80) + unit + "后文";
+  assert.ok(!(await readDetail()).includes(highlight.id));
+  const list = await (await worker.fetch(new Request(`${origin}/read?tab=highlights`), env)).text();
+  const row = list.match(new RegExp(`<li id="hl-${highlight.id}">[\\s\\S]*?<\\/li>`))?.[0];
+  assert.ok(row);
+  assert.match(row, /正文已变动，未能定位/);
+  assert.doesNotMatch(row, /class="item-link"/);
+  fixture.properties["正文翻译"].rich_text[0]!.plain_text = original;
+  assert.ok((await readDetail()).includes(highlight.id));
+});
+
+test("paragraph picker saves the selected repeated text without Selection or native dialog APIs", async t => {
+  const { db, sql } = database();
+  t.after(() => sql.close());
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({ results: [page] })) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const html = await (await worker.fetch(new Request(`${origin}/r/${code}`), { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source" })).text();
+  const script = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), m => m[1]!).find(s => s.includes("var rows="))!;
+  class Element {
+    nodeType = 1; nodeValue = ""; parentNode: Element | null = null; children: Element[] = [];
+    handlers = new Map<string, (event: any) => void>(); attributes = new Map<string, string>();
+    hidden = false; disabled = false; className = ""; value = ""; private content = "";
+    tagName: string;
+    constructor(tagName = "DIV") { this.tagName = tagName; }
+    get firstChild() { return this.children[0] || null; }
+    get nextSibling(): Element | null { if (!this.parentNode) return null; const a = this.parentNode.children; return a[a.indexOf(this) + 1] || null; }
+    get textContent(): string { return this.content; }
+    set textContent(value: string) { this.content = value; this.children = []; }
+    appendChild(child: Element) { if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1); child.parentNode = this; this.children.push(child); }
+    insertBefore(child: Element, reference: Element | null) { if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1); child.parentNode = this; const i = reference ? this.children.indexOf(reference) : -1; if (i < 0) this.children.push(child); else this.children.splice(i, 0, child); }
+    contains(child: Element): boolean { for (let n: Element | null = child; n; n = n.parentNode) if (n === this) return true; return false; }
+    setAttribute(key: string, value: string) { this.attributes.set(key, value); }
+    getAttribute(key: string) { return this.attributes.get(key) ?? null; }
+    hasAttribute(key: string) { return this.attributes.has(key); }
+    removeAttribute(key: string) { this.attributes.delete(key); }
+    addEventListener(name: string, fn: (event: any) => void) { this.handlers.set(name, fn); }
+    focus() {}
+    click() { this.handlers.get("click")?.({ target: this, preventDefault() {} }); }
+  }
+  function textNode(value: string) { const n = new Element(); n.nodeType = 3; n.nodeValue = value; return n; }
+  const body = new Element(), before = new Element("P"), paragraph = new Element("P");
+  body.setAttribute("data-field", "translation"); body.appendChild(before); before.appendChild(textNode("甲 重复\n")); body.appendChild(paragraph); paragraph.appendChild(textNode("乙。重复😀。丁"));
+  const elements = new Map<string, Element>();
+  for (const id of ["highlight-bar", "highlight-save", "highlight-message", "favorite-dialog", "favorite-form", "pin", "favorite-error", "highlight-picker", "highlight-picker-close", "highlight-characters", "highlight-picker-save", "highlight-picker-message", "highlight-preview", "body-highlight"]) elements.set(id, new Element());
+  const documentHandlers = new Map<string, (event: any) => void>();
+  const pickerHome = new Element(); pickerHome.appendChild(elements.get("highlight-picker")!); elements.get("highlight-picker")!.hidden = true;
+  const document = {
+    getElementById: (id: string) => elements.get(id) || null,
+    querySelector: () => null, querySelectorAll: () => [body], addEventListener(name: string, handler: (event: any) => void) { documentHandlers.set(name, handler); },
+    createElement: (tag: string) => new Element(tag.toUpperCase()), createTextNode: textNode,
+  };
+  const requests: string[] = [];
+  const fakeFetch = async (_url: string, init?: { body?: string }) => {
+    if (init?.body) { requests.push(init.body); return Response.json({ error: "正文已更新" }, { status: 409 }); }
+    return Response.json({ authenticated: false, csrf: "token" });
+  };
+  let pinError = "";
+  const window = { fetch: fakeFetch, promptForReadPin: (resume: (value: string) => Promise<unknown>) => { void resume("012345").catch(error => { pinError = error.message; }); }, addEventListener() {}, openHighlightPicker: undefined as undefined | ((p: Element, b: Element) => void) };
+  runInNewContext(script, { document, window, fetch: fakeFetch, URLSearchParams, location: { hash: "" }, setTimeout });
+  assert.equal(elements.get("body-highlight")!.hidden, false);
+  window.openHighlightPicker!(paragraph, body);
+  const chars = elements.get("highlight-characters")!;
+  const buttons = chars.children.filter(n => n.tagName === "BUTTON");
+  assert.deepEqual(buttons.map(n => n.textContent), ["乙。", "重复😀。", "丁"]);
+  assert.equal(elements.get("highlight-picker-save")!.disabled, true, "save starts disabled with no selected sentence");
+  chars.handlers.get("click")!({ target: buttons[2] });
+  chars.handlers.get("click")!({ target: buttons[0] });
+  assert.equal(elements.get("highlight-preview")!.textContent, "乙。重复😀。丁", "sentences can be selected from end to start");
+  assert.equal(elements.get("highlight-picker-save")!.disabled, false);
+  elements.get("highlight-picker-save")!.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const sent = new URLSearchParams(requests[0]);
+  assert.equal(sent.get("field"), "translation");
+  assert.equal(sent.get("start"), "3");
+  assert.equal(sent.get("end"), "11");
+  assert.equal(sent.get("quote"), "乙。重复😀。丁");
+  assert.equal(pinError, "正文已更新", "save errors are passed to the shared PIN dialog");
+  window.openHighlightPicker!(paragraph, body);
+  const picker = elements.get("highlight-picker")!;
+  await new Promise(resolve => setTimeout(resolve, 0));
+  documentHandlers.get("click")!({ target: new Element() });
+  assert.equal(picker.hidden, true, "clicking outside the selection panel closes it");
+  paragraph.children[0]!.nodeValue = "甲。乙👩‍👩‍👧 好！丙。";
+  window.openHighlightPicker!(paragraph, body);
+  const sentences = chars.children.filter(n => n.tagName === "BUTTON");
+  assert.deepEqual(sentences.map(n => n.textContent), ["甲。", "乙👩‍👩‍👧 好！", "丙。"]);
+  chars.handlers.get("click")!({ target: sentences[1] });
+  assert.equal(elements.get("highlight-preview")!.textContent, "乙👩‍👩‍👧 好！");
+  chars.handlers.get("click")!({ target: sentences[2] });
+  assert.equal(elements.get("highlight-preview")!.textContent, "乙👩‍👩‍👧 好！丙。", "selecting a second sentence extends the range");
+  await new Promise(resolve => setTimeout(resolve, 0));
+  documentHandlers.get("click")!({ target: new Element() });
+  paragraph.children[0]!.nodeValue = "甲".repeat(501);
+  window.openHighlightPicker!(paragraph, body);
+  assert.equal(elements.get("highlight-picker-save")!.disabled, true);
+  assert.ok(chars.children.length <= 4, "long paragraphs are split into a few chunks");
+  elements.get("highlight-picker-close")!.click();
+  assert.equal(picker.hidden, true, "the close button dismisses the picker");
+});
