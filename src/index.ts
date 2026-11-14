@@ -132,8 +132,7 @@ type NotionProperty = {
 
 type WorkerBindings = FavoriteBindings & {
   HIGHLIGHTS_DB?: D1Database;
-  OPENAI_API_KEY?: string;
-  TYPESAFE_API_KEY?: string;
+  AI302_API_KEY?: string;
   INSTAPAPER_CONSUMER_ID?: string;
   INSTAPAPER_CONSUMER_SECRET?: string;
   INSTAPAPER_OAUTH_TOKEN?: string;
@@ -570,7 +569,7 @@ const EINK_STYLE = [
   "#body-actions button,#explanation-close{font-size:0.9375rem;line-height:1.6}",
   "#body-actions button:disabled{opacity:0.4;}",
 
-  "#explanation-dialog,#original-match-dialog{font-size:0.9375rem;line-height:1.6}#explanation-dialog[open],#original-match-dialog[open]{display:flex;flex-direction:column;overflow:hidden}#explanation-text{flex:1;min-height:0;overflow-y:auto;white-space:normal}#explanation-close,#original-match-close{flex:none}#original-match-content{display:flex;flex:1;flex-direction:column;min-height:0}#original-match-content section{flex:1;min-height:0;overflow-y:auto;padding:0.35rem 0;white-space:pre-wrap;overflow-wrap:anywhere}#original-match-content section+section{border-top:1px solid #000}#original-match-content h2{margin:0 0 0.35rem;font-size:0.875rem;line-height:1.4}#original-match-content p{margin:0}#explanation-text :is(ul,ol){list-style:revert;padding-left:1.5em}#explanation-text li,#explanation-text li:last-child{border:0;padding:0;margin:0}#explanation-text :is(h1,h2,h3,h4,h5,h6){font-size:1em;line-height:1.6;margin:0.85em 0;font-weight:700}#explanation-text blockquote{border-left:2px solid #000;margin:0.85em 0;padding-left:0.75em}#explanation-text pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}#explanation-text :is(pre,code){font-family:monospace;font-size:0.95em}",
+  "#explanation-dialog,#original-match-dialog{font-size:0.9375rem;line-height:1.6}#explanation-dialog[open],#original-match-dialog[open]{display:flex;flex-direction:column;overflow:hidden}#explanation-text{flex:1;min-height:0;overflow-y:auto;white-space:normal}#explanation-close,#original-match-close{flex:none}#original-match-content{display:flex;flex:1;flex-direction:column;min-height:0}#original-match-content section{flex:1;min-height:0;overflow-y:auto;padding:0.35rem 0;white-space:pre-wrap;overflow-wrap:anywhere}#original-match-content section:first-child{padding-bottom:1rem;padding-block-end:1rem}#original-match-content section+section{border-top:1px solid #000;padding-top:1rem;padding-block-start:1rem}#original-match-content h2{margin:0 0 0.35rem;font-size:0.875rem;line-height:1.4}#original-match-content p{margin:0}#explanation-text :is(ul,ol){list-style:revert;padding-left:1.5em}#explanation-text li,#explanation-text li:last-child{border:0;padding:0;margin:0}#explanation-text :is(h1,h2,h3,h4,h5,h6){font-size:1em;line-height:1.6;margin:0.85em 0;font-weight:700}#explanation-text blockquote{border-left:2px solid #000;margin:0.85em 0;padding-left:0.75em}#explanation-text pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}#explanation-text :is(pre,code){font-family:monospace;font-size:0.95em}",
   "#favorite-dialog .favorite-close{min-height:2.25rem;min-width:3.25rem;margin:0.15rem 0 0.15rem auto;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;text-decoration:none}",
 ].join("");
 
@@ -1418,12 +1417,12 @@ const worker = {
         if (text === null) throw highlightError("划线内容不存在。", 400);
         if (ranges.some(range => text.slice(range.start, range.end) !== canonicalText(range.quote))) throw highlightError("正文已更新，请刷新后重试。", 409);
         if (explaining) {
-          if (!env.OPENAI_API_KEY) throw highlightError("解释服务未配置，请设置 OPENAI_API_KEY。", 503);
+          if (!env.AI302_API_KEY) throw highlightError("解释服务未配置，请设置 AI302_API_KEY。", 503);
           const context = field === "original" ? (excerpt.chinese ? excerpt.body : excerpt.originalBody || "") : field === "terms" ? excerpt.terms : excerpt.body;
           const source = excerpt.originalUrl ? `\n原文地址：${excerpt.originalUrl}` : "";
-          const response = await fetch("https://api.openai.com/v1/responses", {
+          const response = await fetch("https://api.302.ai/v1/responses", {
             method: "POST",
-            headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+            headers: { Authorization: `Bearer ${env.AI302_API_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({ model: "gpt-6-luna", store: false, reasoning: { effort: "none" }, max_output_tokens: 1500,
               input: `文章标题：${excerpt.title}${source}\n文章上下文（过长时可能截断）：\n${context.slice(0, 40000)}\n\n解释一下：${ranges.map(range => range.quote).join("\n")}` }),
             signal: AbortSignal.timeout(60000),
@@ -1439,7 +1438,7 @@ const worker = {
           return { explanation, markdown: explanationMarkdown(explanation) };
         }
         if (matchingOriginal) {
-          if (!env.TYPESAFE_API_KEY) throw highlightError("原文匹配服务未配置，请设置 TYPESAFE_API_KEY。", 503);
+          if (!env.AI302_API_KEY) throw highlightError("原文匹配服务未配置，请设置 AI302_API_KEY。", 503);
           if (excerpt.chinese || !excerpt.originalBody) throw highlightError("这篇文章没有可匹配的原文。", 400);
           const allCandidates = einkParagraphTexts(excerpt.originalBody, excerpt.id)
             .map((paragraph) => paragraph.replace(IMAGE_TAG, " ").replace(HTML_IMG, " ").trim())
@@ -1450,18 +1449,18 @@ const worker = {
           const lastCandidate = Math.min(allCandidates.length, estimatedIndex + JEV_CANDIDATE_RADIUS + 1);
           const candidates = allCandidates.slice(firstCandidate, lastCandidate);
           const criteria = Object.fromEntries(candidates.map((paragraph, index) => [`p${index}`, Array.from(paragraph).slice(0, JEV_CANDIDATE_TEXT_LIMIT).join("")]));
-          const response = await fetch("https://api.typesafe.ai/v1/systemone", {
+          const response = await fetch("https://api.302.ai/typesafeai/v1/systemone", {
             method: "POST",
-            headers: { Authorization: `Bearer ${env.TYPESAFE_API_KEY}`, "Content-Type": "application/json" },
+            headers: { Authorization: `Bearer ${env.AI302_API_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({
               model: "jev-latest",
-              state: { title: excerpt.originalTitle || excerpt.title, selected_paragraph: ranges.map((range) => range.quote).join("\n"), estimated_source_position: `${estimatedIndex + 1} / ${allCandidates.length}` },
+              state: JSON.stringify({ title: excerpt.originalTitle || excerpt.title, selected_paragraph: ranges.map((range) => range.quote).join("\n"), estimated_source_position: `${estimatedIndex + 1} / ${allCandidates.length}` }),
               questions: { match: { type: "choice", instructions: "从原文候选段落中，选择与所选译文段落内容最对应的原文。依据语义、实体、细节和段落主旨匹配，不要只按关键词匹配。若都不匹配，也选择最可能的一段。", criteria } },
             }),
             signal: AbortSignal.timeout(30000),
           });
           if (!response.ok) {
-            console.error("TypeSafe Jev request failed", { status: response.status });
+            console.error("302.AI Jev request failed", { status: response.status });
             throw highlightError("原文匹配服务暂不可用，请稍后再试。", 502);
           }
           const result = await response.json() as { answers?: { match?: { type?: string; choice?: string; confidence?: number } } };

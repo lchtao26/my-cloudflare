@@ -18,8 +18,7 @@
       "INSTAPAPER_OAUTH_TOKEN_SECRET",
       "FAVORITE_PIN",
       "FAVORITE_SESSION_SECRET",
-      "OPENAI_API_KEY",
-      "TYPESAFE_API_KEY"
+      "AI302_API_KEY"
     ]
   },
   "durable_objects": {

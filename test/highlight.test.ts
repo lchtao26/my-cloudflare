@@ -116,21 +116,21 @@ test("highlight writes reuse PIN and CSRF, validate rendered text and render onl
   assert.equal((await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), { ...env, HIGHLIGHTS_DB: undefined })).status, 503);
 });
 
-test("explanations require authentication, verify the selection, and send article context to OpenAI", async t => {
+test("explanations require authentication, verify the selection, and send article context through 302.AI", async t => {
   const { db, sql } = database();
   t.after(() => sql.close());
   const originalFetch = globalThis.fetch;
   const requests: Array<{ headers: Headers; body: Record<string, unknown> }> = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input).includes("/data_sources/source/query")) return Response.json({ results: [page] });
-    if (String(input) === "https://api.openai.com/v1/responses") {
+    if (String(input) === "https://api.302.ai/v1/responses") {
       requests.push({ headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
       return Response.json({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "这段话的意思。" }] }] });
     }
     throw new Error(`unexpected fetch ${input}`);
   }) as typeof fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
-  const env = { HIGHLIGHTS_DB: db, OPENAI_API_KEY: "test-key", NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
+  const env = { HIGHLIGHTS_DB: db, AI302_API_KEY: "test-key", NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
   const opened = await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), env);
   const { csrf } = await opened.json() as { csrf: string };
   const cookie = opened.headers.get("set-cookie")!.split(";")[0]!;
@@ -140,7 +140,7 @@ test("explanations require authentication, verify the selection, and send articl
   assert.equal((await post()).status, 401);
   assert.equal((await post({ pin: "012345" }, "https://evil.example")).status, 403);
   assert.equal((await post({ pin: "012345", quote: "伪造" })).status, 409);
-  const unconfigured = await post({ pin: "012345" }, origin, { ...env, OPENAI_API_KEY: "" });
+  const unconfigured = await post({ pin: "012345" }, origin, { ...env, AI302_API_KEY: "" });
   assert.equal(unconfigured.status, 503);
   assert.equal(requests.length, 0);
   assert.equal((await post({ action: "verify", pin: "999999" })).status, 401);
@@ -165,6 +165,35 @@ test("explanations require authentication, verify the selection, and send articl
   assert.equal((await post({ pin: "012345", ranges: JSON.stringify(disjointRanges.reverse()) })).status, 400);
   assert.equal(requests.length, 2);
   assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights").get() as { n: number }).n, 0);
+});
+
+test("original paragraph matching uses the 302.AI System One API", async t => {
+  const { db, sql } = database();
+  t.after(() => sql.close());
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ headers: Headers; body: any }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes("/data_sources/source/query")) return Response.json({ results: [page] });
+    if (String(input) === "https://api.302.ai/typesafeai/v1/systemone") {
+      requests.push({ headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
+      return Response.json({ answers: { match: { type: "choice", choice: "p0", confidence: 0.9 } } });
+    }
+    throw new Error(`unexpected fetch ${input}`);
+  }) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const env = { HIGHLIGHTS_DB: db, AI302_API_KEY: "test-key", NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
+  const opened = await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), env);
+  const { csrf } = await opened.json() as { csrf: string };
+  const cookie = opened.headers.get("set-cookie")!.split(";")[0]!;
+  const response = await worker.fetch(new Request(url, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, pin: "012345", action: "original", field: "translation", start: "0", end: "1", quote: "甲" }) }), env);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json() as { paragraph: string }).paragraph, "Original text");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]!.headers.get("authorization"), "Bearer test-key");
+  assert.equal(requests[0]!.body.model, "jev-latest");
+  assert.equal(JSON.parse(requests[0]!.body.state).selected_paragraph, "甲");
+  assert.equal(requests[0]!.body.questions.match.type, "choice");
+  assert.equal(requests[0]!.body.questions.match.criteria.p0, "Original text");
 });
 
 test("highlight article navigation returns to an existing unique list anchor", async t => {
