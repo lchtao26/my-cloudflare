@@ -930,7 +930,7 @@ test("e-ink categories filter the view and preserve navigation context", async (
     ["weekly", "周刊", "bunshun.jp/denshiban/articles/"],
     ["bunshun", "文春", "bunshun.jp/articles/"],
     ["novel", "小说", "epub"],
-    ["news", "博客", "news.ycombinator.com"],
+    ["news", "IT", "news.ycombinator.com"],
   ]) {
     const response = await worker.fetch(new Request(`https://example.com/read?tab=${category}`), env);
     assert.equal(response.status, 200);
@@ -1045,7 +1045,7 @@ test("e-ink list displays every category without interaction", () => {
     ["/read?tab=weekly", "周刊"],
     ["/read?tab=bunshun", "文春"],
     ["/read?tab=novel", "小说"],
-    ["/read?tab=news", "博客"],
+    ["/read?tab=news", "IT"],
     ["/read?tab=likes", "收藏"],
     ["/read?tab=later", "稍后阅读"],
   ]) {
@@ -1058,7 +1058,7 @@ test("e-ink list displays every category without interaction", () => {
   assert.match(navigation, /href="\/read\?tab=later"/);
   assert.match(navigation, /href="\/read\?tab=highlights"/);
   assert.deepEqual(Array.from(navigation.matchAll(/<a [^>]*>([^<]+)<\/a>/g), (match) => match[1]),
-    ["全部", "收藏", "划线", "稍后阅读", "博客", "周刊", "文春", "小说"]);
+    ["全部", "收藏", "划线", "稍后阅读", "IT", "周刊", "文春", "小说"]);
 });
 
 test("back-to-top appears only when the remaining list content needs scrolling", () => {
@@ -1916,6 +1916,88 @@ test("two paragraph taps open actions and switch the displayed language", () => 
   const noOriginal = excerptFromPage({ ...page, properties: { ...properties, "正文": { type: "rich_text", rich_text: [] } } })!;
   assert.doesNotMatch(renderEinkDetail(noOriginal, "/read", "/read/p"), /id="original-body"/);
   assert.doesNotMatch(renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, false), /id="original-body"/);
+});
+
+test("tapping a highlight opens cancel on the bottom right and does not page or count as a double tap", () => {
+  const properties = {
+    ...idProperty(),
+    "原文语言": { type: "select" as const, select: { name: "日文" } },
+    "正文": { type: "rich_text" as const, rich_text: [{ plain_text: "原文" }] },
+    "正文翻译": { type: "rich_text" as const, rich_text: [{ plain_text: "中文译文" }] },
+  };
+  const page = { id: "page", url: "https://notion.so/page", properties };
+  const excerpt = excerptFromPage(page)!;
+  const html = renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, true, [], true);
+  assert.match(html, /id="body-unhighlight">取消划线/);
+  assert.match(html, /#body-actions\[data-mode=mark\] #body-toggle/);
+  assert.doesNotMatch(renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, false, [], true), /id="body-unhighlight"/);
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
+  type Handler = (event?: any) => void;
+  function element(hidden = false) {
+    const handlers = new Map<string, Handler>();
+    return { hidden, handlers, textContent: "", focus() {}, addEventListener: (name: string, handler: Handler) => handlers.set(name, handler) };
+  }
+  const translated = element(), original = element(true), toggle = element(), highlight = element(true), unhighlight = element();
+  const attributes = new Map<string, string>();
+  const actions = { ...element(true), contains: () => false, setAttribute: (name: string, value: string) => attributes.set(name, value), getAttribute: (name: string) => attributes.get(name) ?? null, removeAttribute: (name: string) => attributes.delete(name) };
+  const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight, "body-unhighlight": unhighlight };
+  const translatedP = { tagName: "P", parentNode: translated, contains: (node: unknown) => node === translatedP };
+  const mark = { tagName: "MARK", className: "hl", parentNode: translatedP, getAttribute: (name: string) => name === "data-hl" ? "11111111-1111-4111-8111-111111111111" : null };
+  let now = 1000;
+  const windowHandlers = new Map<string, Array<() => void>>();
+  const documentHandlers = new Map<string, Array<Handler>>();
+  const removed: string[] = [];
+  const window = {
+    innerHeight: 600,
+    scrollY: 0,
+    removeHighlight: (id: string) => { removed.push(id); },
+    getSelection: undefined as undefined | (() => { rangeCount: number; isCollapsed: boolean }),
+    addEventListener(name: string, handler: () => void) { windowHandlers.set(name, [...windowHandlers.get(name) ?? [], handler]); },
+  };
+  runInNewContext(script, {
+    document: { documentElement: { scrollHeight: 600 }, querySelector: () => null, querySelectorAll: () => [translated, original], getElementById: (id: string) => nodes[id], addEventListener(name: string, handler: Handler) { documentHandlers.set(name, [...documentHandlers.get(name) ?? [], handler]); } },
+    window, location: { pathname: "/r/000000" }, localStorage: { getItem: () => null, setItem() {} }, Date: { now: () => now }, setTimeout: () => 1,
+  });
+  function tap(target: { tagName: string; parentNode: unknown; getAttribute?: (name: string) => string | null } = translatedP) {
+    const point = { clientX: 10, clientY: 10 };
+    let prevented = false;
+    const event = { touches: [point], changedTouches: [point], target, ...point, button: 0, cancelable: true, preventDefault() { prevented = true; } };
+    translated.handlers.get("touchstart")!(event);
+    translated.handlers.get("touchend")!({ ...event, touches: [] });
+    now += 150;
+    return prevented;
+  }
+  assert.equal(tap(mark), true, "a highlight tap is not turned into a click");
+  assert.equal(actions.hidden, false);
+  assert.equal(actions.getAttribute("data-mode"), "mark");
+  unhighlight.handlers.get("click")!();
+  assert.equal(actions.hidden, false, "the synthetic click after opening the bar is ignored");
+  assert.deepEqual(removed, []);
+  now += 600;
+  unhighlight.handlers.get("click")!();
+  assert.equal(actions.hidden, true);
+  assert.equal(actions.getAttribute("data-mode"), null);
+  assert.deepEqual(removed, ["11111111-1111-4111-8111-111111111111"]);
+  now += 600;
+  assert.equal(tap(), false);
+  assert.equal(actions.hidden, true, "one paragraph tap after cancel does not open the bar");
+  now += 600;
+  tap(); tap();
+  assert.equal(actions.getAttribute("data-mode"), "body");
+  let stopped = false;
+  documentHandlers.get("touchstart")![0]!({ target: mark, touches: [{ clientX: 10, clientY: 10 }], cancelable: true, preventDefault() {}, stopImmediatePropagation() { stopped = true; } });
+  assert.equal(stopped, true);
+  assert.equal(actions.hidden, true, "tapping a highlight while the bar is open only dismisses it");
+  assert.equal(actions.getAttribute("data-mode"), null);
+  now += 600;
+  window.getSelection = () => ({ rangeCount: 1, isCollapsed: false });
+  assert.equal(tap(mark), false, "a tap that starts with a selection does not open cancel");
+  assert.equal(actions.hidden, true);
+  now += 600;
+  delete (window as { removeHighlight?: unknown }).removeHighlight;
+  window.getSelection = undefined;
+  tap(mark); tap(mark);
+  assert.equal(actions.getAttribute("data-mode"), "body", "without removal support a highlight tap is an ordinary paragraph tap");
 });
 
 test("excerpt image proxy serves images referenced by the displayed body fields", async (context) => {

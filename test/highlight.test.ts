@@ -21,7 +21,7 @@ function database() {
   sql.exec(readFileSync("migrations/0001_highlights.sql", "utf8"));
   sql.exec(readFileSync("migrations/0002_highlight_terms.sql", "utf8"));
   const db = { prepare(query: string) { return { bind(...args: SQLInputValue[]) { return {
-    async run() { return sql.prepare(query).run(...args); },
+    async run() { const outcome = sql.prepare(query).run(...args); return { meta: { changes: Number(outcome.changes) } }; },
     async first() { return sql.prepare(query).get(...args) ?? null; },
     async all() { return { results: sql.prepare(query).all(...args) }; },
   }; } }; } } as unknown as D1Database;
@@ -74,13 +74,15 @@ test("highlight writes reuse PIN and CSRF, validate rendered text and render onl
   const detailHtml = await detail.text();
   assert.match(detailHtml, new RegExp(value.highlight.id));
   assert.match(detailHtml, /id="highlight-save"/);
+  assert.match(detailHtml, /id="highlight-error"/);
+  assert.match(detailHtml, /id="body-unhighlight">取消划线/);
   for (const script of detailHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Script(script[1]!);
   const uiScript = Array.from(detailHtml.matchAll(/<script>([\s\S]*?)<\/script>/g), match => match[1]!).find(text => text.includes("var rows="))!;
   const handlers = new Map<string, (event?: any) => void>();
   const body = { hidden: false, getAttribute: () => "translation", closest: () => body };
   const selection = { rangeCount: 1, isCollapsed: false, getRangeAt: () => ({ startContainer: { nodeType: 1, closest: () => body }, endContainer: { nodeType: 1, closest: () => body }, startOffset: 0, cloneRange: () => ({ selectNodeContents() {}, setEnd() {}, toString: () => "甲 重复乙\n丙" }), toString: () => "重复" }) };
   const elements = new Map<string, any>();
-  for (const id of ["highlight-bar", "highlight-save", "highlight-message", "favorite-dialog", "favorite-form", "pin", "favorite-error"]) elements.set(id, { hidden: false, open: false, showModal() { this.open = true; }, addEventListener(name: string, fn: (event?: any) => void) { handlers.set(`${id}:${name}`, fn); } });
+  for (const id of ["highlight-bar", "highlight-save", "highlight-message", "favorite-dialog", "favorite-form", "pin", "favorite-error", "highlight-error", "highlight-error-message", "highlight-error-retry", "highlight-error-close"]) elements.set(id, { hidden: id === "highlight-error", open: false, textContent: "", showModal() { this.open = true; this.hidden = false; }, addEventListener(name: string, fn: (event?: any) => void) { handlers.set(`${id}:${name}`, fn); } });
   const document = { getElementById: (id: string) => elements.get(id) || null, querySelector: () => null, createTreeWalker: () => ({ nextNode: () => null }), addEventListener: (name: string, fn: (event?: any) => void) => handlers.set(name, fn) };
   const sent: string[] = [];
   const fakeFetch = async (_url: string, init?: { body?: string }) => { if (init?.body) { sent.push(init.body); return new Response(JSON.stringify({ error: "正文已更新" }), { status: 409 }); } return Response.json({ authenticated: true, csrf: "token" }); };
@@ -93,11 +95,27 @@ test("highlight writes reuse PIN and CSRF, validate rendered text and render onl
   const sentForm = new URLSearchParams(sent[0]);
   assert.equal(sentForm.get("start"), "5");
   assert.equal(sentForm.get("end"), "7");
-  assert.equal(elements.get("highlight-message").textContent, "正文已更新");
+  assert.equal(elements.get("highlight-bar").hidden, true, "a failed highlight does not stay at the bottom for retry");
+  assert.equal(elements.get("highlight-error").open, true);
+  assert.equal(elements.get("highlight-error-message").textContent, "正文已更新");
+  assert.equal(elements.get("highlight-error-retry").textContent, "划线");
+  handlers.get("highlight-error-retry:click")!();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(sent.length, 2, "the dialog retries the same highlight");
+  assert.equal(elements.get("highlight-bar").hidden, true);
+  handlers.get("highlight-error-close:click")!();
+  assert.equal(elements.get("highlight-error").hidden, true);
+  assert.equal(sent.length, 2);
+  await (window as unknown as { removeHighlight: (id: string) => Promise<void> }).removeHighlight("11111111-1111-4111-8111-111111111111");
+  assert.equal(elements.get("highlight-error").hidden, true, "canceling a highlight does not open the error dialog");
+  assert.equal(elements.get("highlight-message").textContent, "");
+  assert.equal(elements.get("highlight-bar").hidden, true);
   assert.equal(detail.headers.get("cache-control"), "no-store");
   const share = await worker.fetch(new Request(`${origin}/s/${code}`), env);
   const shareHtml = await share.text();
   assert.doesNotMatch(shareHtml, /id="highlight-save"/);
+  assert.doesNotMatch(shareHtml, /id="highlight-error"/);
+  assert.doesNotMatch(shareHtml, /id="body-unhighlight"/);
   assert.doesNotMatch(shareHtml, new RegExp(value.highlight.id));
   const list = await worker.fetch(new Request(`${origin}/read?tab=highlights`), env);
   assert.equal(list.headers.get("cache-control"), "no-store");
@@ -152,7 +170,7 @@ test("highlight article navigation returns to an existing unique list anchor", a
   assert.match(listHtml, new RegExp(`<li id="hl-b"><span id="${nextCode}"></span>`));
 });
 
-test("saved marks are painted without selection, fetch, dialog or TreeWalker support", async t => {
+test("saved marks paint each layer and removal unwraps only the chosen highlight", async t => {
   const { db, sql } = database();
   t.after(() => sql.close());
   const originalFetch = globalThis.fetch;
@@ -160,8 +178,10 @@ test("saved marks are painted without selection, fetch, dialog or TreeWalker sup
   t.after(() => { globalThis.fetch = originalFetch; });
   const { hashText } = await import("../src/highlight-anchor.ts");
   const text = "甲重复乙丙重复丁<script>";
-  sql.prepare('INSERT INTO highlights (id, excerpt_number, excerpt_page_id, field, start, "end", quote, prefix, suffix, body_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run("aabb", 42, pageId, "translation", 1, 3, "重复", "甲", "乙丙重复丁<script>", await hashText(text), "2026-01-01");
+  const insert = sql.prepare('INSERT INTO highlights (id, excerpt_number, excerpt_page_id, field, start, "end", quote, prefix, suffix, body_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  const hash = await hashText(text);
+  insert.run("aabb", 42, pageId, "translation", 1, 3, "重复", "甲", "乙丙重复丁<script>", hash, "2026-01-01");
+  insert.run("bbcc", 42, pageId, "translation", 2, 5, "复乙丙", "甲重", "重复丁<script>", hash, "2026-01-02");
   const env = { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source" };
   const response = await worker.fetch(new Request(`${origin}/r/${code}`), env);
   const html = await response.text();
@@ -174,26 +194,64 @@ test("saved marks are painted without selection, fetch, dialog or TreeWalker sup
     id = "";
     parentNode: FakeNode | null = null;
     children: FakeNode[] = [];
+    attributes = new Map<string, string>();
     constructor(nodeType: number, nodeValue = "") { this.nodeType = nodeType; this.nodeValue = nodeValue; }
     get firstChild(): FakeNode | null { return this.children[0] || null; }
     get nextSibling(): FakeNode | null { if (!this.parentNode) return null; return this.parentNode.children[this.parentNode.children.indexOf(this) + 1] || null; }
     insertBefore(child: FakeNode, reference: FakeNode) { if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1); child.parentNode = this; this.children.splice(this.children.indexOf(reference), 0, child); }
     appendChild(child: FakeNode) { if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1); child.parentNode = this; this.children.push(child); }
+    removeChild(child: FakeNode) { const index = this.children.indexOf(child); if (index >= 0) this.children.splice(index, 1); child.parentNode = null; return child; }
+    setAttribute(key: string, value: string) { this.attributes.set(key, value); }
+    getAttribute(key: string) { return this.attributes.get(key) ?? null; }
+    normalize() { for (let index = 0; index < this.children.length - 1; index++) { const child = this.children[index]!, next = this.children[index + 1]!; if (child.nodeType === 3 && next.nodeType === 3) { child.nodeValue += next.nodeValue; this.children.splice(index + 1, 1); next.parentNode = null; index--; } } }
     splitText(offset: number) { const rest = new FakeNode(3, this.nodeValue.slice(offset)); this.nodeValue = this.nodeValue.slice(0, offset); const parent = this.parentNode!; rest.parentNode = parent; parent.children.splice(parent.children.indexOf(this) + 1, 0, rest); return rest; }
   }
   const body = new FakeNode(1); body.className = "excerpt-body";
   body.appendChild(new FakeNode(3, "甲重复乙丙重复丁<script>"));
+  function findId(node: FakeNode, id: string): FakeNode | null {
+    if (node.id === id) return node;
+    for (const child of node.children) { const found = findId(child, id); if (found) return found; }
+    return null;
+  }
+  function walk(node: FakeNode, visit: (node: FakeNode) => void) { visit(node); for (const child of node.children) walk(child, visit); }
+  function nodeText(node: FakeNode): string { return node.nodeType === 3 ? node.nodeValue : node.children.map(nodeText).join(""); }
+  const stubs = new Map<string, { hidden: boolean; disabled: boolean; textContent: string; addEventListener: () => void }>();
+  function stub() { return { hidden: false, disabled: false, textContent: "", addEventListener() {} }; }
+  const chrome = ["highlight-bar", "highlight-save", "highlight-message", "favorite-dialog", "pin", "favorite-error"];
+  const replaced: string[] = [];
   const document = {
-    getElementById: (_id: string) => null,
+    getElementById: (id: string) => findId(body, id) || (chrome.includes(id) ? stubs.get(id) || stubs.set(id, stub()).get(id)! : null),
     querySelector: (selector: string) => selector === '.excerpt-body[data-field="translation"]' ? body : null,
+    querySelectorAll: (selector: string) => {
+      const id = selector.match(/^mark\.hl\[data-hl="([0-9a-z-]+)"\]$/i)?.[1];
+      const found: FakeNode[] = [];
+      if (id) walk(body, node => { if (node.className === "hl" && node.getAttribute("data-hl") === id) found.push(node); });
+      return found;
+    },
     createElement: (_tag: string) => new FakeNode(1),
   };
-  const window = { addEventListener() {} };
-  runInNewContext(script, { document, window, location: { hash: "" } });
-  const mark = body.children.find(node => node.className === "hl");
-  assert.ok(mark);
-  assert.equal(mark.firstChild?.nodeValue, "重复");
-  assert.ok(body.children.some(node => node.id === "hl-aabb"));
+  const fakeFetch = async (_url: string, init?: { body?: string }) => init?.body ? Response.json({ deleted: true }) : Response.json({ authenticated: true, csrf: "token" });
+  const location = { hash: "#hl-aabb", pathname: "/r/test", search: "" };
+  const window = { addEventListener() {}, fetch: fakeFetch, history: { replaceState(_state: null, _title: string, url: string) { replaced.push(url); location.hash = ""; } }, removeHighlight: undefined as undefined | ((id: string) => Promise<void>) };
+  runInNewContext(script, { document, window, fetch: fakeFetch, URLSearchParams, location, setTimeout: (fn: () => void) => { fn(); return 0; }, history: window.history });
+  const marks = () => { const found: FakeNode[] = []; walk(body, node => { if (node.className === "hl") found.push(node); }); return found; };
+  const outer = marks().find(node => node.getAttribute("data-hl") === "aabb");
+  assert.ok(outer);
+  assert.equal(nodeText(outer), "重复");
+  assert.ok(marks().some(node => node.getAttribute("data-hl") === "bbcc"));
+  assert.ok(findId(body, "hl-aabb"));
+  await window.removeHighlight!("aabb");
+  assert.equal(marks().some(node => node.getAttribute("data-hl") === "aabb"), false);
+  assert.ok(marks().some(node => node.getAttribute("data-hl") === "bbcc"), "removing the outer highlight keeps the inner one");
+  assert.equal(nodeText(body), text);
+  assert.equal(findId(body, "hl-aabb"), null);
+  assert.deepEqual(replaced, ["/r/test"]);
+  assert.equal(stubs.get("highlight-message")?.textContent, "");
+  assert.equal(stubs.get("highlight-bar")?.hidden, true);
+  await window.removeHighlight!("bbcc");
+  assert.equal(marks().length, 0);
+  assert.equal(findId(body, "hl-bbcc"), null);
+  assert.equal(nodeText(body), text);
 });
 
 test("distant duplicate deletion leaves the saved highlight orphaned until the body is restored", async t => {
@@ -322,4 +380,45 @@ test("paragraph picker saves the selected repeated text without Selection or nat
   assert.ok(chars.children.length <= 4, "long paragraphs are split into a few chunks");
   elements.get("highlight-picker-close")!.click();
   assert.equal(picker.hidden, true, "the close button dismisses the picker");
+});
+
+test("deleting a highlight reuses PIN and CSRF and cannot cross articles", async t => {
+  const { db, sql } = database();
+  t.after(() => sql.close());
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({ results: [page] })) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const env = { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
+  const opened = await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), env);
+  const cookie = opened.headers.get("set-cookie")!.split(";")[0]!;
+  const { csrf } = await opened.json() as { csrf: string };
+  const saved = await worker.fetch(new Request(url, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, pin: "012345", field: "translation", start: "5", end: "7", quote: "重复" }) }), env);
+  assert.equal(saved.status, 200);
+  const session = saved.headers.get("set-cookie")!.split(";")[0]!;
+  const { highlight } = await saved.json() as { highlight: { id: string } };
+  const otherId = "22222222-2222-4222-8222-222222222222";
+  sql.prepare('INSERT INTO highlights (id, excerpt_number, excerpt_page_id, field, start, "end", quote, prefix, suffix, body_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(otherId, 43, pageId, "translation", 0, 1, "甲", "", "", "hash", "2026-01-01");
+  function remove(id: string, changes: Record<string, string> = {}, requestOrigin = origin, cookieHeader = session) {
+    return worker.fetch(new Request(url, { method: "POST", headers: { Origin: requestOrigin, Cookie: [cookie, cookieHeader].filter(Boolean).join("; "), Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, action: "delete", id, ...changes }) }), env);
+  }
+  assert.equal((await remove(highlight.id, {}, "https://evil.example", "")).status, 403);
+  assert.equal((await remove(highlight.id, { csrf: "0".repeat(64) }, origin, "")).status, 403);
+  assert.equal((await remove(highlight.id, {}, origin, "")).status, 401);
+  assert.equal((await remove(highlight.id, { pin: "999999" }, origin, "")).status, 401);
+  assert.equal((await remove("not-a-uuid")).status, 400);
+  const foreign = await remove(otherId);
+  assert.equal(foreign.status, 200);
+  assert.equal((await foreign.json() as { deleted: boolean }).deleted, false);
+  assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights WHERE id=?").get(otherId) as { n: number }).n, 1);
+  const removed = await remove(highlight.id, { pin: "012345" }, origin, "");
+  assert.equal(removed.status, 200);
+  assert.match(removed.headers.get("set-cookie") || "", /__Host-read-session=/);
+  assert.equal((await removed.json() as { deleted: boolean }).deleted, true);
+  assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights WHERE id=?").get(highlight.id) as { n: number }).n, 0);
+  const again = await remove(highlight.id);
+  assert.equal(again.status, 200);
+  assert.equal((await again.json() as { deleted: boolean }).deleted, false);
+  const detail = await (await worker.fetch(new Request(`${origin}/r/${code}`), env)).text();
+  assert.doesNotMatch(detail, new RegExp(highlight.id));
+  assert.match(detail, /id="body-unhighlight">取消划线/);
 });
