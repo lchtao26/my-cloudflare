@@ -513,7 +513,6 @@ const EINK_STYLE = [
   "a:hover{text-decoration:underline;text-underline-offset:0.35em;}",
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".item-link{display:block;font-weight:700;}",
-  ".icon-credit{margin:1.5rem 0 0;font-size:0.75rem;text-align:center;}.icon-credit a{text-decoration:underline;}",
   ".categories{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0.2rem;margin:0 0 1rem;}",
   ".visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}",
   ".categories a{min-width:0;display:flex;align-items:center;justify-content:center;min-height:2.2rem;padding:0.2rem 0.1rem;border:1px solid #000;font-size:0.85em;font-weight:700;text-align:center;}",
@@ -592,7 +591,7 @@ function einkDocument(
     `<title>${panguedTitle ? einkText(title) : displayText(title)}</title>`,
     `<style>${EINK_STYLE}</style>`,
     "</head>",
-    `<body${bodyAttrs}>\n<main>\n${body}\n<footer class="icon-credit">图标由 <a href="https://www.thiings.co/">Thiings</a> 提供</footer>\n</main>${afterMain ? `\n${afterMain}` : ""}\n</body>`,
+    `<body${bodyAttrs}>\n<main>\n${body}\n</main>${afterMain ? `\n${afterMain}` : ""}\n</body>`,
     "</html>",
   ].join("\n");
 }
