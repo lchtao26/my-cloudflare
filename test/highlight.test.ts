@@ -384,6 +384,8 @@ test("paragraph actions send the entire paragraph and keep PIN and service error
   body.setAttribute("data-field", "translation"); body.appendChild(before); before.appendChild(textNode("甲 重复\n")); body.appendChild(paragraph); paragraph.appendChild(textNode("乙。重复😀。丁"));
   const elements = new Map<string, Element>();
   for (const id of ["favorite-dialog", "favorite-form", "pin", "favorite-error", "highlight-error", "highlight-error-message", "highlight-error-retry", "highlight-error-close", "highlight-picker", "highlight-picker-close", "highlight-picker-edit", "highlight-characters", "highlight-picker-save", "highlight-picker-message", "highlight-preview", "body-highlight", "body-explain", "explanation-dialog", "explanation-text", "original-match-dialog", "original-match-text", "original-match-current"]) elements.set(id, new Element());
+  elements.get("explanation-dialog")!.hidden = true;
+  elements.get("original-match-dialog")!.hidden = true;
   elements.get("highlight-picker-save")!.textContent = "确认";
   const documentHandlers = new Map<string, (event: any) => void>();
   const pickerHome = new Element(); pickerHome.appendChild(elements.get("highlight-picker")!); elements.get("highlight-picker")!.hidden = true;
@@ -396,13 +398,15 @@ test("paragraph actions send the entire paragraph and keep PIN and service error
   let explanationFailure = 0;
   let pendingReply: Promise<Response> | null = null;
   let pinFailure = false;
-  const explanationStarts: Array<{ pinOpen: boolean; pinMessage: string; explanationMessage: string }> = [];
+  const explanationStarts: Array<{ pinOpen: boolean; pinMessage: string; explanationHidden: boolean }> = [];
   const fakeFetch = async (_url: string, init?: { body?: string }) => {
-    if (init?.body) { const action = new URLSearchParams(init.body).get("action"); if (action === "verify") return pinFailure ? Response.json({ error: "密码不正确。" }, { status: 401 }) : Response.json({ verified: true }); requests.push(init.body); if (action === "explain") explanationStarts.push({ pinOpen: elements.get("favorite-dialog")!.open, pinMessage: elements.get("favorite-error")!.textContent, explanationMessage: elements.get("explanation-text")!.textContent }); if (pendingReply && (action === "explain" || action === "original")) return pendingReply; return action === "explain" ? explanationFailure ? Response.json({ error: "解释服务暂不可用。" }, { status: explanationFailure }) : Response.json({ explanation: "解释结果", markdown: [{ type: "element", tag: "p", children: [{ type: "element", tag: "strong", children: [{ type: "text", text: "解释结果" }] }] }] }) : Response.json({ error: "正文已更新" }, { status: 409 }); }
+    if (init?.body) { const action = new URLSearchParams(init.body).get("action"); if (action === "verify") return pinFailure ? Response.json({ error: "密码不正确。" }, { status: 401 }) : Response.json({ verified: true }); requests.push(init.body); if (action === "explain") explanationStarts.push({ pinOpen: elements.get("favorite-dialog")!.open, pinMessage: elements.get("favorite-error")!.textContent, explanationHidden: elements.get("explanation-dialog")!.hidden }); if (pendingReply && (action === "explain" || action === "original")) return pendingReply; return action === "explain" ? explanationFailure ? Response.json({ error: "解释服务暂不可用。" }, { status: explanationFailure }) : Response.json({ explanation: "解释结果", markdown: [{ type: "element", tag: "p", children: [{ type: "element", tag: "strong", children: [{ type: "text", text: "解释结果" }] }] }] }) : Response.json({ error: "正文已更新" }, { status: 409 }); }
     return Response.json({ authenticated: false, csrf: "token" });
   };
   let pinError = "";
-  const window = { fetch: fakeFetch, promptForReadPin: (resume: (value: string) => Promise<unknown>) => { elements.get("favorite-dialog")!.open = true; void resume("012345").catch(error => { pinError = error.message; }); }, addEventListener() {}, performParagraphAction: undefined as undefined | ((p: Element, b: Element, mode?: string) => void) };
+  let cancelPin: (() => void) | undefined;
+  let autoPin = true;
+  const window = { fetch: fakeFetch, promptForReadPin: (resume: (value: string) => Promise<unknown>, cancel: () => void) => { elements.get("favorite-dialog")!.open = true; cancelPin = cancel; if (autoPin) void resume("012345").catch(error => { pinError = error.message; }); }, addEventListener() {}, performParagraphAction: undefined as undefined | ((p: Element, b: Element, mode?: string, ready?: (close?: boolean) => void) => void) };
   runInNewContext(script, { document, window, fetch: fakeFetch, URLSearchParams, location: { hash: "" }, setTimeout });
   assert.equal(elements.get("body-highlight")!.hidden, false);
   window.performParagraphAction!(paragraph, body, "explain");
@@ -410,7 +414,7 @@ test("paragraph actions send the entire paragraph and keep PIN and service error
   const explainRequest = new URLSearchParams(requests.shift());
   assert.equal(explainRequest.get("action"), "explain");
   assert.equal(explainRequest.has("pin"), false);
-  assert.deepEqual(explanationStarts[0], { pinOpen: false, pinMessage: "", explanationMessage: "正在解释…" });
+  assert.deepEqual(explanationStarts[0], { pinOpen: false, pinMessage: "", explanationHidden: true });
   assert.deepEqual(JSON.parse(explainRequest.get("ranges")!), [{ start: 3, end: 11, quote: "乙。重复😀。丁" }]);
   assert.equal(elements.get("explanation-text")!.children[0]!.children[0]!.tagName, "STRONG");
   elements.get("explanation-dialog")!.close();
@@ -425,19 +429,36 @@ test("paragraph actions send the entire paragraph and keep PIN and service error
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(elements.get("favorite-dialog")!.open, true);
   assert.equal(pinError, "密码不正确。");
-  elements.get("favorite-dialog")!.close(); pinFailure = false; requests.length = 0;
-  for (const [mode, id, reply] of [["explain", "explanation-dialog", { explanation: "迟到的解释" }], ["original", "original-match-dialog", { paragraph: "迟到的原文" }]] as const) {
-    let resolveReply!: (value: Response) => void;
-    pendingReply = new Promise<Response>(resolve => { resolveReply = resolve; });
-    window.performParagraphAction!(paragraph, body, mode);
-    await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(elements.get(id)!.hidden, false);
-    elements.get(id)!.close();
-    resolveReply(Response.json(reply));
-    await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(elements.get(id)!.hidden, true, "a late response does not reopen a dismissed dialog");
-    pendingReply = null;
-  }
+  elements.get("favorite-dialog")!.close(); cancelPin!(); pinFailure = false; requests.length = 0;
+  autoPin = false;
+  let cancelled: boolean | undefined = true;
+  window.performParagraphAction!(paragraph, body, "explain", close => { cancelled = close; });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  elements.get("favorite-dialog")!.close(); cancelPin!();
+  assert.equal(cancelled, false, "cancelling PIN verification releases the button");
+  autoPin = true;
+  let resolveReply!: (value: Response) => void;
+  pendingReply = new Promise<Response>(resolve => { resolveReply = resolve; });
+  let completed = false;
+  window.performParagraphAction!(paragraph, body, "explain", () => { completed = true; });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(elements.get("explanation-dialog")!.hidden, true);
+  assert.equal(completed, false, "the button stays disabled until the explanation arrives");
+  resolveReply(Response.json({ explanation: "迟到的解释" }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(completed, true);
+  assert.equal(elements.get("explanation-dialog")!.hidden, false);
+  assert.equal(elements.get("explanation-text")!.textContent, "迟到的解释");
+  elements.get("explanation-dialog")!.close();
+  pendingReply = new Promise<Response>(resolve => { resolveReply = resolve; });
+  window.performParagraphAction!(paragraph, body, "original");
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(elements.get("original-match-dialog")!.hidden, false);
+  elements.get("original-match-dialog")!.close();
+  resolveReply(Response.json({ paragraph: "迟到的原文" }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(elements.get("original-match-dialog")!.hidden, true, "a late response does not reopen a dismissed dialog");
+  pendingReply = null;
   requests.length = 0;
   window.performParagraphAction!(paragraph, body, "highlight");
   await new Promise(resolve => setTimeout(resolve, 0));
