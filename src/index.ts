@@ -1016,7 +1016,7 @@ function highlightChrome(code: string, highlights: ResolvedHighlight[]): string 
   const json = JSON.stringify(highlights).replaceAll("<", "\\u003c");
   return `<dialog id="highlight-error" aria-label="划线失败" closedby="any" hidden><p id="highlight-error-message" role="alert"></p><div><button type="button" id="highlight-error-close">取消</button><button type="button" id="highlight-error-retry">划线</button></div></dialog>
 <dialog id="explanation-dialog" aria-label="解释" hidden><div id="explanation-text" role="status"></div><button type="button" id="explanation-close">关闭</button></dialog>
-<dialog id="original-match-dialog" aria-label="原文匹配结果" hidden><div id="original-match-content"><section><h2>原文</h2><p id="original-match-text" role="status"></p></section><section><h2>正文</h2><p id="original-match-current"></p></section></div><button type="button" id="original-match-close">关闭</button></dialog>
+<dialog id="original-match-dialog" aria-label="原文匹配结果" hidden><div id="original-match-content"><section><h2>正文</h2><p id="original-match-current"></p></section><section><h2>原文</h2><p id="original-match-text" role="status"></p></section></div><button type="button" id="original-match-close">关闭</button></dialog>
 <script>(function(){
 var rows=${json}, dialog=document.getElementById('favorite-dialog');
 function canon(s){return s.replace(/\\s/g,'')}

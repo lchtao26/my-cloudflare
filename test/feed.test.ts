@@ -1885,6 +1885,7 @@ test("two paragraph taps open actions and request the matching original paragrap
   const html = renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, true, [], true);
   assert.match(html, /id="body-toggle"[^>]*>显示原文/);
   assert.match(html, /id="body-view-toggle"[^>]*>显示原文<\/button>\s*<a class="other-link" id="favorite-link"/);
+  assert.match(html, /id="original-match-content"><section><h2>正文<\/h2><p id="original-match-current"><\/p><\/section><section><h2>原文<\/h2><p id="original-match-text"/);
   assert.doesNotMatch(html, /<p>正文操作<\/p>|id="body-actions-cancel"/);
   const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
   type Handler = (event?: any) => void;
