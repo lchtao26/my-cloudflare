@@ -1058,7 +1058,7 @@ test("e-ink list displays every category without interaction", () => {
   assert.match(navigation, /href="\/read\?tab=later"/);
   assert.match(navigation, /href="\/read\?tab=highlights"/);
   assert.deepEqual(Array.from(navigation.matchAll(/<a [^>]*>([^<]+)<\/a>/g), (match) => match[1]),
-    ["全部", "收藏", "划线", "稍后阅读", "IT", "周刊", "文春", "小说"]);
+    ["全部", "周刊", "文春", "小说", "IT", "收藏", "划线", "稍后阅读"]);
 });
 
 test("back-to-top appears only when the remaining list content needs scrolling", () => {
@@ -1158,6 +1158,29 @@ test("e-ink list updates its return anchor only for normal article navigation", 
   assert.doesNotThrow(() => runInNewContext(script, { window: {} }));
 });
 
+test("load more shows a disabled loading state after activation", () => {
+  const html = renderEinkList([], "/read", "all", 1, true);
+  const script = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), (match) => match[1])[1];
+  assert.ok(script);
+  let activate: (event: { preventDefault(): void }) => void = () => {};
+  let disabled = "";
+  const more = {
+    textContent: "加载更多",
+    addEventListener(_name: string, handler: typeof activate) { activate = handler; },
+    getAttribute() { return disabled; },
+    setAttribute(_name: string, value: string) { disabled = value; },
+  };
+  runInNewContext(script, { document: { querySelector: () => ({}), getElementById: () => more, addEventListener() {} }, window: {} });
+  let prevented = false;
+  const event = { preventDefault() { prevented = true; } };
+  activate(event);
+  assert.equal(more.textContent, "正在加载");
+  assert.equal(disabled, "true");
+  assert.equal(prevented, false);
+  activate(event);
+  assert.equal(prevented, true);
+});
+
 test("e-ink list pages only when the blank margins are tapped", () => {
   const html = renderEinkList([], "/read");
   const scripts = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), (match) => match[1]);
@@ -1174,6 +1197,7 @@ test("e-ink list pages only when the blank margins are tapped", () => {
   const document = {
     body, documentElement: root,
     querySelector: () => main,
+    getElementById: () => null,
     addEventListener: (name: string, handler: (event: object) => void) => handlers.set(name, handler),
   };
   runInNewContext(script, {
