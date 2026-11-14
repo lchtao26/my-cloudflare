@@ -1044,7 +1044,7 @@ test("e-ink list displays every category without interaction", () => {
     ["/read", "全部"],
     ["/read?tab=weekly", "周刊"],
     ["/read?tab=bunshun", "文春"],
-    ["/read?tab=novel", "小说"],
+    ["/read?tab=novel", "连载"],
     ["/read?tab=news", "IT"],
     ["/read?tab=likes", "收藏"],
     ["/read?tab=later", "稍后阅读"],
@@ -1058,7 +1058,7 @@ test("e-ink list displays every category without interaction", () => {
   assert.match(navigation, /href="\/read\?tab=later"/);
   assert.match(navigation, /href="\/read\?tab=highlights"/);
   assert.deepEqual(Array.from(navigation.matchAll(/<a [^>]*>([^<]+)<\/a>/g), (match) => match[1]),
-    ["全部", "周刊", "文春", "小说", "IT", "收藏", "划线", "稍后阅读"]);
+    ["全部", "周刊", "文春", "连载", "IT", "收藏", "划线", "稍后阅读"]);
 });
 
 test("back-to-top appears only when the remaining list content needs scrolling", () => {
