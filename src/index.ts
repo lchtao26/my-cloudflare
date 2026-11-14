@@ -457,10 +457,6 @@ function einkOriginalTitle(excerpt: Excerpt): string {
 function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: boolean, category: ReadCategory, page: number, highlightsEnabled: boolean): string {
   const query = categorySearch(category, page);
   const favoriteUrl = `/read/favorite/${excerpt.code}${query}${query ? "&" : "?"}favorite=${excerpt.favorite ? "0" : "1"}`;
-  const source = [
-    excerpt.sourceTitle ? `<cite>${einkText(excerpt.sourceTitle)}</cite>` : "",
-    excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
-  ].filter(Boolean).join(" · ");
   const details = [
     einkOriginalTitle(excerpt),
     excerpt.publisher ? einkText(`来源：${excerpt.publisher}`) : "",
@@ -470,10 +466,10 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: 
   const body = excerpt.body ? einkParagraphs(excerpt.body, excerpt.id, imageBaseUrl) : "";
   const originalBody = showActions && !excerpt.chinese && excerpt.body && excerpt.originalBody
     ? einkParagraphs(excerpt.originalBody, excerpt.id, imageBaseUrl) : "";
+  const subtitle = `${originalBody ? `<span id="body-view-toggle-prefix" hidden><button type="button" class="other-link" id="body-view-toggle" aria-controls="original-body" aria-expanded="false" hidden>显示原文</button>${excerpt.author ? " · " : ""}</span>` : ""}${excerpt.author ? einkText(excerpt.author) : ""}`;
   const terms = showActions && excerpt.terms ? einkParagraphs(excerpt.terms, excerpt.id, imageBaseUrl) : "";
   return [
-    ...(source ? [`<p>${source}</p>`] : []),
-    ...(originalBody ? ['<p><button type="button" class="other-link" id="body-view-toggle" aria-controls="original-body" aria-expanded="false" hidden>显示原文</button></p>'] : []),
+    ...(subtitle ? [`<p>${subtitle}</p>`] : []),
     ...(body ? [`<div class="excerpt-body"${originalBody ? ' id="translated-body"' : ""}${highlightsEnabled ? ` data-field="${excerpt.chinese ? "original" : "translation"}"` : ""} lang="${htmlText(excerpt.lang)}">\n${body}\n</div>`] : []),
     ...(originalBody ? [`<div class="excerpt-body" id="original-body"${highlightsEnabled ? ' data-field="original"' : ""} lang="${htmlText(excerpt.originalLang)}" hidden>\n${originalBody}\n</div>`] : []),
     ...(showActions && (originalBody || highlightsEnabled) ? [`<dialog id="body-actions" aria-label="正文操作" closedby="any" hidden><div id="body-preview-scroll"><p id="body-preview"></p></div><div id="body-actions-buttons"><button type="button" id="body-toggle"${originalBody && highlightsEnabled ? "" : " hidden"}>显示原文</button>${highlightsEnabled ? ' <button type="button" id="body-explain" aria-live="polite" hidden>解释</button>' : ""} <button type="button" id="body-highlight" hidden>划线</button>${highlightsEnabled ? ' <button type="button" id="body-unhighlight">取消划线</button>' : ""}</div></dialog>`] : []),
@@ -809,9 +805,9 @@ const EINK_DETAIL_CHROME = [
   "var shareCopy=document.getElementById('share-copy');",
   "var translatedBody=document.getElementById('translated-body');",
   "var originalBody=document.getElementById('original-body');",
-  "var bodyViewToggle=document.getElementById('body-view-toggle');",
+  "var bodyViewToggle=document.getElementById('body-view-toggle'),bodyViewTogglePrefix=document.getElementById('body-view-toggle-prefix');",
   "function syncBodyViewToggle(){if(!bodyViewToggle||!originalBody)return;bodyViewToggle.hidden=false;bodyViewToggle.textContent=originalBody.hidden?'显示原文':'显示译文';bodyViewToggle.setAttribute('aria-expanded',originalBody.hidden?'false':'true');}",
-  "if(bodyViewToggle&&translatedBody&&originalBody){bodyViewToggle.addEventListener('click',function(){var showOriginal=originalBody.hidden;originalBody.hidden=!showOriginal;translatedBody.hidden=showOriginal;syncBodyViewToggle();progress();saveSoon();});window.syncBodyViewToggle=syncBodyViewToggle;syncBodyViewToggle();}",
+  "if(bodyViewToggle&&translatedBody&&originalBody){bodyViewToggle.addEventListener('click',function(){var showOriginal=originalBody.hidden;originalBody.hidden=!showOriginal;translatedBody.hidden=showOriginal;syncBodyViewToggle();progress();saveSoon();});window.syncBodyViewToggle=syncBodyViewToggle;syncBodyViewToggle();if(bodyViewTogglePrefix)bodyViewTogglePrefix.hidden=false;}",
   "var actionPreview=document.getElementById('body-preview'),actions=document.getElementById('body-actions'),toggle=document.getElementById('body-toggle'),highlightAction=document.getElementById('body-highlight'),explainAction=document.getElementById('body-explain'),unhighlightAction=document.getElementById('body-unhighlight');",
   "if(actions&&document.querySelectorAll){",
   "var tapCount=0,lastTap=0,lastParagraph=null,touchTap=null,mouseTap=null,ignoreBodyClickUntil=0,actionParagraph=null,actionBody=null,actionHighlight=null,actionFocus=null,openingEvent=null,ignoreActionUntil=0,oldPaddingBottom=null,dismissTouch=false,suppressClickUntil=0;",

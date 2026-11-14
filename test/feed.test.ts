@@ -409,7 +409,8 @@ test("excerpt titles fall back to the original and missing source fields are omi
   assert.equal(item?.title, "节");
   assert.equal(item?.description, undefined);
   const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
-  assert.match(detail, /<p><cite>书<\/cite><\/p>\n<div class="excerpt-body" lang="zh-CN">\n<p>正文<\/p>/);
+  assert.match(detail, /<div class="excerpt-body" lang="zh-CN">\n<p>正文<\/p>/);
+  assert.doesNotMatch(detail, /<cite>书<\/cite>/);
   assert.doesNotMatch(detail, /作者：|(?:<p>|<br \/>\n)来源：|章节：|内容类型：|名词解释|原文：|javascript:/);
 });
 
@@ -1312,7 +1313,7 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
   assert.doesNotMatch(html, /eink-weight/);
   assert.match(html, /<title>详情标题<\/title>/);
   assert.equal(html.match(/<nav class="nav-row">/g)?.length, 1);
-  assert.match(html, /<p><cite>某书<\/cite> · 作者：张三<\/p>/);
+  assert.match(html, /<p>张三<\/p>/);
   assert.match(html, /第一段/);
   assert.match(html, /第二段/);
   assert.match(html, /原文：<a [^>]*lang="zh-CN" href="https:\/\/example\.com\/original">Original &amp; title<\/a>/);
@@ -1402,7 +1403,8 @@ test("e-ink render helpers escape content and omit empty metadata", () => {
     code,
   }, "/read", "https://example.com/read/p", { prevCode: null, nextCode: null });
   assert.match(detail, /一段 &lt;文字&gt;/);
-  assert.match(detail, /<cite>It&#39;s<\/cite>/);
+  assert.match(detail, /<p>作者<\/p>/);
+  assert.doesNotMatch(detail, /<cite>It&#39;s<\/cite>/);
   assert.match(detail, new RegExp(`href="/read#${code}"[^>]*>返回列表`));
   assert.match(detail, /class="is-disabled">上一篇</);
   assert.match(detail, /class="is-disabled">下一篇</);
@@ -1869,7 +1871,7 @@ test("e-ink detail pangues all visible text without changing image proxy URLs", 
   }, "/read", "https://example.com/read/p");
   assert.match(html, /<title>AI 时代的 RSS<\/title>/);
   assert.match(html, /<h1 lang="zh-CN">AI 时代的 RSS<\/h1>/);
-  assert.match(html, /作者：张三 AI/);
+  assert.match(html, /<p>张三 AI<\/p>/);
   assert.match(html, /使用 API 处理 2026 年数据/);
   assert.match(html, /<p>「使用 API 处理 2026 年数据。<\/p>/);
   assert.match(html, /<p>结束。」<\/p>/);
@@ -1892,9 +1894,11 @@ test("two paragraph taps open actions and request the matching original paragrap
   const page = { id: "page", url: "https://notion.so/page", properties };
   const excerpt = excerptFromPage(page)!;
   excerpt.sourceTitle = "文章副标题";
+  excerpt.author = "张三";
   const html = renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, true, [], true);
   assert.match(html, /id="body-toggle"[^>]*>显示原文/);
-  assert.match(html, /<p><cite>文章副标题<\/cite><\/p>\s*<p><button[^>]*id="body-view-toggle"[^>]*>显示原文<\/button><\/p>\s*<div class="excerpt-body" id="translated-body"/);
+  assert.match(html, /<p><span id="body-view-toggle-prefix" hidden><button[^>]*id="body-view-toggle"[^>]*>显示原文<\/button> · <\/span>张三<\/p>\s*<div class="excerpt-body" id="translated-body"/);
+  assert.doesNotMatch(html, /文章副标题|作者：张三/);
   assert.match(html, /id="original-match-content"><section><h2>正文<\/h2><p id="original-match-current"><\/p><\/section><section><h2>原文<\/h2><p id="original-match-text"/);
   assert.doesNotMatch(html, /<p>正文操作<\/p>|id="body-actions-cancel"/);
   const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
@@ -1907,7 +1911,8 @@ test("two paragraph taps open actions and request the matching original paragrap
   toggle.textContent = "显示原文";
   const viewAttributes = new Map<string, string>();
   const viewToggle = { ...element(true), setAttribute: (name: string, value: string) => viewAttributes.set(name, value) };
-  const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-view-toggle": viewToggle, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight, "body-preview": preview };
+  const viewTogglePrefix = element(true);
+  const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-view-toggle": viewToggle, "body-view-toggle-prefix": viewTogglePrefix, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight, "body-preview": preview };
   const translatedP = { tagName: "P", textContent: "中文译文", parentNode: translated, contains: (node: unknown) => node === translatedP };
   let now = 1000, scrollY = 0;
   const windowHandlers = new Map<string, Array<() => void>>();
@@ -1919,6 +1924,7 @@ test("two paragraph taps open actions and request the matching original paragrap
     location: { pathname: "/r/000000" }, localStorage: { getItem: () => null, setItem() {} }, Date: { now: () => now }, setTimeout: () => 1,
   });
   assert.equal(viewToggle.hidden, false);
+  assert.equal(viewTogglePrefix.hidden, false);
   assert.equal(viewToggle.textContent, "显示原文");
   viewToggle.handlers.get("click")!();
   assert.equal(original.hidden, false); assert.equal(translated.hidden, true);
