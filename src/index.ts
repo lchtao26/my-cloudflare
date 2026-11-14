@@ -806,7 +806,7 @@ const EINK_DETAIL_CHROME = [
   "var translatedBody=document.getElementById('translated-body');",
   "var originalBody=document.getElementById('original-body');",
   "var bodyViewToggle=document.getElementById('body-view-toggle'),bodyViewTogglePrefix=document.getElementById('body-view-toggle-prefix');",
-  "function syncBodyViewToggle(){if(!bodyViewToggle||!originalBody)return;bodyViewToggle.hidden=false;bodyViewToggle.textContent=originalBody.hidden?'显示原文':'显示译文';bodyViewToggle.setAttribute('aria-expanded',originalBody.hidden?'false':'true');}",
+  "function syncBodyViewToggle(){if(!bodyViewToggle||!originalBody)return;bodyViewToggle.hidden=false;bodyViewToggle.textContent=originalBody.hidden?'显示原文':'显示翻译';bodyViewToggle.setAttribute('aria-expanded',originalBody.hidden?'false':'true');}",
   "if(bodyViewToggle&&translatedBody&&originalBody){bodyViewToggle.addEventListener('click',function(){var showOriginal=originalBody.hidden;originalBody.hidden=!showOriginal;translatedBody.hidden=showOriginal;syncBodyViewToggle();progress();saveSoon();});window.syncBodyViewToggle=syncBodyViewToggle;syncBodyViewToggle();if(bodyViewTogglePrefix)bodyViewTogglePrefix.hidden=false;}",
   "var actionPreview=document.getElementById('body-preview'),actions=document.getElementById('body-actions'),toggle=document.getElementById('body-toggle'),highlightAction=document.getElementById('body-highlight'),explainAction=document.getElementById('body-explain'),unhighlightAction=document.getElementById('body-unhighlight');",
   "if(actions&&document.querySelectorAll){",

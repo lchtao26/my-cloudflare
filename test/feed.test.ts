@@ -1928,7 +1928,7 @@ test("two paragraph taps open actions and request the matching original paragrap
   assert.equal(viewToggle.textContent, "显示原文");
   viewToggle.handlers.get("click")!();
   assert.equal(original.hidden, false); assert.equal(translated.hidden, true);
-  assert.equal(viewToggle.textContent, "显示译文"); assert.equal(viewAttributes.get("aria-expanded"), "true");
+  assert.equal(viewToggle.textContent, "显示翻译"); assert.equal(viewAttributes.get("aria-expanded"), "true");
   viewToggle.handlers.get("click")!();
   assert.equal(original.hidden, true); assert.equal(translated.hidden, false);
   assert.equal(viewToggle.textContent, "显示原文"); assert.equal(viewAttributes.get("aria-expanded"), "false");
