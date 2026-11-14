@@ -1961,7 +1961,7 @@ test("tapping a highlight opens cancel on the bottom right and does not page or 
   type Handler = (event?: any) => void;
   function element(hidden = false) {
     const handlers = new Map<string, Handler>();
-    return { hidden, handlers, textContent: "", focus() {}, addEventListener: (name: string, handler: Handler) => handlers.set(name, handler) };
+    return { hidden, disabled: false, handlers, textContent: "", focus() {}, addEventListener: (name: string, handler: Handler) => handlers.set(name, handler) };
   }
   const translated = element(), original = element(true), toggle = element(), highlight = element(true), explain = element(), unhighlight = element();
   const attributes = new Map<string, string>();
@@ -2009,8 +2009,14 @@ test("tapping a highlight opens cancel on the bottom right and does not page or 
   now += 600;
   tap(mark); now += 600;
   explain.handlers.get("click")!();
+  assert.equal(actions.hidden, false, "the action dialog remains visible while authorization is pending");
+  assert.equal(explain.disabled, true);
+  explain.handlers.get("click")!();
+  assert.equal(explained.length, 1, "repeated activation is ignored");
+  assert.deepEqual(explained[0]!.slice(0, 3), [translatedP, translated, "explain"]);
+  (explained[0]![3] as () => void)();
   assert.equal(actions.hidden, true);
-  assert.deepEqual(explained, [[translatedP, translated, "explain"]]);
+  assert.equal(explain.disabled, false);
   now += 600;
   assert.equal(tap(), false);
   assert.equal(actions.hidden, true, "one paragraph tap after cancel does not open the bar");
