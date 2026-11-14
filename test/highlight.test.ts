@@ -376,14 +376,14 @@ test("paragraph actions send the entire paragraph and keep PIN and service error
     removeAttribute(key: string) { this.attributes.delete(key); }
     addEventListener(name: string, fn: (event: any) => void) { this.handlers.set(name, fn); }
     focus() {}
-    close() { this.open = false; }
+    close() { this.open = false; this.removeAttribute("open"); this.handlers.get("close")?.({ target: this }); }
     click() { this.handlers.get("click")?.({ target: this, preventDefault() {} }); }
   }
   function textNode(value: string) { const n = new Element(); n.nodeType = 3; n.nodeValue = value; return n; }
   const body = new Element(), before = new Element("P"), paragraph = new Element("P");
   body.setAttribute("data-field", "translation"); body.appendChild(before); before.appendChild(textNode("甲 重复\n")); body.appendChild(paragraph); paragraph.appendChild(textNode("乙。重复😀。丁"));
   const elements = new Map<string, Element>();
-  for (const id of ["favorite-dialog", "favorite-form", "pin", "favorite-error", "highlight-error", "highlight-error-message", "highlight-error-retry", "highlight-error-close", "highlight-picker", "highlight-picker-close", "highlight-picker-edit", "highlight-characters", "highlight-picker-save", "highlight-picker-message", "highlight-preview", "body-highlight", "body-explain", "explanation-dialog", "explanation-text", "explanation-close"]) elements.set(id, new Element());
+  for (const id of ["favorite-dialog", "favorite-form", "pin", "favorite-error", "highlight-error", "highlight-error-message", "highlight-error-retry", "highlight-error-close", "highlight-picker", "highlight-picker-close", "highlight-picker-edit", "highlight-characters", "highlight-picker-save", "highlight-picker-message", "highlight-preview", "body-highlight", "body-explain", "explanation-dialog", "explanation-text", "original-match-dialog", "original-match-text", "original-match-current"]) elements.set(id, new Element());
   elements.get("highlight-picker-save")!.textContent = "确认";
   const documentHandlers = new Map<string, (event: any) => void>();
   const pickerHome = new Element(); pickerHome.appendChild(elements.get("highlight-picker")!); elements.get("highlight-picker")!.hidden = true;
@@ -394,10 +394,11 @@ test("paragraph actions send the entire paragraph and keep PIN and service error
   };
   const requests: string[] = [];
   let explanationFailure = 0;
+  let pendingReply: Promise<Response> | null = null;
   let pinFailure = false;
   const explanationStarts: Array<{ pinOpen: boolean; pinMessage: string; explanationMessage: string }> = [];
   const fakeFetch = async (_url: string, init?: { body?: string }) => {
-    if (init?.body) { const action = new URLSearchParams(init.body).get("action"); if (action === "verify") return pinFailure ? Response.json({ error: "密码不正确。" }, { status: 401 }) : Response.json({ verified: true }); requests.push(init.body); if (action === "explain") explanationStarts.push({ pinOpen: elements.get("favorite-dialog")!.open, pinMessage: elements.get("favorite-error")!.textContent, explanationMessage: elements.get("explanation-text")!.textContent }); return action === "explain" ? explanationFailure ? Response.json({ error: "解释服务暂不可用。" }, { status: explanationFailure }) : Response.json({ explanation: "解释结果", markdown: [{ type: "element", tag: "p", children: [{ type: "element", tag: "strong", children: [{ type: "text", text: "解释结果" }] }] }] }) : Response.json({ error: "正文已更新" }, { status: 409 }); }
+    if (init?.body) { const action = new URLSearchParams(init.body).get("action"); if (action === "verify") return pinFailure ? Response.json({ error: "密码不正确。" }, { status: 401 }) : Response.json({ verified: true }); requests.push(init.body); if (action === "explain") explanationStarts.push({ pinOpen: elements.get("favorite-dialog")!.open, pinMessage: elements.get("favorite-error")!.textContent, explanationMessage: elements.get("explanation-text")!.textContent }); if (pendingReply && (action === "explain" || action === "original")) return pendingReply; return action === "explain" ? explanationFailure ? Response.json({ error: "解释服务暂不可用。" }, { status: explanationFailure }) : Response.json({ explanation: "解释结果", markdown: [{ type: "element", tag: "p", children: [{ type: "element", tag: "strong", children: [{ type: "text", text: "解释结果" }] }] }] }) : Response.json({ error: "正文已更新" }, { status: 409 }); }
     return Response.json({ authenticated: false, csrf: "token" });
   };
   let pinError = "";
@@ -412,19 +413,32 @@ test("paragraph actions send the entire paragraph and keep PIN and service error
   assert.deepEqual(explanationStarts[0], { pinOpen: false, pinMessage: "", explanationMessage: "正在解释…" });
   assert.deepEqual(JSON.parse(explainRequest.get("ranges")!), [{ start: 3, end: 11, quote: "乙。重复😀。丁" }]);
   assert.equal(elements.get("explanation-text")!.children[0]!.children[0]!.tagName, "STRONG");
-  elements.get("explanation-close")!.click();
+  elements.get("explanation-dialog")!.close();
   explanationFailure = 502;
   window.performParagraphAction!(paragraph, body, "explain");
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(elements.get("favorite-dialog")!.open, false);
   assert.equal(elements.get("explanation-text")!.textContent, "解释服务暂不可用。");
-  elements.get("explanation-close")!.click();
+  elements.get("explanation-dialog")!.close();
   explanationFailure = 0; pinFailure = true;
   window.performParagraphAction!(paragraph, body, "explain");
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(elements.get("favorite-dialog")!.open, true);
   assert.equal(pinError, "密码不正确。");
   elements.get("favorite-dialog")!.close(); pinFailure = false; requests.length = 0;
+  for (const [mode, id, reply] of [["explain", "explanation-dialog", { explanation: "迟到的解释" }], ["original", "original-match-dialog", { paragraph: "迟到的原文" }]] as const) {
+    let resolveReply!: (value: Response) => void;
+    pendingReply = new Promise<Response>(resolve => { resolveReply = resolve; });
+    window.performParagraphAction!(paragraph, body, mode);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(elements.get(id)!.hidden, false);
+    elements.get(id)!.close();
+    resolveReply(Response.json(reply));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(elements.get(id)!.hidden, true, "a late response does not reopen a dismissed dialog");
+    pendingReply = null;
+  }
+  requests.length = 0;
   window.performParagraphAction!(paragraph, body, "highlight");
   await new Promise(resolve => setTimeout(resolve, 0));
   const sent = new URLSearchParams(requests[0]);
@@ -457,41 +471,55 @@ test("jumping to an original highlight synchronizes the whole-body toggle", () =
   assert.equal(syncCalls, 1);
 });
 
-test("tapping either side of the explanation backdrop pages its content without reacting to swipes", async t => {
+test("result dialogs dismiss on the backdrop without dismissing content or swipes", async t => {
   const { db, sql } = database();
   t.after(() => sql.close());
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => Response.json({ results: [page] })) as typeof fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
   const html = await (await worker.fetch(new Request(`${origin}/r/${code}`), { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source" })).text();
+  assert.match(html, /id="explanation-dialog"[^>]*closedby="any"/);
+  assert.match(html, /id="original-match-dialog"[^>]*closedby="any"/);
+  assert.doesNotMatch(html, /id="(?:explanation|original-match)-close"/);
   const script = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), m => m[1]!).find(s => s.includes("var rows="))!;
   const handlers = new Map<string, Array<(event: any) => void>>();
-  const explanation = { hidden: false, open: true, getBoundingClientRect: () => ({ left: 300, right: 700 }), contains: (target: unknown) => target === content, addEventListener() {} };
-  const content = { scrollTop: 200, clientHeight: 100 };
-  const favorite = { open: false };
-  const body = {};
-  const nodes: Record<string, unknown> = { "explanation-dialog": explanation, "explanation-text": content, "favorite-dialog": favorite };
+  const content = {};
+  function panel() { return { hidden: true, open: false, getBoundingClientRect: () => ({ left: 300, right: 700, top: 100, bottom: 500 }), contains: (target: unknown) => target === content, addEventListener() {}, close() { this.open = false; } }; }
+  const explanation = panel(), original = panel();
+  const nodes: Record<string, unknown> = { "explanation-dialog": explanation, "explanation-text": content, "original-match-dialog": original, "favorite-dialog": { open: false } };
   const document = { getElementById: (id: string) => nodes[id] || null, querySelector: () => null, addEventListener: (name: string, fn: (event: any) => void) => handlers.set(name, [...handlers.get(name) || [], fn]) };
   let now = 1000, selected = false;
   const window = { fetch: async () => Response.json({}), addEventListener() {}, getSelection: () => ({ rangeCount: selected ? 1 : 0, isCollapsed: !selected }) };
   runInNewContext(script, { document, window, fetch: window.fetch, URLSearchParams, location: { hash: "" }, Date: { now: () => now }, setTimeout });
-  const fire = (name: string, event: any) => { for (const handler of handlers.get(name) || []) handler(event); };
-  const click = (x: number, target: unknown = explanation) => { fire("pointerdown", {}); fire("click", { target, clientX: x, button: 0, cancelable: true, preventDefault() {}, stopPropagation() {} }); };
-  click(100); assert.equal(content.scrollTop, 100, "the left backdrop pages up");
-  click(900); assert.equal(content.scrollTop, 200, "the right backdrop pages down");
-  click(500); click(900, content); assert.equal(content.scrollTop, 200, "the dialog and its contents do not trigger backdrop paging");
-  const point = { clientX: 900, clientY: 200 };
-  fire("touchstart", { target: explanation, touches: [point] });
-  let prevented = false;
-  fire("touchend", { target: explanation, touches: [], changedTouches: [point], cancelable: true, preventDefault() { prevented = true; }, stopPropagation() {} });
-  click(900); assert.equal(content.scrollTop, 300, "a touch and its synthetic click page only once"); assert.equal(prevented, true);
-  now += 1000;
-  fire("touchstart", { target: body, touches: [point] });
-  fire("touchmove", { touches: [{ clientX: 900, clientY: 240 }] });
-  fire("touchend", { target: body, touches: [], changedTouches: [{ clientX: 900, clientY: 240 }] });
-  click(900); assert.equal(content.scrollTop, 300, "swipes and their synthetic clicks do not page");
-  now += 1000; selected = true; click(900); assert.equal(content.scrollTop, 300, "existing selections are not turned into page taps");
-  selected = false; explanation.hidden = true; click(900); assert.equal(content.scrollTop, 300, "the behavior only applies while the explanation is open");
+  const fire = (name: string, event: any) => { for (const handler of handlers.get(name) || []) { handler(event); if (event.stopped) break; } };
+  const event = (target: unknown, x: number, y: number) => ({ target, clientX: x, clientY: y, button: 0, cancelable: true, stopped: false, preventDefault() {}, stopImmediatePropagation() { this.stopped = true; }, stopPropagation() { this.stopped = true; } });
+  const click = (target: unknown, x: number, y: number) => { fire("pointerdown", event(target, x, y)); fire("click", event(target, x, y)); };
+  for (const dialog of [explanation, original]) {
+    for (const [x, y] of [[100, 200], [900, 200], [500, 50], [500, 550]]) {
+      dialog.hidden = false; dialog.open = true;
+      click(dialog, x!, y!);
+      assert.equal(dialog.hidden, true, "each side of the backdrop closes the dialog");
+    }
+    dialog.hidden = false; dialog.open = true;
+    click(dialog, 500, 200); click(content, 500, 200);
+    assert.equal(dialog.hidden, false, "dialog content and padding do not dismiss");
+    fire("pointerdown", event(content, 500, 200)); fire("click", event(dialog, 900, 200));
+    assert.equal(dialog.hidden, false, "a drag from the content to the backdrop does not dismiss");
+    selected = true; click(dialog, 900, 200); selected = false;
+    assert.equal(dialog.hidden, false, "a text selection does not dismiss");
+    const point = { clientX: 900, clientY: 200 };
+    fire("touchstart", { target: dialog, touches: [point] });
+    fire("touchmove", { touches: [{ clientX: 900, clientY: 240 }] });
+    fire("touchend", { target: dialog, touches: [], changedTouches: [{ clientX: 900, clientY: 240 }], cancelable: true, preventDefault() {}, stopPropagation() {} });
+    assert.equal(dialog.hidden, false, "a swipe on the backdrop does not dismiss");
+    now += 1000;
+    fire("touchstart", { target: dialog, touches: [point] });
+    let prevented = false;
+    fire("touchend", { target: dialog, touches: [], changedTouches: [point], cancelable: true, preventDefault() { prevented = true; }, stopPropagation() {} });
+    assert.equal(dialog.hidden, true, "a tap on the backdrop dismisses");
+    assert.equal(prevented, true);
+    now += 1000;
+  }
 });
 
 test("deleting a highlight reuses PIN and CSRF and cannot cross articles", async t => {

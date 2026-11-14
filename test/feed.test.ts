@@ -1663,13 +1663,14 @@ test("e-ink detail pages only when the blank margins are tapped", async () => {
       getAttribute: (name: string) => name === "data-path" ? html.match(/data-path="([^"]*)"/)?.[1] ?? null : null,
     };
     const shareStatus = { textContent: "" };
+    const resultDialog = { hidden: true };
     const target = (tagName: string) => tagName === "BODY" ? body : tagName === "HTML" ? root : { tagName, parentNode: body };
     let selected = false;
     let now = 1000;
     const document = {
       body, documentElement: root,
       querySelector: () => main,
-      getElementById: (id: string) => id === "share-copy" ? shareButton : id === "share-status" ? shareStatus : null,
+      getElementById: (id: string) => id === "share-copy" ? shareButton : id === "share-status" ? shareStatus : id === "explanation-dialog" ? resultDialog : null,
       addEventListener(name: string, handler: (event: object) => void) { handlers.set(name, handler); },
     };
     const window = {
@@ -1698,6 +1699,7 @@ test("e-ink detail pages only when the blank margins are tapped", async () => {
       storageCalls,
       copyShareLink() { shareHandlers.get("click")?.(); },
       selectText(value: boolean) { selected = value; },
+      showResultDialog(value: boolean) { resultDialog.hidden = !value; },
       advance(milliseconds: number) { now += milliseconds; },
       startPointer() { dispatch("pointerdown", {}); },
       startTouch(x = 750, y = 200, tagName = "BODY") {
@@ -1729,6 +1731,13 @@ test("e-ink detail pages only when the blank margins are tapped", async () => {
   touch.click(undefined, "A");
   touch.click("touch", "BUTTON");
   assert.deepEqual(touch.scrolls, []);
+
+  const overlay = setupPaging(false);
+  overlay.showResultDialog(true);
+  overlay.startTouch(750);
+  assert.equal(overlay.endTouch(750), false);
+  overlay.click("touch", "BODY", 750);
+  assert.deepEqual(overlay.scrolls, [], "the article does not page while a result dialog is open");
 
   const margins = setupPaging(false);
   for (const x of [250, 750]) {
