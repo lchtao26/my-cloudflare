@@ -15,6 +15,7 @@ interface __BaseEnv_Env {
 	FAVORITE_PIN: string;
 	FAVORITE_SESSION_SECRET: string;
 	OPENAI_API_KEY: string;
+	TYPESAFE_API_KEY: string;
 	FAVORITE_LOGIN_LIMIT: DurableObjectNamespace<import("./src/worker").FavoriteLoginLimit>;
 }
 declare namespace Cloudflare {
@@ -29,7 +30,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "NOTION_DATA_SOURCE_ID" | "NOTION_EXCERPTS_DATA_SOURCE_ID" | "NOTION_EXCERPTS_VIEW_ID" | "NOTION_EXCERPTS_FAVORITES_VIEW_ID" | "NOTION_TOKEN" | "INSTAPAPER_CONSUMER_ID" | "INSTAPAPER_CONSUMER_SECRET" | "INSTAPAPER_OAUTH_TOKEN" | "INSTAPAPER_OAUTH_TOKEN_SECRET" | "FAVORITE_PIN" | "FAVORITE_SESSION_SECRET" | "OPENAI_API_KEY">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "NOTION_DATA_SOURCE_ID" | "NOTION_EXCERPTS_DATA_SOURCE_ID" | "NOTION_EXCERPTS_VIEW_ID" | "NOTION_EXCERPTS_FAVORITES_VIEW_ID" | "NOTION_TOKEN" | "INSTAPAPER_CONSUMER_ID" | "INSTAPAPER_CONSUMER_SECRET" | "INSTAPAPER_OAUTH_TOKEN" | "INSTAPAPER_OAUTH_TOKEN_SECRET" | "FAVORITE_PIN" | "FAVORITE_SESSION_SECRET" | "OPENAI_API_KEY" | "TYPESAFE_API_KEY">> {}
 }
 declare module "*.txt" {
 	const value: string;

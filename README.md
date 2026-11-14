@@ -52,9 +52,9 @@ RSS 条目只输出标题、指向水墨屏详情页 `/r/{6 位短码}` 的链�
 
 `/r/{短码}` 可在正文段落连续点击 2 次，然后在段落预览下方点击「划线」，直接保存整段。点击窗口外可退出。支持原文与译文；每条最多 1500 个非空白 UTF-16 代码单元，每篇最多 200 条。首次写入使用收藏的 PIN、会话、CSRF 和限速；重复提交相同选区不会产生重复记录。`/read?tab=highlights` 按保存时间显示划线，可跳回对应正文；正文的非空白内容变化后无法可靠确认划线位置，系统会在列表标注未能定位；如果正文恢复原状，划线也会恢复显示。仅空白变化不会导致未定位。分享页 `/s/` 不加载或显示划线。列表和详情页均不缓存，划线和收藏列表一样可公开读取，PIN 只保护写入和删除，请勿保存不适合公开的内容。在详情页点击已有划线，底部右侧会显示「取消划线」，点击后删除该条划线。删除同样使用 PIN、会话、CSRF 和限速；划线重叠时，取消的是所点文字最内层的那一条；点击操作栏外可收起，这次点击不会触发正文或翻页。目前不支持网页端编辑划线，划线列表页也不提供删除。
 
-双击段落还可选择「解释」，直接解释整段，单次最多 1500 个非空白 UTF-16 代码单元。服务端沿用收藏的 PIN、会话和 CSRF 验证，向 OpenAI 的 `gpt-6-luna` 发送选区、文章标题、原文地址（如有）以及当前语言的文章正文（最多前 40000 个字符）作为上下文；不会自动抓取原文网址。解释结果支持 Markdown，不执行原始 HTML；点击解释弹窗左侧或右侧遮罩可向上或向下翻页，关闭按钮始终可用。请求会产生 OpenAI API 费用，解释结果不会保存到划线数据库。
+双击段落可选择「显示原文」或「解释」。「显示原文」将当前段落和按正文相对位置选出的原文候选发送给 TypeSafe Jev，由 Jev 选择最可能对应的原文段落，并在独立半窗中展示结果；每次最多发送相邻 17 段候选，每个候选最多 1200 字符，以减少输入 token。匹配请求沿用收藏的 PIN、会话和 CSRF 验证。「解释」直接解释整段，单次最多 1500 个非空白 UTF-16 代码单元。服务端沿用收藏的 PIN、会话和 CSRF 验证，向 OpenAI 的 `gpt-6-luna` 发送选区、文章标题、原文地址（如有）以及当前语言的文章正文（最多前 40000 个字符）作为上下文；不会自动抓取原文网址。解释结果支持 Markdown，不执行原始 HTML；点击解释弹窗左侧或右侧遮罩可向上或向下翻页，关闭按钮始终可用。请求会产生 OpenAI API 费用，解释结果不会保存到划线数据库。
 
-启用解释前，将 OpenAI API 密钥保存为 Cloudflare Worker Secret `OPENAI_API_KEY`。在项目目录执行 `npx wrangler secret put OPENAI_API_KEY`，按提示粘贴密钥；该命令会立即更新线上 Worker。不要把密钥放进 `wrangler.jsonc`、GitHub 仓库或聊天。本地开发则在已被 Git 忽略的 `.dev.vars` 中添加 `OPENAI_API_KEY=你的密钥`，本地文件不会自动成为线上 Secret。两份 Wrangler 配置都将该名称列为必需密钥；本地缺少密钥时解释会提示配置，线上部署时缺少密钥会阻止部署。
+启用解释前，将 OpenAI API 密钥保存为 Cloudflare Worker Secret `OPENAI_API_KEY`；启用原文匹配前，将 TypeSafe API 密钥保存为 Worker Secret `TYPESAFE_API_KEY`。在项目目录分别执行 `npx wrangler secret put OPENAI_API_KEY` 和 `npx wrangler secret put TYPESAFE_API_KEY`，按提示粘贴密钥；该命令会立即更新线上 Worker。不要把密钥放进 `wrangler.jsonc`、GitHub 仓库或聊天。本地开发则在已被 Git 忽略的 `.dev.vars` 中添加对应的 `OPENAI_API_KEY=你的密钥` 和 `TYPESAFE_API_KEY=你的密钥`；本地文件不会自动成为线上 Secret。两份 Wrangler 配置都将这两个名称列为必需密钥；本地缺少密钥时对应功能会提示配置，线上部署时缺少密钥会阻止部署。
 
 `wrangler.jsonc` 已绑定远程 D1 数据库 `my-cloudflare-highlights`。本地开发默认使用独立的本地 D1，不会写入远程数据库。要在本地测试划线，先准备原有 `.dev.vars`（包括 Notion 只读凭据、`FAVORITE_PIN` 和 `FAVORITE_SESSION_SECRET`），然后执行：
 

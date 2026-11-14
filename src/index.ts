@@ -22,6 +22,8 @@ const SHORT_ID_PROPERTY = "ID";
 // IDs stay below 2^20, so a random code decodes to a valid ID only about 1 time in 4096.
 // Changing the keys or alphabet breaks every detail and share link already sent out.
 const SHORT_ID_LIMIT = 2 ** 20;
+const JEV_CANDIDATE_RADIUS = 8;
+const JEV_CANDIDATE_TEXT_LIMIT = 1200;
 const SHARE_CODE_KEYS = [0x3c6e, 0xa54f, 0x510e, 0x9b05];
 const SHARE_CODE_ALPHABET = "hqAiRYEFKT2xePmzuOfgrw4dBbNscH78S9kI30LQjpaGUJXonCMZ6ly15DtWvV";
 const SHARE_CODE = /^[0-9A-Za-z]{6}$/;
@@ -131,6 +133,7 @@ type NotionProperty = {
 type WorkerBindings = FavoriteBindings & {
   HIGHLIGHTS_DB?: D1Database;
   OPENAI_API_KEY?: string;
+  TYPESAFE_API_KEY?: string;
   INSTAPAPER_CONSUMER_ID?: string;
   INSTAPAPER_CONSUMER_SECRET?: string;
   INSTAPAPER_OAUTH_TOKEN?: string;
@@ -473,7 +476,7 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: 
     ...(source ? [`<p>${source}</p>`] : []),
     ...(body ? [`<div class="excerpt-body"${originalBody ? ' id="translated-body"' : ""}${highlightsEnabled ? ` data-field="${excerpt.chinese ? "original" : "translation"}"` : ""} lang="${htmlText(excerpt.lang)}">\n${body}\n</div>`] : []),
     ...(originalBody ? [`<div class="excerpt-body" id="original-body"${highlightsEnabled ? ' data-field="original"' : ""} lang="${htmlText(excerpt.originalLang)}" hidden>\n${originalBody}\n</div>`] : []),
-    ...(showActions && (originalBody || highlightsEnabled) ? [`<dialog id="body-actions" aria-label="正文操作" closedby="any" hidden><div id="body-preview-scroll"><p id="body-preview"></p></div><div id="body-actions-buttons"><button type="button" id="body-toggle"${originalBody ? "" : " hidden"}>显示原文</button>${highlightsEnabled ? ' <button type="button" id="body-explain" hidden>解释</button>' : ""} <button type="button" id="body-highlight" hidden>划线</button>${highlightsEnabled ? ' <button type="button" id="body-unhighlight">取消划线</button>' : ""}</div></dialog>`] : []),
+    ...(showActions && (originalBody || highlightsEnabled) ? [`<dialog id="body-actions" aria-label="正文操作" closedby="any" hidden><div id="body-preview-scroll"><p id="body-preview"></p></div><div id="body-actions-buttons"><button type="button" id="body-toggle"${originalBody && highlightsEnabled ? "" : " hidden"}>显示原文</button>${highlightsEnabled ? ' <button type="button" id="body-explain" hidden>解释</button>' : ""} <button type="button" id="body-highlight" hidden>划线</button>${highlightsEnabled ? ' <button type="button" id="body-unhighlight">取消划线</button>' : ""}</div></dialog>`] : []),
     ...(showActions ? [`<p class="other"><a class="other-link" id="favorite-link" data-favorite="${excerpt.favorite ? "true" : "false"}" href="${htmlText(favoriteUrl)}"><span id="favorite-status" role="status">${excerpt.favorite ? "取消收藏" : "收藏"}</span></a> <a class="other-link" href="${htmlText(excerpt.link)}">管理</a> <button type="button" class="other-link" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}"><span id="share-status" role="status">分享</span></button></p><p id="favorite-message" role="status"></p><dialog id="favorite-dialog" aria-label="收藏验证"><form id="favorite-form" method="post" action="${htmlText(favoriteUrl)}">${PIN_FIELD}<p id="favorite-error" role="alert"></p></form><form method="dialog"><button type="submit" class="favorite-close">取消</button></form></dialog>`] : []),
     "<hr />",
     `<p class="detail-metadata">${details.join("<br />\n")}</p>`,
@@ -563,11 +566,11 @@ const EINK_STYLE = [
 
 
   "#body-actions[open]{width:calc(100% - 3.25rem);max-width:365px;margin:0 auto;display:flex;flex-direction:column;box-sizing:border-box;bottom:0;height:auto;max-height:90vh;padding:1rem;border-top:0;font-size:0.9375rem;line-height:1.6}#body-actions::backdrop{background:rgba(0,0,0,.35)}#body-actions #body-preview-scroll{display:block;flex:none;height:32vh;max-height:calc(90vh - 6rem);min-height:0;overflow-y:auto}#body-preview{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}#body-actions #body-actions-buttons{flex:none;display:flex;justify-content:flex-end;margin:0 -1rem;padding:0.75rem 1rem 0;border-top:1px solid #000}@media (min-width:440px){#body-actions{width:calc(100% - 2.5rem)}}@media (min-width:720px){#body-actions{max-width:36rem}}",
-  "#body-actions #body-toggle{margin-right:auto}#body-explain{order:1}#body-highlight{order:2}#body-unhighlight{order:3}#explanation-dialog[open]{position:fixed;inset:0;width:calc(100% - 3.25rem);max-width:365px;max-height:80vh;overflow:auto;background:#fff;color:#000;border:2px solid #000;padding:1rem}@media (min-width:440px){#explanation-dialog[open]{width:calc(100% - 2.5rem)}}@media (min-width:720px){#explanation-dialog[open]{max-width:36rem}}#explanation-dialog:modal{overscroll-behavior:contain}#explanation-dialog::backdrop{background:rgba(0,0,0,.35);overflow:hidden;overscroll-behavior:contain}#explanation-text{white-space:pre-wrap;overflow-wrap:anywhere}#explanation-close{display:block;min-height:2.25rem;min-width:3.25rem;margin:0.15rem 0 0.15rem auto;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;color:#000;font:inherit}#explanation-close:focus{outline:none}",
+  "#body-actions #body-toggle{margin-right:auto}#body-explain{order:1}#body-highlight{order:2}#body-unhighlight{order:3}#explanation-dialog[open],#original-match-dialog[open]{position:fixed;inset:0;width:calc(100% - 3.25rem);max-width:365px;max-height:80vh;overflow:auto;background:#fff;color:#000;border:2px solid #000;padding:1rem}@media (min-width:440px){#explanation-dialog[open],#original-match-dialog[open]{width:calc(100% - 2.5rem)}}@media (min-width:720px){#explanation-dialog[open],#original-match-dialog[open]{max-width:36rem}}#explanation-dialog:modal,#original-match-dialog:modal{overscroll-behavior:contain}#explanation-dialog::backdrop,#original-match-dialog::backdrop{background:rgba(0,0,0,.35);overflow:hidden;overscroll-behavior:contain}#explanation-text,#original-match-text{white-space:pre-wrap;overflow-wrap:anywhere}#explanation-close,#original-match-close{display:block;min-height:2.25rem;min-width:3.25rem;margin:0.15rem 0 0.15rem auto;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;color:#000;font:inherit}#explanation-close:focus,#original-match-close:focus{outline:none}",
   "#body-actions button,#explanation-close{font-size:0.9375rem;line-height:1.6}",
   "#body-actions button:disabled{opacity:0.4;}",
 
-  "#explanation-dialog{font-size:0.9375rem;line-height:1.6}#explanation-dialog[open]{display:flex;flex-direction:column;overflow:hidden}#explanation-text{flex:1;min-height:0;overflow-y:auto;white-space:normal}#explanation-close{flex:none}#explanation-text :is(ul,ol){list-style:revert;padding-left:1.5em}#explanation-text li,#explanation-text li:last-child{border:0;padding:0;margin:0}#explanation-text :is(h1,h2,h3,h4,h5,h6){font-size:1em;line-height:1.6;margin:0.85em 0;font-weight:700}#explanation-text blockquote{border-left:2px solid #000;margin:0.85em 0;padding-left:0.75em}#explanation-text pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}#explanation-text :is(pre,code){font-family:monospace;font-size:0.95em}",
+  "#explanation-dialog,#original-match-dialog{font-size:0.9375rem;line-height:1.6}#explanation-dialog[open],#original-match-dialog[open]{display:flex;flex-direction:column;overflow:hidden}#explanation-text{flex:1;min-height:0;overflow-y:auto;white-space:normal}#explanation-close,#original-match-close{flex:none}#original-match-content{display:flex;flex:1;flex-direction:column;min-height:0}#original-match-content section{flex:1;min-height:0;overflow-y:auto;padding:0.35rem 0;white-space:pre-wrap;overflow-wrap:anywhere}#original-match-content section+section{border-top:1px solid #000}#original-match-content h2{margin:0 0 0.35rem;font-size:0.875rem;line-height:1.4}#original-match-content p{margin:0}#explanation-text :is(ul,ol){list-style:revert;padding-left:1.5em}#explanation-text li,#explanation-text li:last-child{border:0;padding:0;margin:0}#explanation-text :is(h1,h2,h3,h4,h5,h6){font-size:1em;line-height:1.6;margin:0.85em 0;font-weight:700}#explanation-text blockquote{border-left:2px solid #000;margin:0.85em 0;padding-left:0.75em}#explanation-text pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}#explanation-text :is(pre,code){font-family:monospace;font-size:0.95em}",
   "#favorite-dialog .favorite-close{min-height:2.25rem;min-width:3.25rem;margin:0.15rem 0 0.15rem auto;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;text-decoration:none}",
 ].join("");
 
@@ -816,10 +819,10 @@ const EINK_DETAIL_CHROME = [
   "function validTap(start,point){return start&&(start.paragraph||start.mark)&&Date.now()-start.time<=500&&Math.abs(point.clientX-start.x)<=10&&Math.abs(point.clientY-start.y)<=10&&Math.abs(scrollY()-start.scroll)<=5;}",
   "function closeActions(){if(actions.open&&actions.close)actions.close();actions.hidden=true;actionHighlight=null;if(actions.removeAttribute)actions.removeAttribute('data-mode');if(document.body&&oldPaddingBottom!==null){document.body.style.paddingBottom=oldPaddingBottom;oldPaddingBottom=null;}if(actionFocus&&actionFocus.focus)actionFocus.focus();}",
   "function openActions(mode,event){if(actionPreview){actionPreview.textContent=actionParagraph&&actionParagraph.textContent||'';if(actionPreview.parentNode)actionPreview.parentNode.scrollTop=0;}if(actions.setAttribute)actions.setAttribute('data-mode',mode);openingEvent=event;actions.hidden=false;if(typeof actions.showModal==='function'&&!actions.open)actions.showModal();else if(!actions.open&&actions.setAttribute)actions.setAttribute('open','');if(document.body&&document.body.style){oldPaddingBottom=document.body.style.paddingBottom;document.body.style.paddingBottom=(actions.offsetHeight+40)+'px';}if(window.getSelection){var selection=window.getSelection();if(selection&&selection.removeAllRanges)selection.removeAllRanges();}if(mode==='mark'){if(unhighlightAction)unhighlightAction.focus();}else if(toggle&&!toggle.hidden)toggle.focus();else if(highlightAction&&!highlightAction.hidden)highlightAction.focus();}",
-  "function countTap(start,body,event){var now=Date.now();tapCount=lastTap&&now-lastTap<=500&&lastParagraph===start.paragraph?tapCount+1:1;lastTap=now;lastParagraph=start.paragraph;if(tapCount===2){resetTaps();actionParagraph=start.paragraph;actionBody=body;actionFocus=document.activeElement;if(toggle&&!toggle.hidden)toggle.textContent=originalBody.hidden?'显示原文':'显示译文';openActions('body',event);}}",
+  "function countTap(start,body,event){var now=Date.now();tapCount=lastTap&&now-lastTap<=500&&lastParagraph===start.paragraph?tapCount+1:1;lastTap=now;lastParagraph=start.paragraph;if(tapCount===2){resetTaps();actionParagraph=start.paragraph;actionBody=body;actionFocus=document.activeElement;if(toggle&&!toggle.hidden)toggle.textContent='显示原文';openActions('body',event);}}",
   "function markTap(start){return !!(start.mark&&!start.selected&&!hasSelection()&&window.removeHighlight);}",
   "function openMark(start,body,event){resetTaps();actionParagraph=start.paragraph;actionBody=body;actionHighlight=start.mark.getAttribute('data-hl');actionFocus=document.activeElement;openActions('mark',event);}",
-  "if(toggle)toggle.addEventListener('click',function(){if(Date.now()<ignoreActionUntil||!translatedBody||!originalBody)return;var showOriginal=originalBody.hidden;originalBody.hidden=!showOriginal;translatedBody.hidden=showOriginal;closeActions();progress();saveSoon();});",
+  "if(toggle)toggle.addEventListener('click',function(){if(Date.now()<ignoreActionUntil||toggle.disabled||!window.performParagraphAction)return;toggle.disabled=true;window.performParagraphAction(actionParagraph,actionBody,'original',function(){toggle.disabled=false;if(!actions.hidden)closeActions();});});",
   "if(highlightAction)highlightAction.addEventListener('click',function(){if(Date.now()<ignoreActionUntil)return;closeActions();if(window.performParagraphAction)window.performParagraphAction(actionParagraph,actionBody,'highlight');});",
   "if(explainAction)explainAction.addEventListener('click',function(){if(Date.now()<ignoreActionUntil||explainAction.disabled||!window.performParagraphAction)return;explainAction.disabled=true;window.performParagraphAction(actionParagraph,actionBody,'explain',function(){explainAction.disabled=false;if(!actions.hidden)closeActions();});});",
   "if(unhighlightAction)unhighlightAction.addEventListener('click',function(){if(Date.now()<ignoreActionUntil)return;var id=actionHighlight;closeActions();if(window.removeHighlight)window.removeHighlight(id);});",
@@ -1011,6 +1014,7 @@ function highlightChrome(code: string, highlights: ResolvedHighlight[]): string 
   const json = JSON.stringify(highlights).replaceAll("<", "\\u003c");
   return `<dialog id="highlight-error" aria-label="划线失败" closedby="any" hidden><p id="highlight-error-message" role="alert"></p><div><button type="button" id="highlight-error-close">取消</button><button type="button" id="highlight-error-retry">划线</button></div></dialog>
 <dialog id="explanation-dialog" aria-label="解释" hidden><div id="explanation-text" role="status"></div><button type="button" id="explanation-close">关闭</button></dialog>
+<dialog id="original-match-dialog" aria-label="原文匹配结果" hidden><div id="original-match-content"><section><h2>原文</h2><p id="original-match-text" role="status"></p></section><section><h2>正文</h2><p id="original-match-current"></p></section></div><button type="button" id="original-match-close">关闭</button></dialog>
 <script>(function(){
 var rows=${json}, dialog=document.getElementById('favorite-dialog');
 function canon(s){return s.replace(/\\s/g,'')}
@@ -1048,10 +1052,16 @@ document.addEventListener('click',function(e){var selected=explanationSelectionA
 function showExplanation(text){explanationText.textContent=text;explanationDialog.hidden=false;if(typeof explanationDialog.showModal==='function'&&!explanationDialog.open)explanationDialog.showModal();else explanationDialog.setAttribute('open','')}
 function renderExplanation(nodes){explanationText.textContent='';function append(parent,list){for(var i=0;i<list.length;i++){var n=list[i];if(n.type==='text'&&typeof n.text==='string'){parent.appendChild(document.createTextNode(n.text));continue}if(n.type!=='element'||! /^(p|h[1-6]|blockquote|ul|ol|li|em|strong|s|a|table|thead|tbody|tr|th|td|hr|br|pre|code)$/.test(n.tag)||!Array.isArray(n.children))continue;var el=document.createElement(n.tag);if(n.tag==='a'&&typeof n.href==='string'&&/^(https?:\\/\\/|mailto:|\\/(?!\\/)|#)/i.test(n.href))el.setAttribute('href',n.href);if(n.tag==='ol'&&Number.isSafeInteger(n.start)&&n.start>0)el.setAttribute('start',String(n.start));append(el,n.children);parent.appendChild(el)}}append(explanationText,nodes)}
 function explain(fields,ready){if(!fields||busy||!explanationDialog||!explanationText){if(ready)ready();return}busy=true;function release(){if(ready){var fn=ready;ready=null;fn()}}function failed(e){release();settle();showExplanation(e.message||'解释失败，请稍后再试。')}return authorized(function(){showExplanation('正在解释…');var request={action:'explain',field:fields.field,ranges:JSON.stringify(fields.ranges)};return send(request,null,'解释失败').then(function(d){if(Array.isArray(d.markdown)){showExplanation('');renderExplanation(d.markdown)}else showExplanation(d.explanation);settle()})},'解释失败',failed,release).catch(failed)}
+var originalMatchDialog=document.getElementById('original-match-dialog'),originalMatchText=document.getElementById('original-match-text'),originalMatchCurrent=document.getElementById('original-match-current'),originalMatchClose=document.getElementById('original-match-close');
+function closeOriginalMatch(){if(originalMatchDialog.open&&originalMatchDialog.close)originalMatchDialog.close();else if(originalMatchDialog.removeAttribute)originalMatchDialog.removeAttribute('open');originalMatchDialog.hidden=true}
+if(originalMatchClose)originalMatchClose.addEventListener('click',closeOriginalMatch);
+if(originalMatchDialog)originalMatchDialog.addEventListener('close',function(){originalMatchDialog.hidden=true});
+function showOriginalMatch(original,current){originalMatchText.textContent=original;originalMatchCurrent.textContent=current||'';originalMatchDialog.hidden=false;if(typeof originalMatchDialog.showModal==='function'&&!originalMatchDialog.open)originalMatchDialog.showModal();else originalMatchDialog.setAttribute('open','')}
+function matchOriginal(fields,ready){if(!fields||busy||!originalMatchDialog||!originalMatchText){if(ready)ready();return}busy=true;var current=fields.ranges.map(function(range){return range.quote}).join('\\n');function release(){if(ready){var fn=ready;ready=null;fn()}}function failed(e){release();settle();showOriginalMatch(e.message||'原文匹配失败，请稍后再试。',current)}return authorized(function(){showOriginalMatch('正在匹配原文…',current);return send({action:'original',field:fields.field,ranges:JSON.stringify(fields.ranges)},null,'原文匹配失败').then(function(d){showOriginalMatch(d.paragraph||'未找到匹配段落。',current);settle()})},'原文匹配失败',failed,release).catch(failed)}
 function removeSaved(id){if(!id||busy)return;busy=true;return authorized(function(){return send({action:'delete',id:id},null,'取消划线失败').then(function(d){unpaint(id);settle()})},'取消划线失败',settle).catch(settle)}
 window.removeHighlight=removeSaved;
 window.performParagraphAction=function(p,body,mode,ready){
-if(!p||!body||body.hidden){if(ready)ready();return}var all=nodes(body),text='',base=0,found=false;for(var i=0;i<all.length;i++){if(p.contains(all[i])){found=true;text+=all[i].nodeValue||''}else if(!found)base+=canon(all[i].nodeValue||'').length}var clean=canon(text);if(!clean){if(ready)ready();return}if(clean.length>1500){if(ready)ready();if(mode==='explain')showExplanation('解释最多 1500 字。');else showError('划线最多 1500 字。','划线',null);return}var field=body.getAttribute('data-field'),range={start:base,end:base+clean.length,quote:text};if(mode==='explain')explain({field:field,ranges:[range]},ready);else save({field:field,start:range.start,end:range.end,quote:text});
+if(!p||!body||body.hidden){if(ready)ready();return}var all=nodes(body),text='',base=0,found=false;for(var i=0;i<all.length;i++){if(p.contains(all[i])){found=true;text+=all[i].nodeValue||''}else if(!found)base+=canon(all[i].nodeValue||'').length}var clean=canon(text);if(!clean){if(ready)ready();return}if(clean.length>1500){if(ready)ready();if(mode==='explain')showExplanation('解释最多 1500 字。');else if(mode==='original')showOriginalMatch('段落最多 1500 字。',text);else showError('划线最多 1500 字。','划线',null);return}var field=body.getAttribute('data-field')||'translation',range={start:base,end:base+clean.length,quote:text};if(mode==='explain')explain({field:field,ranges:[range]},ready);else if(mode==='original')matchOriginal({field:field,ranges:[range]},ready);else save({field:field,start:range.start,end:range.end,quote:text});
 };
 var action=document.getElementById('body-highlight'),explainAction=document.getElementById('body-explain');if(action)action.hidden=false;if(explainAction)explainAction.hidden=false;
 })();</script>`;
@@ -1120,7 +1130,7 @@ async function fetchExcerptByShortId(env: ConfiguredBindings, shortId: number): 
   return page ? excerptFromPage(page) : null;
 }
 
-function einkParagraphs(translation: string, pageId: string, imageBaseUrl: string, textParts?: string[]): string {
+function einkParagraphTexts(translation: string, pageId: string): string[] {
   // Existing translations contain literal <br /> separators. Interpret only
   // attribute-free line breaks, Notion file images, and http(s) <img> tags;
   // all other markup remains escaped text.
@@ -1129,9 +1139,13 @@ function einkParagraphs(translation: string, pageId: string, imageBaseUrl: strin
     if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) return match;
     return match.replace(/>[\s\S]*<\/image>$/i, "></image>");
   });
-  // Format the whole passage so quotations can span paragraphs and images.
   return formatText(withoutCaptions.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim())
-    .split(/\n(?:[^\S\n]*\n)+/)
+    .split(/\n(?:[^\S\n]*\n)+/);
+}
+
+function einkParagraphs(translation: string, pageId: string, imageBaseUrl: string, textParts?: string[]): string {
+  // Use the same paragraph boundaries for display and Jev candidate selection.
+  return einkParagraphTexts(translation, pageId)
     .map((paragraph) => {
       const replacements: Array<{ index: number; length: number; html: string }> = [];
       for (const match of paragraph.matchAll(IMAGE_TAG)) {
@@ -1376,9 +1390,10 @@ const worker = {
         const endText = data.get("end") || "";
         const quote = data.get("quote") || "";
         const explaining = data.get("action") === "explain";
+        const matchingOriginal = data.get("action") === "original";
         if (!/^(original|translation|terms)$/.test(field)) throw highlightError("选区无效。", 400);
         let ranges: Array<{ start: number; end: number; quote: string }>;
-        const rangesJson = explaining ? data.get("ranges") : null;
+        const rangesJson = explaining || matchingOriginal ? data.get("ranges") : null;
         if (rangesJson !== null) {
           try { ranges = JSON.parse(rangesJson); } catch { throw highlightError("选区无效。", 400); }
           if (!Array.isArray(ranges) || !ranges.length || ranges.length > 1500) throw highlightError("选区无效。", 400);
@@ -1422,6 +1437,40 @@ const worker = {
           const explanation = result.output?.flatMap(item => item.type === "message" ? item.content || [] : []).filter(part => part.type === "output_text" && typeof part.text === "string").map(part => part.text).join("\n").trim();
           if (!explanation || result.status === "incomplete") throw highlightError("未能生成完整解释，请稍后再试。", 502);
           return { explanation, markdown: explanationMarkdown(explanation) };
+        }
+        if (matchingOriginal) {
+          if (!env.TYPESAFE_API_KEY) throw highlightError("原文匹配服务未配置，请设置 TYPESAFE_API_KEY。", 503);
+          if (excerpt.chinese || !excerpt.originalBody) throw highlightError("这篇文章没有可匹配的原文。", 400);
+          const allCandidates = einkParagraphTexts(excerpt.originalBody, excerpt.id)
+            .map((paragraph) => paragraph.replace(IMAGE_TAG, " ").replace(HTML_IMG, " ").trim())
+            .filter((paragraph) => canonicalText(paragraph).length > 0);
+          if (!allCandidates.length) throw highlightError("这篇文章没有可匹配的原文。", 400);
+          const estimatedIndex = Math.min(allCandidates.length - 1, Math.floor((start / Math.max(text.length, 1)) * allCandidates.length));
+          const firstCandidate = Math.max(0, estimatedIndex - JEV_CANDIDATE_RADIUS);
+          const lastCandidate = Math.min(allCandidates.length, estimatedIndex + JEV_CANDIDATE_RADIUS + 1);
+          const candidates = allCandidates.slice(firstCandidate, lastCandidate);
+          const criteria = Object.fromEntries(candidates.map((paragraph, index) => [`p${index}`, Array.from(paragraph).slice(0, JEV_CANDIDATE_TEXT_LIMIT).join("")]));
+          const response = await fetch("https://api.typesafe.ai/v1/systemone", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${env.TYPESAFE_API_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "jev-latest",
+              state: { title: excerpt.originalTitle || excerpt.title, selected_paragraph: ranges.map((range) => range.quote).join("\n"), estimated_source_position: `${estimatedIndex + 1} / ${allCandidates.length}` },
+              questions: { match: { type: "choice", instructions: "从原文候选段落中，选择与所选译文段落内容最对应的原文。依据语义、实体、细节和段落主旨匹配，不要只按关键词匹配。若都不匹配，也选择最可能的一段。", criteria } },
+            }),
+            signal: AbortSignal.timeout(30000),
+          });
+          if (!response.ok) {
+            console.error("TypeSafe Jev request failed", { status: response.status });
+            throw highlightError("原文匹配服务暂不可用，请稍后再试。", 502);
+          }
+          const result = await response.json() as { answers?: { match?: { type?: string; choice?: string; confidence?: number } } };
+          const answer = result.answers?.match;
+          const choice = answer?.type === "choice" ? answer.choice || "" : "";
+          const confidence = answer?.confidence;
+          const index = /^p(?:0|[1-9]\d{0,2})$/.test(choice) ? Number(choice.slice(1)) : -1;
+          if (index < 0 || index >= candidates.length || typeof confidence !== "number") throw highlightError("未能匹配原文段落，请稍后再试。", 502);
+          return { paragraph: candidates[index], confidence };
         }
         const cleanQuote = canonicalText(quote);
         const hash = await hashText(text), uuid = crypto.randomUUID();
