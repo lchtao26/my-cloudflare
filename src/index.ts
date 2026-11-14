@@ -29,13 +29,13 @@ const FEED_ITEM_LIMIT = 30;
 
 const READ_CATEGORIES = [
   { id: "all", label: "全部" },
-  { id: "favorites", label: "收藏" },
-  { id: "highlights", label: "划线" },
-  { id: "later", label: "稍后阅读" },
-  { id: "news", label: "IT" },
   { id: "weekly", label: "周刊" },
   { id: "bunshun", label: "文春" },
   { id: "novel", label: "小说" },
+  { id: "news", label: "IT" },
+  { id: "favorites", label: "收藏" },
+  { id: "highlights", label: "划线" },
+  { id: "later", label: "稍后阅读" },
 ] as const;
 type ReadCategory = typeof READ_CATEGORIES[number]["id"];
 
@@ -513,10 +513,13 @@ const EINK_STYLE = [
   "a:hover{text-decoration:underline;text-underline-offset:0.35em;}",
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".item-link{display:block;font-weight:700;}",
-  ".categories{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0.2rem;margin:0 0 1rem;}",
+  ".categories{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0.2rem;margin:0 0 1rem;}",
   ".visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}",
-  ".categories a{min-width:0;display:flex;align-items:center;justify-content:center;min-height:2.4rem;padding:0.25rem 0.1rem;border:1px solid #000;font-size:0.9em;font-weight:700;text-align:center;}",
-  ".categories a.category-later{grid-column:span 2;}",
+  ".categories a{min-width:0;display:flex;align-items:center;justify-content:center;min-height:2.2rem;padding:0.2rem 0.1rem;border:1px solid #000;font-size:0.85em;font-weight:700;text-align:center;}",
+  ".categories{position:fixed;z-index:2;left:1.625rem;right:1.625rem;bottom:0;width:auto;max-width:365px;margin:0 auto;padding:0.65rem 0 max(0.65rem,env(safe-area-inset-bottom));background:#fff;border-top:1px solid #000;box-sizing:border-box;}",
+  "@media (min-width:440px){.categories{left:1.25rem;right:1.25rem;}}",
+  "@media (min-width:720px){.categories{left:1.25rem;right:1.25rem;max-width:36rem;}}",
+  "body:has(.categories){padding-bottom:6.5rem;}",
 
   ".categories a[aria-current=page]{background:#000;color:#fff;}",
   ".meta{font-size:1rem;margin:0.65em 0 0;}",
@@ -543,9 +546,10 @@ const EINK_STYLE = [
   "#favorite-dialog:modal{overscroll-behavior:contain;}#favorite-dialog::backdrop{background:rgba(0,0,0,0.45);overflow:hidden;overscroll-behavior:contain;}",
   "#favorite-dialog p:first-child{margin-top:0;}#favorite-error:empty,#favorite-message:empty{display:none;}.favorite-close{display:block;margin:1rem auto 0;border:0;background:none;color:inherit;font:inherit;text-decoration:underline;cursor:pointer;min-height:3rem;min-width:3rem;}.favorite-close:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   "#highlight-error[hidden]{display:none}#highlight-error:not([open]){display:none}#highlight-error{position:fixed;z-index:12;top:50%;left:50%;width:calc(100% - 3rem);max-width:24rem;margin:0;padding:1.5rem;border:2px solid #000;background:#fff;color:#000;transform:translate(-50%,-50%)}#highlight-error:modal{overscroll-behavior:contain}#highlight-error::backdrop{background:rgba(0,0,0,0.45);overflow:hidden;overscroll-behavior:contain}#highlight-error p{margin:0}#highlight-error div{display:flex;justify-content:flex-end;margin-top:1rem}#highlight-error button{flex:none;min-height:2.25rem;min-width:3.25rem;margin:0 0 0 0.35rem;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;color:#000;font:inherit}#highlight-error button:focus-visible{outline:3px solid #000;outline-offset:3px}",
-  ".list-actions{display:flex;justify-content:flex-end;gap:0.25rem;margin-top:1rem;}",
-  ".list-actions .btn{flex:none;min-width:3.25rem;min-height:2.25rem;margin:0.15rem 0;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;font:inherit;text-align:center;}",
+  ".list-actions{display:flex;justify-content:flex-end;gap:0.25rem;margin:1rem 0 2rem;}",
+  ".list-actions .btn{flex:none;min-width:3.25rem;min-height:2.25rem;margin:0.15rem 0;padding:0.2rem 0.5rem;border:0;background:#fff;font:inherit;text-align:center;}",
   ".list-actions .btn[hidden]{display:none;}",
+  ".list-actions #load-more[aria-disabled=true]{color:#777;opacity:0.55;pointer-events:none;}",
   "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
   // Mobile article images may extend beyond the reading column to the screen edges.
   "@media (max-width:440px){@supports (container-type:inline-size) and (width:100cqw){html{container-type:inline-size;}.excerpt-body img{width:100cqw;max-width:none;margin-left:calc(50% - 50cqw);}}}",
@@ -670,6 +674,8 @@ const EINK_LIST_PAGING = [
   "var dir=direction(e.clientX,e.target);",
   "if(dir)go(dir);",
   "},false);",
+  "var more=document.getElementById('load-more');",
+  "if(more)more.addEventListener('click',function(e){if(more.getAttribute('aria-disabled')==='true'){e.preventDefault();return;}more.setAttribute('aria-disabled','true');more.textContent='正在加载';},false);",
   "})();",
   "</script>",
 ].join("\n");
