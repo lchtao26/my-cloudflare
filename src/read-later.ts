@@ -24,7 +24,7 @@ function escapeXml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 }
 
-async function authorization(env: Required<InstapaperBindings>, body: Record<string, string>): Promise<string> {
+async function authorization(env: Required<InstapaperBindings>, body: Record<string, string>, endpoint = ENDPOINT): Promise<string> {
   const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
   const oauth: Record<string, string> = {
     oauth_consumer_key: env.INSTAPAPER_CONSUMER_ID,
@@ -38,7 +38,7 @@ async function authorization(env: Required<InstapaperBindings>, body: Record<str
     .map(([key, value]) => [encode(key), encode(value)] as const)
     .sort(([a, av], [b, bv]) => a < b ? -1 : a > b ? 1 : av < bv ? -1 : av > bv ? 1 : 0)
     .map(([key, value]) => `${key}=${value}`).join("&");
-  const base = `POST&${encode(ENDPOINT)}&${encode(parameters)}`;
+  const base = `POST&${encode(endpoint)}&${encode(parameters)}`;
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`${encode(env.INSTAPAPER_CONSUMER_SECRET)}&${encode(env.INSTAPAPER_OAUTH_TOKEN_SECRET)}`), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
   const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(base));
   oauth.oauth_signature = btoa(String.fromCharCode(...new Uint8Array(signature)));
@@ -84,4 +84,13 @@ ${items}
     console.error("Failed to build Instapaper RSS", error);
     return new Response("Feed temporarily unavailable", { status: 502, headers: { "Cache-Control": "no-store" } });
   }
+}
+
+export async function addReadLater(env: InstapaperBindings, url: string, title: string): Promise<void> {
+  const { INSTAPAPER_CONSUMER_ID, INSTAPAPER_CONSUMER_SECRET, INSTAPAPER_OAUTH_TOKEN, INSTAPAPER_OAUTH_TOKEN_SECRET } = env;
+  if (!INSTAPAPER_CONSUMER_ID || !INSTAPAPER_CONSUMER_SECRET || !INSTAPAPER_OAUTH_TOKEN || !INSTAPAPER_OAUTH_TOKEN_SECRET) throw new Error("Instapaper is not configured");
+  const endpoint = "https://www.instapaper.com/api/1/bookmarks/add";
+  const body = { url, title };
+  const response = await fetch(endpoint, { method: "POST", headers: { Authorization: await authorization({ INSTAPAPER_CONSUMER_ID, INSTAPAPER_CONSUMER_SECRET, INSTAPAPER_OAUTH_TOKEN, INSTAPAPER_OAUTH_TOKEN_SECRET }, body, endpoint), "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body) });
+  if (!response.ok) throw new Error(`Instapaper returned ${response.status}`);
 }

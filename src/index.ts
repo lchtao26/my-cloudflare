@@ -1,7 +1,7 @@
 import { generateRssFeed, type RssFeed } from "feedsmith";
 import { canonicalText, hashText, resolveAnchor } from "./highlight-anchor.ts";
 import { formatText } from "./format-text.ts";
-import { readLaterFeed } from "./read-later.ts";
+import { addReadLater, readLaterFeed } from "./read-later.ts";
 import { favoriteRequest, PIN_FIELD, PIN_STYLE, type FavoriteBindings } from "./favorite.ts";
 import { explanationMarkdown } from "./explanation-markdown.ts";
 
@@ -473,7 +473,7 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: 
     ...(body ? [`<div class="excerpt-body"${originalBody ? ' id="translated-body"' : ""}${highlightsEnabled ? ` data-field="${excerpt.chinese ? "original" : "translation"}"` : ""} lang="${htmlText(excerpt.lang)}">\n${body}\n</div>`] : []),
     ...(originalBody ? [`<div class="excerpt-body" id="original-body"${highlightsEnabled ? ' data-field="original"' : ""} lang="${htmlText(excerpt.originalLang)}" hidden>\n${originalBody}\n</div>`] : []),
     ...(showActions && (originalBody || highlightsEnabled) ? [`<dialog id="body-actions" aria-label="正文操作" closedby="any" hidden><div id="body-preview-scroll"><p id="body-preview"></p></div><div id="body-actions-buttons"><button type="button" id="body-toggle"${originalBody && highlightsEnabled ? "" : " hidden"}>显示原文</button>${highlightsEnabled ? ' <button type="button" id="body-explain" aria-live="polite" hidden>解释</button>' : ""} <button type="button" id="body-highlight" hidden>划线</button>${highlightsEnabled ? ' <button type="button" id="body-unhighlight">取消划线</button>' : ""}</div></dialog>`] : []),
-    ...(showActions ? [`<p class="other"><a class="other-link" id="favorite-link" data-favorite="${excerpt.favorite ? "true" : "false"}" href="${htmlText(favoriteUrl)}"><span id="favorite-status" role="status">${excerpt.favorite ? "取消收藏" : "收藏"}</span></a> <a class="other-link" href="${htmlText(excerpt.link)}">管理</a> <button type="button" class="other-link" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}"><span id="share-status" role="status">分享</span></button></p><p id="favorite-message" role="status"></p><dialog id="favorite-dialog" aria-label="收藏验证"><form id="favorite-form" method="post" action="${htmlText(favoriteUrl)}">${PIN_FIELD}<p id="favorite-error" role="alert"></p></form><form method="dialog"><button type="submit" class="favorite-close">取消</button></form></dialog>`] : []),
+    ...(showActions ? [`<p class="other"><button type="button" class="other-link" id="read-later" data-url="/read/add-later/${excerpt.code}"><span role="status">加入待读</span></button> <a class="other-link" id="favorite-link" data-favorite="${excerpt.favorite ? "true" : "false"}" href="${htmlText(favoriteUrl)}"><span id="favorite-status" role="status">${excerpt.favorite ? "取消收藏" : "收藏"}</span></a> <a class="other-link" href="${htmlText(excerpt.link)}">管理</a> <button type="button" class="other-link" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}"><span id="share-status" role="status">分享</span></button></p><p id="favorite-message" role="status"></p><dialog id="favorite-dialog" aria-label="收藏验证"><form id="favorite-form" method="post" action="${htmlText(favoriteUrl)}">${PIN_FIELD}<p id="favorite-error" role="alert"></p></form><form method="dialog"><button type="submit" class="favorite-close">取消</button></form></dialog>`] : []),
     "<hr />",
     `<p class="detail-metadata">${details.join("<br />\n")}</p>`,
     ...(terms ? ["<hr />", `<p>${einkText("名词解释")}</p>`, highlightsEnabled ? `<div class="excerpt-body" data-field="terms">\n${terms}\n</div>` : terms] : []),
@@ -540,7 +540,7 @@ const EINK_STYLE = [
   ".other-link + .other-link{margin-left:0.35em;}",
   "button.other-link{padding:0;border:0;background:transparent;cursor:pointer;}",
   "button.other-link:focus-visible{outline:3px solid #000;outline-offset:3px;}",
-  ".other-link[aria-disabled=true]{opacity:0.4;cursor:default;}",
+  ".other-link[aria-disabled=true],button.other-link:disabled{opacity:0.4;cursor:default;}",
   PIN_STYLE,
   "#favorite-dialog:not([open]){display:none;}#favorite-dialog{width:calc(100% - 3rem);max-width:24rem;padding:1.5rem;border:2px solid #000;background:#fff;color:#000;}",
   "#favorite-dialog:modal{overscroll-behavior:contain;}#favorite-dialog::backdrop{background:rgba(0,0,0,0.45);overflow:hidden;overscroll-behavior:contain;}",
@@ -951,6 +951,14 @@ const EINK_FAVORITE_CHROME = `<script>
   pin.addEventListener('compositionend',function(){mark();submit()});pin.addEventListener('change',function(){mark();submit()});
   pin.addEventListener('focus',mark);pin.addEventListener('click',mark);pin.addEventListener('keyup',mark);pin.addEventListener('select',mark);
   dialog.addEventListener('close',function(){var cancel=pinCancel;pinCancel=null;pinContinuation=null;pin.value='';mark();error.textContent='';label();if(cancel)cancel()});
+  var later=document.getElementById('read-later');
+  if(later)later.addEventListener('click',function(){
+    var label=later.firstElementChild;later.disabled=true;label.textContent='正在添加';message.textContent='';
+    function reset(text){later.disabled=false;label.textContent='加入待读';if(text)message.textContent=text}
+    var token='';
+    function send(value){var data=new URLSearchParams();data.set('csrf',token);if(value)data.set('pin',value);return fetch(later.dataset.url,{method:'POST',headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded'},body:data.toString(),credentials:'same-origin'}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'加入待读失败，请重试。');return d})}).then(function(){label.textContent='已加待读';window.confirmReadPin()})}
+    fetch(later.dataset.url,{headers:{'Accept':'application/json'},credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'加入待读失败，请重试。');return d})}).then(function(d){token=d.csrf;if(d.authenticated)return send();window.promptForReadPin(send,function(){reset('')})}).catch(function(e){reset(e.message||'加入待读失败，请重试。')});
+  });
   mark();pin.parentElement.classList.add('pin-enhanced');
 })();
 </script>`;
@@ -1483,6 +1491,18 @@ const worker = {
         if (!row) throw highlightError("每篇文章最多保存 200 条划线。", 429);
         return { highlight: row };
       }, einkDocument, { maxBytes: 16384, errorMessage: "请求失败，请稍后再试。" });
+    }
+    if (url.pathname.startsWith("/read/add-later/")) {
+      const code = url.pathname.slice("/read/add-later/".length);
+      const shortId = shareCodeId(code);
+      if (shortId === null) return new Response("Not found", { status: 404 });
+      return favoriteRequest(request, env, code, async () => {
+        if (!env.NOTION_TOKEN || !env.NOTION_EXCERPTS_DATA_SOURCE_ID) throw new Error("Notion is not configured");
+        const excerpt = await fetchExcerptByShortId({ NOTION_TOKEN: env.NOTION_TOKEN, NOTION_DATA_SOURCE_ID: env.NOTION_EXCERPTS_DATA_SOURCE_ID }, shortId);
+        if (!excerpt) return false;
+        await addReadLater(env, excerpt.originalUrl || new URL(`/s/${code}`, url.origin).toString(), excerpt.originalTitle || excerpt.title);
+        return { added: true };
+      }, einkDocument, { errorMessage: "加入待读失败，请稍后再试。" });
     }
     if (url.pathname.startsWith("/read/favorite/")) {
       const code = url.pathname.slice("/read/favorite/".length);
