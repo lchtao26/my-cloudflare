@@ -1,6 +1,6 @@
 import MarkdownIt from "markdown-it";
 
-type MarkdownNode = { type: "text"; text: string } | { type: "element"; tag: string; children: MarkdownNode[]; href?: string; start?: number };
+export type MarkdownNode = { type: "text"; text: string } | { type: "element"; tag: string; children: MarkdownNode[]; href?: string; start?: number };
 const parser = new MarkdownIt({ html: false, linkify: false }).disable("image");
 type Token = ReturnType<typeof parser.parse>[number];
 const allowedTags = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "ul", "ol", "li", "em", "strong", "s", "a", "table", "thead", "tbody", "tr", "th", "td", "hr", "br"]);

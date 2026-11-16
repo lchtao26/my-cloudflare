@@ -884,6 +884,16 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
   assert.match(html, /AI 时代的 RSS/);
   assert.match(html, /科技 News · 作者：张三 AI/);
   assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
+  const api = await worker.fetch(new Request("https://example.workers.dev/api/read"), {
+    NOTION_TOKEN: "test",
+    NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
+    NOTION_EXCERPTS_VIEW_ID: viewId,
+  });
+  assert.match(api.headers.get("Content-Type") ?? "", /application\/json/);
+  assert.deepEqual(await api.json(), {
+    kind: "articles", hasMore: false,
+    items: [{ code: shareCode(1), title: "AI 时代的 RSS", titleLang: "zh-CN", source: "科技 News", author: "张三 AI" }],
+  });
   assert.equal((await worker.fetch(new Request("https://example.workers.dev/read"), {
     NOTION_TOKEN: "test",
     NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",

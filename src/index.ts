@@ -2,8 +2,10 @@ import { generateRssFeed, type RssFeed } from "feedsmith";
 import { canonicalText, hashText, resolveAnchor } from "./highlight-anchor.ts";
 import { formatText } from "./format-text.ts";
 import { addReadLater, readLaterFeed } from "./read-later.ts";
-import { favoriteRequest, PIN_FIELD, PIN_STYLE, type FavoriteBindings } from "./favorite.ts";
+import { favoriteRequest, PIN_FIELD, type FavoriteBindings } from "./favorite.ts";
 import { explanationMarkdown } from "./explanation-markdown.ts";
+import { EINK_STYLE } from "./reader-style.ts";
+import { readCategory, readPage, type ReadCategory, type ReaderArticle, type ReaderItem, type ReaderList, type ReaderParagraph, type ResolvedHighlight, READ_CATEGORIES } from "./reader-data.ts";
 
 const NOTION_VERSION = "2026-03-11";
 const FEED_TITLE = "书籍推荐";
@@ -28,22 +30,6 @@ const SHARE_CODE_KEYS = [0x3c6e, 0xa54f, 0x510e, 0x9b05];
 const SHARE_CODE_ALPHABET = "hqAiRYEFKT2xePmzuOfgrw4dBbNscH78S9kI30LQjpaGUJXonCMZ6ly15DtWvV";
 const SHARE_CODE = /^[0-9A-Za-z]{6}$/;
 const FEED_ITEM_LIMIT = 30;
-
-const READ_CATEGORIES = [
-  { id: "all", label: "全部" },
-  { id: "weekly", label: "周刊" },
-  { id: "bunshun", label: "文春" },
-  { id: "novel", label: "连载" },
-  { id: "news", label: "IT" },
-  { id: "favorites", label: "收藏" },
-  { id: "highlights", label: "划线" },
-  { id: "later", label: "稍后阅读" },
-] as const;
-type ReadCategory = typeof READ_CATEGORIES[number]["id"];
-
-function readCategory(value: string | null): ReadCategory {
-  return READ_CATEGORIES.find((category) => category.id === (value === "likes" ? "favorites" : value))?.id ?? "all";
-}
 
 function shareCodeRound(half: number, key: number): number {
   let value = Math.imul(half ^ key, 0x45d9f3b);
@@ -480,96 +466,6 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: 
   ].join("\n");
 }
 
-// E-ink: pure black/white, serif, wide leading, capped line length, no motion/hover-only UI.
-const EINK_STYLE = [
-  "*,*::before,*::after{box-sizing:border-box;animation:none!important;transition:none!important;}",
-  "html{-webkit-text-size-adjust:100%;}",
-  "html,body{scrollbar-width:none;-ms-overflow-style:none;}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;width:0;height:0;}",
-  // Fixed rem gutters + main max-width (no vw); Kindles often ignore CSS min()/max().
-  // OS-bundled faces first: Safari hides user-installed fonts, and partial installs (e.g. Heavy only) render body text too bold in Chrome.
-  "body{margin:0;padding:1.25rem 1.625rem 2.5rem;font-family:serif;font-size:1.0625rem;font-weight:400;line-height:1.75;letter-spacing:normal;text-align:left;word-break:normal;overflow-wrap:break-word;color:#000;background:#fff;}",
-  ":lang(zh){font-family:\"Songti SC\",\"STSong\",\"Noto Serif CJK SC\",\"SimSun\",serif;}",
-  ":lang(ja){font-family:\"Hiragino Mincho ProN\",\"Hiragino Mincho Pro\",\"Yu Mincho\",\"YuMincho\",\"Noto Serif CJK JP\",\"MS PMincho\",serif;}",
-  ":lang(en){font-family:Georgia,\"Times New Roman\",serif;}",
-  ":lang(zh),:lang(ja){line-break:strict;}",
-  // Pangu already inserts mixed-script spaces; leave unsupported CSS harmless on old readers.
-  "body{text-autospace:no-autospace;}",
-  // 6\" Kindle: 365px column. Scribe (≥720px): 36rem + larger type.
-  "main{max-width:365px;margin:0 auto;}",
-  "h1{font-size:1.5rem;line-height:1.35;font-weight:700;margin:0 0 1rem;}",
-  // Keep mixed-language reading text evenly spaced and scale paragraph gaps with its size.
-  "p{margin:0.85em 0;}",
-  "li{margin:0;}",
-  "ul{list-style:none;margin:0;padding:0;}",
-  "li{border-top:2px solid #000;padding:2rem 0;}",
-  "li:last-child{border-bottom:2px solid #000;}",
-  // Fragment return from detail: no UA focus ring (scroll centering is JS).
-  "li:focus{outline:none;}",
-  "li:target{position:relative;padding-left:0.9rem;}",
-  // Center the marker on the title's first line; retain the old offset for older readers.
-  "li:target::before{content:\"\";position:absolute;left:0;top:2.35rem;top:calc(2rem + 0.525em);width:0;height:0;border-top:0.35em solid transparent;border-bottom:0.35em solid transparent;border-left:0.55em solid #000;}",
-  "a{color:#000;text-decoration:none;}",
-  "a:hover{text-decoration:underline;text-underline-offset:0.35em;}",
-  "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
-  ".item-link{display:block;font-weight:700;}",
-  ".categories{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0.2rem;margin:0 0 1rem;}",
-  ".visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}",
-  ".categories a{min-width:0;display:flex;align-items:center;justify-content:center;min-height:2.2rem;padding:0.2rem 0.1rem;border:1px solid #000;font-size:0.85em;font-weight:700;text-align:center;}",
-  ".categories{position:fixed;z-index:2;left:1.625rem;right:1.625rem;bottom:0;width:auto;max-width:365px;margin:0 auto;padding:0.65rem 0;padding-bottom:calc(0.65rem + env(safe-area-inset-bottom, 0px));background:#fff;border-top:1px solid #000;box-sizing:border-box;}",
-  ".categories::after{content:'';position:absolute;top:100%;left:0;right:0;height:100vh;background:#fff;pointer-events:none;}",
-  "@media (min-width:440px){.categories{left:1.25rem;right:1.25rem;}}",
-  "@media (min-width:720px){.categories{left:1.25rem;right:1.25rem;max-width:36rem;}}",
-  "body.read-list{padding-top:max(1.25rem,env(safe-area-inset-top, 0px));padding-bottom:calc(8rem + env(safe-area-inset-bottom, 0px));}",
-
-  ".categories a[aria-current=page]{background:#000;color:#fff;}",
-  ".meta{font-size:1rem;margin:0.65em 0 0;}",
-  // Responsive type must follow the base heading/meta rules to win the cascade.
-  "@media (min-width:440px){body{font-size:1.125rem;padding-right:1.25rem;padding-left:1.25rem;}}",
-  "@media (min-width:720px){body{font-size:1.25rem;}h1{font-size:1.65rem;}.meta{font-size:1.0625rem;}main{max-width:36rem;}}",
-  ".nav-row{display:flex;gap:0.5rem;align-items:stretch;margin:0.85rem 0;}",
-  ".nav-row[hidden]{display:none;}",
-  ".nav-row a,.nav-row span{flex:1;display:flex;align-items:center;justify-content:center;min-height:3rem;padding:0.75rem 0.35rem;font-weight:700;text-align:center;}",
-  ".nav-row .is-disabled{opacity:0.4;}",
-  ".nav-row a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
-  "a.metadata-link{text-decoration:underline;text-decoration-thickness:1px;text-decoration-skip-ink:none;text-underline-offset:0.28em;}",
-  ".btn{display:block;border:2px solid #000;padding:0.85rem 1rem;margin:0.75rem 0;text-align:center;text-decoration:none;font-weight:700;min-height:3rem;}",
-  ".btn:focus-visible{outline:3px solid #000;outline-offset:3px;}",
-  ".detail-metadata{margin-bottom:0;}",
-  ".other{margin:0;}",
-  ".other-link{color:inherit;font:inherit;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:0.28em;}",
-  ".other-link + .other-link{margin-left:0.35em;}",
-  "button.other-link{padding:0;border:0;background:transparent;cursor:pointer;}",
-  "button.other-link:focus-visible{outline:3px solid #000;outline-offset:3px;}",
-  ".other-link[aria-disabled=true],button.other-link:disabled{opacity:0.4;cursor:default;}",
-  PIN_STYLE,
-  "#favorite-dialog:not([open]){display:none;}#favorite-dialog{width:calc(100% - 3rem);max-width:24rem;padding:1.5rem;border:2px solid #000;background:#fff;color:#000;}",
-  "#favorite-dialog:modal{overscroll-behavior:contain;}#favorite-dialog::backdrop{background:rgba(0,0,0,0.45);overflow:hidden;overscroll-behavior:contain;}",
-  "#favorite-dialog p:first-child{margin-top:0;}#favorite-error:empty,#favorite-message:empty{display:none;}.favorite-close{display:block;margin:1rem auto 0;border:0;background:none;color:inherit;font:inherit;text-decoration:underline;cursor:pointer;min-height:3rem;min-width:3rem;}.favorite-close:focus-visible{outline:3px solid #000;outline-offset:3px;}",
-  "#highlight-error[hidden]{display:none}#highlight-error:not([open]){display:none}#highlight-error{position:fixed;z-index:12;top:50%;left:50%;width:calc(100% - 3rem);max-width:24rem;margin:0;padding:1.5rem;border:2px solid #000;background:#fff;color:#000;transform:translate(-50%,-50%)}#highlight-error:modal{overscroll-behavior:contain}#highlight-error::backdrop{background:rgba(0,0,0,0.45);overflow:hidden;overscroll-behavior:contain}#highlight-error p{margin:0}#highlight-error div{display:flex;justify-content:flex-end;margin-top:1rem}#highlight-error button{flex:none;min-height:2.25rem;min-width:3.25rem;margin:0 0 0 0.35rem;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;color:#000;font:inherit}#highlight-error button:focus-visible{outline:3px solid #000;outline-offset:3px}",
-  ".list-actions{display:flex;justify-content:flex-end;gap:0.25rem;margin:1rem 0 2rem;}",
-  ".list-actions .btn{flex:none;min-width:3.25rem;min-height:2.25rem;margin:0.15rem 0;padding:0.2rem 0.5rem;border:0;background:#fff;font:inherit;text-align:center;}",
-  ".list-actions .btn[hidden]{display:none;}",
-  ".list-actions #load-more[aria-disabled=true]{color:#777;opacity:0.55;pointer-events:none;}",
-  "img{max-width:100%;height:auto;display:block;margin:1rem 0;}",
-  // Mobile article images may extend beyond the reading column to the screen edges.
-  "@media (max-width:440px){@supports (container-type:inline-size) and (width:100cqw){html{container-type:inline-size;}.excerpt-body img{width:100cqw;max-width:none;margin-left:calc(50% - 50cqw);}}}",
-  "hr{border:0;border-top:2px solid #000;margin:1.5rem 0;}",
-  "cite{font-style:normal;font-weight:700;}",
-  // Thin bottom progress track; width updates from scroll position (no animation).
-  ".progress{position:fixed;left:0;right:0;bottom:0;height:4px;background:#fff;border-top:1px solid #000;z-index:1;}",
-  ".progress-bar{display:block;height:100%;width:0;background:#000;}",
-  "#body-actions[hidden]{display:none}#body-actions:modal{overscroll-behavior:contain}#body-actions::backdrop{background:transparent;overflow:hidden;overscroll-behavior:contain}#body-actions{position:fixed;z-index:9;top:auto;right:0;bottom:4px;left:0;background:#fff;border:0;border-top:1px solid #000}#body-actions div{display:flex;justify-content:flex-end}#body-actions button{flex:none;min-height:2.25rem;min-width:3.25rem;margin:0.15rem;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;color:#000;font:inherit}#body-toggle{order:0}#body-highlight{order:1}#body-unhighlight{order:2}#body-actions[data-mode=mark] #body-toggle,#body-actions[data-mode=mark] #body-highlight{display:none}#body-actions:not([data-mode=mark]) #body-unhighlight{display:none}#body-actions button:focus{outline:none}#body-actions button[hidden]{display:none}mark.hl{background:none;color:inherit;border-bottom:2px solid #000}",
-
-
-  "#body-actions[open]{width:calc(100% - 3.25rem);max-width:365px;margin:0 auto;display:flex;flex-direction:column;box-sizing:border-box;bottom:0;height:auto;max-height:90vh;padding:1rem;border-top:0;font-size:0.9375rem;line-height:1.6}#body-actions::backdrop{background:rgba(0,0,0,.35)}#body-actions #body-preview-scroll{display:block;flex:none;height:32vh;max-height:calc(90vh - 6rem);min-height:0;overflow-y:auto}#body-preview{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}#body-actions #body-actions-buttons{flex:none;display:flex;justify-content:flex-end;margin:0 -1rem;padding:0.75rem 1rem 0;border-top:1px solid #000}@media (min-width:440px){#body-actions{width:calc(100% - 2.5rem)}}@media (min-width:720px){#body-actions{max-width:36rem}}",
-  "#body-actions #body-toggle{margin-right:auto}#body-explain{order:1}#body-highlight{order:2}#body-unhighlight{order:3}#explanation-dialog[open],#original-match-dialog[open]{position:fixed;inset:0;width:calc(100% - 3.25rem);max-width:365px;max-height:80vh;overflow:auto;background:#fff;color:#000;border:2px solid #000;padding:1rem}@media (min-width:440px){#explanation-dialog[open],#original-match-dialog[open]{width:calc(100% - 2.5rem)}}@media (min-width:720px){#explanation-dialog[open],#original-match-dialog[open]{max-width:36rem}}#explanation-dialog:modal,#original-match-dialog:modal{overscroll-behavior:contain}#explanation-dialog::backdrop,#original-match-dialog::backdrop{background:rgba(0,0,0,.35);overflow:hidden;overscroll-behavior:contain}#explanation-text,#original-match-text{white-space:pre-wrap;overflow-wrap:anywhere}",
-  "#body-actions button{font-size:0.9375rem;line-height:1.6}",
-  "#body-actions button:disabled{opacity:0.4;}",
-
-  "#explanation-dialog,#original-match-dialog{font-size:0.9375rem;line-height:1.6}#explanation-dialog[open],#original-match-dialog[open]{display:flex;flex-direction:column;overflow:hidden}#explanation-text{flex:1;min-height:0;overflow-y:auto;white-space:normal}#original-match-content{display:flex;flex:1;flex-direction:column;min-height:0}#original-match-content section{flex:1;min-height:0;overflow-y:auto;padding:0.35rem 0;white-space:pre-wrap;overflow-wrap:anywhere}#original-match-content section:first-child{padding-bottom:1rem;padding-block-end:1rem}#original-match-content section+section{border-top:1px solid #000;padding-top:1rem;padding-block-start:1rem}#original-match-content h2{margin:0 0 0.35rem;font-size:0.875rem;line-height:1.4}#original-match-content p{margin:0}#explanation-text :is(ul,ol){list-style:revert;padding-left:1.5em}#explanation-text li,#explanation-text li:last-child{border:0;padding:0;margin:0}#explanation-text :is(h1,h2,h3,h4,h5,h6){font-size:1em;line-height:1.6;margin:0.85em 0;font-weight:700}#explanation-text blockquote{border-left:2px solid #000;margin:0.85em 0;padding-left:0.75em}#explanation-text pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}#explanation-text :is(pre,code){font-family:monospace;font-size:0.95em}",
-  "#favorite-dialog .favorite-close{min-height:2.25rem;min-width:3.25rem;margin:0.15rem 0 0.15rem auto;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;text-decoration:none}",
-].join("");
-
 function einkDocument(
   title: string,
   body: string,
@@ -989,16 +885,13 @@ type HighlightRow = {
   id: string; excerpt_number: number; excerpt_page_id: string; field: "original" | "translation" | "terms";
   start: number; end: number; quote: string; prefix: string; suffix: string; body_hash: string; created_at: string;
 };
-type ResolvedHighlight = { id: string; field: string; start: number; end: number };
 
 function bodyText(excerpt: Excerpt, field: string): string | null {
   const raw = field === "translation" ? (!excerpt.chinese ? excerpt.body : "") :
     field === "original" ? (excerpt.chinese ? excerpt.body : excerpt.originalBody || "") :
     field === "terms" ? excerpt.terms : "";
   if (!raw) return null;
-  const parts: string[] = [];
-  einkParagraphs(raw, excerpt.id, "", parts);
-  return canonicalText(parts.join(""));
+  return canonicalText(readerParagraphs(raw, excerpt.id, "").map(({ quote }) => quote).join(""));
 }
 
 async function resolveHighlights(excerpt: Excerpt, rows: HighlightRow[]): Promise<ResolvedHighlight[]> {
@@ -1101,14 +994,20 @@ async function fetchHighlightExcerpts(env: ConfiguredBindings, ids: number[]): P
   return found;
 }
 
-async function renderHighlightList(db: D1Database | undefined, env: ConfiguredBindings, page: number): Promise<string> {
-  if (!db) return renderEinkList([], READ_LIST_PATH, "highlights").replace("暂无条目", "划线数据库未配置");
+async function loadHighlightList(db: D1Database | undefined, env: ConfiguredBindings, page: number) {
+  if (!db) return { rows: [], excerpts: new Map<number, Excerpt>(), resolved: new Set<string>(), hasMore: false };
   const limit = FEED_ITEM_LIMIT;
   const result = await db.prepare('SELECT * FROM highlights ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?').bind(limit + 1, (page - 1) * limit).all<HighlightRow>();
   const rows = result.results.slice(0, limit);
   const excerpts = await fetchHighlightExcerpts(env, [...new Set(rows.map(row => row.excerpt_number))]);
   const resolved = new Set<string>();
   for (const [id, excerpt] of excerpts) for (const row of await resolveHighlights(excerpt, rows.filter(row => row.excerpt_number === id))) resolved.add(row.id);
+  return { rows, excerpts, resolved, hasMore: result.results.length > limit && page < 999 };
+}
+
+async function renderHighlightList(db: D1Database | undefined, env: ConfiguredBindings, page: number): Promise<string> {
+  if (!db) return renderEinkList([], READ_LIST_PATH, "highlights").replace("暂无条目", "划线数据库未配置");
+  const { rows, excerpts, resolved, hasMore } = await loadHighlightList(db, env, page);
   const anchoredCodes = new Set<string>();
   const items = rows.map(row => {
     const excerpt = excerpts.get(row.excerpt_number);
@@ -1121,7 +1020,7 @@ async function renderHighlightList(db: D1Database | undefined, env: ConfiguredBi
     return `<li id="hl-${id}">${articleAnchor}${link}<p class="meta">${meta}</p></li>`;
   }).join("\n");
   const pageHtml = renderEinkList([], READ_LIST_PATH, "highlights");
-  const more = result.results.length > limit && page < 999 ? `<a class="btn" id="load-more" href="${htmlText(`${READ_LIST_PATH}${categorySearch("highlights", page + 1)}`)}">下一页</a>` : "";
+  const more = hasMore ? `<a class="btn" id="load-more" href="${htmlText(`${READ_LIST_PATH}${categorySearch("highlights", page + 1)}`)}">下一页</a>` : "";
   const previous = page > 1 ? `<a class="btn" href="${htmlText(`${READ_LIST_PATH}${categorySearch("highlights", page - 1)}`)}">上一页</a>` : "";
   return pageHtml.replace(`<p>${displayText("暂无条目")}</p>`, items ? `<ul>${items}</ul><div class="list-actions" id="list-actions"><a class="btn" id="back-to-top" href="#" hidden>返回顶部</a>${previous}${more}</div>` : `<p>${displayText("暂无条目")}</p>${previous}`);
 }
@@ -1154,11 +1053,13 @@ function einkParagraphTexts(translation: string, pageId: string): string[] {
     .split(/\n(?:[^\S\n]*\n)+/);
 }
 
-function einkParagraphs(translation: string, pageId: string, imageBaseUrl: string, textParts?: string[]): string {
+function readerParagraphs(translation: string, pageId: string, imageBaseUrl: string): ReaderParagraph[] {
+  if (!translation) return [];
+  let start = 0;
   // Use the same paragraph boundaries for display and Jev candidate selection.
   return einkParagraphTexts(translation, pageId)
     .map((paragraph) => {
-      const replacements: Array<{ index: number; length: number; html: string }> = [];
+      const replacements: Array<{ index: number; length: number; image: string }> = [];
       for (const match of paragraph.matchAll(IMAGE_TAG)) {
         const blockId = match[1];
         const fileId = match[2];
@@ -1167,7 +1068,7 @@ function einkParagraphs(translation: string, pageId: string, imageBaseUrl: strin
         replacements.push({
           index: match.index ?? 0,
           length: match[0].length,
-          html: `<img src="${htmlText(`${imageBaseUrl}/${pageId}/${blockId}`)}" alt="${einkText("正文图片")}" />`,
+          image: `${imageBaseUrl}/${pageId}/${blockId}`,
         });
       }
       for (const match of paragraph.matchAll(HTML_IMG)) {
@@ -1176,24 +1077,33 @@ function einkParagraphs(translation: string, pageId: string, imageBaseUrl: strin
         replacements.push({
           index: match.index ?? 0,
           length: match[0].length,
-          html: `<img src="${htmlText(href)}" alt="${einkText("正文图片")}" />`,
+          image: href,
         });
       }
       replacements.sort((a, b) => a.index - b.index);
 
-      let output = "";
+      const parts: ReaderParagraph["parts"] = [];
       let offset = 0;
       for (const replacement of replacements) {
         if (replacement.index < offset) continue;
-        textParts?.push(paragraph.slice(offset, replacement.index));
-        output += htmlText(paragraph.slice(offset, replacement.index)).replaceAll("\n", "<br />\n");
-        output += replacement.html;
+        parts.push({ text: paragraph.slice(offset, replacement.index) }, { image: replacement.image });
         offset = replacement.index + replacement.length;
       }
-      textParts?.push(paragraph.slice(offset));
-      return `<p>${output}${htmlText(paragraph.slice(offset)).replaceAll("\n", "<br />\n")}</p>`;
-    })
-    .join("\n");
+      parts.push({ text: paragraph.slice(offset) });
+      const quote = parts.map(part => "text" in part ? part.text : "").join("");
+      const end = start + canonicalText(quote).length;
+      const result = { parts, quote, start, end };
+      start = end;
+      return result;
+    });
+}
+
+function einkParagraphs(translation: string, pageId: string, imageBaseUrl: string): string {
+  return readerParagraphs(translation, pageId, imageBaseUrl).map(({ parts }) =>
+    `<p>${parts.map(part => "text" in part
+      ? htmlText(part.text).replaceAll("\n", "<br />\n")
+      : `<img src="${htmlText(part.image)}" alt="${einkText("正文图片")}" />`).join("")}</p>`,
+  ).join("\n");
 }
 
 async function fetchPages(env: ConfiguredBindings, filter?: object): Promise<NotionPage[]> {
@@ -1374,9 +1284,31 @@ function htmlResponse(body: string | null, method: string, vary?: string): Respo
   });
 }
 
+function readerItem(excerpt: Excerpt): ReaderItem {
+  return {
+    code: excerpt.code,
+    title: formatText(excerpt.title),
+    titleLang: excerpt.titleLang,
+    source: formatText(excerpt.sourceTitle),
+    author: formatText(excerpt.author),
+  };
+}
+
+function readerResponse(data: ReaderList | ReaderArticle, method: string, cacheable: boolean): Response {
+  return new Response(method === "HEAD" ? null : JSON.stringify(data), {
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": cacheable ? "public, max-age=300, must-revalidate" : "no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
 const worker = {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
+    const readerApi = /^\/api\/(?:read|[rs]\/[0-9A-Za-z]{6})$/.test(url.pathname);
+    if (readerApi) url.pathname = url.pathname.slice("/api".length);
     if (url.pathname.startsWith("/read/highlight/")) {
       const code = url.pathname.slice("/read/highlight/".length);
       const id = shareCodeId(code);
@@ -1528,8 +1460,7 @@ const worker = {
       return readLaterFeed(request, env);
     }
     const category = readCategory(url.searchParams.get("tab") ?? url.searchParams.get("category"));
-    const pageParam = url.searchParams.get("page");
-    const page = pageParam && /^[1-9]\d{0,2}$/.test(pageParam) ? Number(pageParam) : 1;
+    const page = readPage(url.searchParams.get("page"));
     const coverId = coverIdFromPath(url.pathname);
     const isBookFeed = url.pathname === BOOK_FEED_PATH;
     const isExcerptFeed = url.pathname === READ_FEED_PATH;
@@ -1540,7 +1471,7 @@ const worker = {
     const imageIds = imageMatch && NOTION_PAGE_ID.test(imageMatch[1] ?? "") && NOTION_PAGE_ID.test(imageMatch[2] ?? "") ? [imageMatch[1]!, imageMatch[2]!] : null;
     const usesExcerpts = isExcerptFeed || isEinkList || shortId !== null || Boolean(imageIds);
     if (!isBookFeed && !usesExcerpts && !coverId) {
-      return new Response("Not found", { status: 404 });
+      return readerApi ? highlightError("未找到文章。", 404) : new Response("Not found", { status: 404 });
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
@@ -1551,7 +1482,7 @@ const worker = {
     const excerptsViewId = useFavoritesView ? env.NOTION_EXCERPTS_FAVORITES_VIEW_ID : env.NOTION_EXCERPTS_VIEW_ID;
     const needsView = isExcerptFeed || (isEinkList && category !== "highlights");
     if (!notionToken || !dataSourceId || (needsView && !excerptsViewId)) {
-      return new Response("Feed is not configured", { status: 503 });
+      return readerApi ? highlightError("阅读服务未配置。", 503) : new Response("Feed is not configured", { status: 503 });
     }
     const configured = { NOTION_TOKEN: notionToken, NOTION_DATA_SOURCE_ID: dataSourceId };
 
@@ -1587,8 +1518,33 @@ const worker = {
           : Promise.resolve([] as Excerpt[]);
         const [excerpt, list, highlightRows] = await Promise.all([excerptPromise, listPromise, highlightPromise]);
         // Cache misses too, so probing unused codes does not reach Notion on every request.
-        if (!excerpt) return new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=300" } });
+        if (!excerpt) return readerApi ? highlightError("未找到文章。", 404) : new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=300" } });
         const neighbors = neighborsFor(list, excerpt.code) ?? { prevCode: null, nextCode: null };
+        const highlights = showNavigation ? await resolveHighlights(excerpt, highlightRows) : [];
+        if (readerApi) {
+          const paragraphs = (text: string) => readerParagraphs(text, excerpt.id, READ_ASSET_PREFIX);
+          return readerResponse({
+            item: readerItem(excerpt),
+            lang: excerpt.lang,
+            originalLang: excerpt.originalLang,
+            originalTitle: formatText(excerpt.originalTitle),
+            originalUrl: excerpt.originalUrl,
+            publisher: formatText(excerpt.publisher),
+            chapter: formatText(excerpt.chapter),
+            date: excerpt.publishedDate,
+            field: excerpt.chinese ? "original" : "translation",
+            body: paragraphs(excerpt.body),
+            original: showNavigation && !excerpt.chinese ? paragraphs(excerpt.originalBody ?? "") : [],
+            terms: showNavigation ? paragraphs(excerpt.terms) : [],
+            actions: showNavigation ? {
+              favorite: Boolean(excerpt.favorite),
+              notionUrl: excerpt.link,
+              highlightsEnabled: Boolean(env.HIGHLIGHTS_DB),
+              highlights,
+              ...neighbors,
+            } : null,
+          }, request.method, !showNavigation);
+        }
         const detailResponse = htmlResponse(
           renderEinkDetail(
             excerpt,
@@ -1598,7 +1554,7 @@ const worker = {
             category,
             page,
             showNavigation,
-            showNavigation ? await resolveHighlights(excerpt, highlightRows) : [],
+            highlights,
             Boolean(env.HIGHLIGHTS_DB),
           ),
           request.method,
@@ -1608,6 +1564,16 @@ const worker = {
       }
 
       if (isEinkList && category === "highlights") {
+        if (readerApi) {
+          const { rows, excerpts, resolved, hasMore } = await loadHighlightList(env.HIGHLIGHTS_DB, configured, page);
+          return readerResponse({
+            kind: "highlights", hasMore, available: Boolean(env.HIGHLIGHTS_DB),
+            items: rows.map(row => {
+              const excerpt = excerpts.get(row.excerpt_number);
+              return { id: row.id, quote: row.quote, located: resolved.has(row.id), article: excerpt ? readerItem(excerpt) : null };
+            }),
+          }, request.method, false);
+        }
         const listResponse = htmlResponse(await renderHighlightList(env.HIGHLIGHTS_DB, configured, page), request.method);
         listResponse.headers.set("Cache-Control", "no-store");
         return listResponse;
@@ -1618,6 +1584,11 @@ const worker = {
         const excerpts = pages.slice(0, limit)
           .map(excerptFromPage)
           .filter((item): item is Excerpt => item !== null);
+        if (readerApi) {
+          return readerResponse({
+            kind: "articles", items: excerpts.map(readerItem), hasMore: pages.length > limit && page < 999,
+          }, request.method, category !== "favorites");
+        }
         const listResponse = htmlResponse(renderEinkList(excerpts, READ_LIST_PATH, category, page, pages.length > limit && page < 999), request.method);
         if (category === "favorites") listResponse.headers.set("Cache-Control", "no-store");
         return listResponse;
@@ -1643,6 +1614,7 @@ const worker = {
       });
     } catch (error) {
       console.error(coverId || imageIds ? "Failed to load image" : isEinkList || shortId !== null ? "Failed to build e-ink page" : "Failed to build book RSS", error);
+      if (readerApi) return highlightError("暂时无法读取，请稍后重试。", 502);
       return new Response(
         coverId || imageIds ? "Image temporarily unavailable" : isEinkList || shortId !== null ? "Page temporarily unavailable" : "Feed temporarily unavailable",
         { status: 502, headers: { "Cache-Control": "no-store" } },

@@ -102,6 +102,17 @@ test("highlight writes reuse PIN and CSRF, validate rendered text and render onl
   const listHtml = await list.text();
   assert.match(listHtml, new RegExp(`/r/${code}\\?tab=highlights#hl-${value.highlight.id}`));
   assert.match(listHtml, /&lt;script&gt;/);
+  const readApi = await worker.fetch(new Request(`${origin}/api/r/${code}`), env);
+  const article = await readApi.json<import("../src/reader-data.ts").ReaderArticle>();
+  assert.equal(readApi.headers.get("cache-control"), "no-store");
+  assert.ok(article.body.some(paragraph => paragraph.quote.includes("<script>")));
+  assert.ok(article.actions?.highlights.some(mark => mark.id === value.highlight.id));
+  const shareApi = await worker.fetch(new Request(`${origin}/api/s/${code}`), env);
+  const shared = await shareApi.json<import("../src/reader-data.ts").ReaderArticle>();
+  assert.deepEqual(shared.body, article.body);
+  assert.equal(shared.actions, null);
+  assert.deepEqual(shared.original, []);
+  assert.deepEqual(shared.terms, []);
   activePage.properties["正文翻译"].rich_text[0]!.plain_text = "甲 重复乙";
   const changed = await worker.fetch(new Request(`${origin}/read?tab=highlights`), env);
   assert.match(await changed.text(), /正文已变动，未能定位/);

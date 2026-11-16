@@ -3,7 +3,8 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "my-cloudflare-highlights-local",
   "main": "src/worker.ts",
-  "assets": { "directory": "./public" },
+  "assets": { "binding": "ASSETS", "html_handling": "none" },
+  "compatibility_flags": ["nodejs_compat"],
   "compatibility_date": "2026-10-13",
   "workers_dev": true,
   "cache": {

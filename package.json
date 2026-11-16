@@ -3,22 +3,34 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "dev": "vite dev",
+    "deploy": "npm run build && wrangler deploy",
     "check": "tsc --noEmit",
     "hooks:install": "git config core.hooksPath .githooks",
     "types": "wrangler types",
-    "test": "tsc --noEmit && node --test"
+    "test": "tsc --noEmit && node --test",
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.69.1",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
     "typescript": "^7.0.2",
+    "vite": "^8.3.8",
     "wrangler": "^4.0.0"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.107.1",
+    "@tanstack/react-router": "^1.170.46",
+    "@tanstack/react-start": "^1.169.5",
     "feedsmith": "^3.0.1",
     "markdown-it": "^15.0.3",
-    "pangu": "^10.4.1"
+    "pangu": "^10.4.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   }
 }

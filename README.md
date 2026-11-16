@@ -8,15 +8,15 @@ Cloudflare Worker 从 Notion「书籍推荐」数据库读取最近编辑的前 
 2. 将集成密钥保存为 Cloudflare Worker Secret `NOTION_TOKEN`。部署配置要求这个密钥，缺少时 Wrangler 会阻止部署。不要将密钥提交到 GitHub。
 3. `NOTION_DATA_SOURCE_ID` 已在 `wrangler.jsonc` 中配置为该数据库当前的数据源 ID。
 
-本地开发时，把 `.dev.vars.example` 复制为 `.dev.vars`，填入密钥，然后运行 `npm ci` 和 `npm run dev`。首次部署可在登录 Cloudflare 后运行 `npx wrangler deploy --secrets-file .dev.vars`，使代码和密钥同时上线；后续部署使用 `npm run deploy`。`.dev.vars` 已加入 `.gitignore`。
+本地开发时，把 `.dev.vars.example` 复制为 `.dev.vars`，填入密钥，然后运行 `npm ci` 和 `npm run dev`。首次部署可在登录 Cloudflare 后运行 `npm run deploy -- --secrets-file .dev.vars`，使代码和密钥同时上线；后续部署使用 `npm run deploy`。`.dev.vars` 已加入 `.gitignore`。
 
 ## GitHub 自动部署
 
-推送到 `main` 后，GitHub Actions 会运行 `npm test`，再执行 `wrangler deploy`。部署任务使用 `production` 环境，因此 `CLOUDFLARE_API_TOKEN`（权限为 Edit Cloudflare Workers，且只限本账号）和 `CLOUDFLARE_ACCOUNT_ID` 要放在该环境的 Secrets 中。
+推送到 `main` 后，GitHub Actions 会运行 `npm test` 和 `npm run build`，再执行 `wrangler deploy`。部署任务使用 `production` 环境，因此 `CLOUDFLARE_API_TOKEN`（权限为 Edit Cloudflare Workers，且只限本账号）和 `CLOUDFLARE_ACCOUNT_ID` 要放在该环境的 Secrets 中。
 
 本地可运行 `npm run hooks:install` 启用 Git `pre-push` hook；之后每次 push 都会先运行 `npm test`，测试失败时 push 会被阻止。
 
-`NOTION_TOKEN` 和 Instapaper 凭据保存在 Cloudflare Worker Secret 中。Worker 上还没有所需密钥时，Actions 会拒绝部署；先在本地执行一次 `npx wrangler deploy --secrets-file .dev.vars`。不要再把这个仓库接到 Cloudflare Worker 的 Builds，否则每次推送会部署两次。
+`NOTION_TOKEN` 和 Instapaper 凭据保存在 Cloudflare Worker Secret 中。Worker 上还没有所需密钥时，Actions 会拒绝部署；先在本地执行一次 `npm run deploy -- --secrets-file .dev.vars`。不要再把这个仓库接到 Cloudflare Worker 的 Builds，否则每次推送会部署两次。
 
 部署成功后的订阅地址为 `https://my-cloudflare.lichcode.workers.dev/book.xml`。接口返回 RSS 2.0，按 Notion 的最后编辑时间排序，为每本书使用稳定的 Notion 页面 ID 作为 GUID，每次最多输出 30 条。
 
@@ -40,11 +40,15 @@ RSS 条目只输出标题、指向水墨屏详情页 `/r/{6 位短码}` 的链�
 
 ## 阅读节选水墨屏页面
 
+`/read`、`/r/{短码}` 和 `/s/{短码}` 使用 TanStack Start 的 SPA 模式。在浏览器中，React Query 请求 Worker 的 JSON 接口并管理列表、文章和写入状态。页面需要 JavaScript。RSS 订阅地址继续由 Worker 直接返回 XML。
+
+`npm run dev` 默认监听 `127.0.0.1:8787`，入口为 `http://127.0.0.1:8787/read`。要预览发布产物，运行 `npm run build` 和 `npm run preview`。构建在 `dist/client` 产出页面外壳及静态资源，Wrangler 读取 Vite 生成的部署配置。
+
 `/read` 与 `/r/{6 位短码}` 为水墨屏设备提供极简 HTML 阅读页。详情页呈现出处、作者、正文、元数据与术语。有有效「原文链接」时，点按「原文」一行的标题可打开原文。普通详情页可通过「显示原文／显示译文」切换整篇正文，通过「加入待读」将原文链接保存到 Instapaper（没有原文链接时保存本站分享页），通过「收藏」保存文章、「管理」打开 Notion 条目，或通过「分享」复制分享链接；整篇切换按钮仅在同时有原文和译文时显示。连续点击同一正文段落 2 次会在底部半窗预览整段，可选择「显示原文」「解释」或「划线」；触碰操作栏外可收起，且这次触碰不会触发正文或翻页；滑动和滚动不会计入双击。原文匹配仅在同时有原文、译文和划线数据库时显示；解释与划线也需要配置划线数据库。日期缺失时显示「—」。分享页隐藏这些操作和名词解释。分享链接为 `/s/{6 位短码}`，与详情页使用同一个短码。短码由「阅读节选」数据库中名为 `ID` 的 ID 属性（Notion 自增编号）经带密钥的 Feistel 置换和 base62 编码得到，相邻编号的短码互不相似；Worker 可直接解码，无需存储。编号须小于 2^20，没有编号的条目不出现在列表与 RSS 中。旧的 `/read/{短码}`、`/read/d/{短码}`、`/read/d/{pageId}` 与 `/read/s/{pageId}` 地址已停用。修改 `SHARE_CODE_KEYS` 或 `SHARE_CODE_ALPHABET` 会使已有的详情与分享链接全部失效，浏览器保存的阅读进度也会对不上。短码只解析自己数据源内的条目，不能跳转到外部网址；随机猜测的短码约 4096 个中才有 1 个能解码出编号，其余直接返回 404，不请求 Notion，查无条目的 404 也缓存 5 分钟。这只是混淆，不是加密：仓库公开时，看过代码的人可以算出编号。分享页打开后隐藏文章底部导航，不读取或保存阅读进度；其他详情页在底部显示导航。 这些入口适用于所有设备。列表页的标题、出处和作者，以及详情页全部可见文本都经 `pangu` 调整中英文与数字间距，不改动 HTML 标签与图片代理地址。页面使用纯黑白、衬线大字号、固定行宽、实线分隔与大触控目标，无动画。图片继续复用 `/read/p/...` 代理，缓存 5 分钟。
 
 分类栏显示「全部、收藏、划线、稍后阅读、IT、周刊、文春、连载」。「全部、周刊、文春、连载、IT」在 RSS 视图范围内筛选。周刊按原文链接或备注中的 `bunshun.jp/denshiban/articles/` 识别，文春按 `bunshun.jp/articles/` 识别；连载按「提取来源」为 epub 识别，IT按 Hacker News 原文链接或以 `HN ` 开头的备注识别。「收藏」读取 `NOTION_EXCERPTS_FAVORITES_VIEW_ID` 配置的「已收藏」视图，沿用该视图的筛选，并按最后修改时间倒序排列。「稍后阅读」查询「提取来源」为 Instapaper 的条目，不受 RSS 视图筛选条件限制，沿用页面的正文和编号要求。每个分类先读取前 30 条，有更多条目时可继续加载。详情页的上一篇、下一篇和返回列表保留当前分类与已加载的条目。
 
-「加入待读」沿用收藏的密码验证；收录完成状态只保留到页面刷新，失败后可重试。普通详情页可以收藏或取消收藏文章，对应修改 Notion「已收藏」的勾选状态。首次操作或验证失效时，在文章页的弹窗中输入六位密码，输入完成后自动验证并执行操作；已有有效验证时直接执行。浏览器使用有效期 30 天的 Secure、HttpOnly、SameSite=Strict Cookie 记住验证，不保存密码；更改密码或签名密钥会使已有验证失效。不支持弹窗或 JavaScript 的浏览器使用独立验证页。分享页没有收藏入口。普通详情页和收藏列表不缓存；其他分类列表缓存 5 分钟。
+「加入待读」沿用收藏的密码验证；收录完成状态只保留到页面刷新，失败后可重试。普通详情页可以收藏或取消收藏文章，对应修改 Notion「已收藏」的勾选状态。首次操作或验证失效时，在文章页的弹窗中输入六位密码，输入完成后自动验证并执行操作；已有有效验证时直接执行。浏览器使用有效期 30 天的 Secure、HttpOnly、SameSite=Strict Cookie 记住验证，不保存密码；更改密码或签名密钥会使已有验证失效。验证弹窗会在输入六位数字后提交。分享页没有收藏入口。普通详情页和收藏列表不缓存；其他分类列表缓存 5 分钟。
 
 启用收藏前，在 Cloudflare Worker 的 **Settings → Variables and Secrets** 中新增两个 Secret：`FAVORITE_PIN` 填六位随机数字（保留前导零），`FAVORITE_SESSION_SECRET` 填至少 32 字符的独立随机密钥（可用 `openssl rand -hex 32` 生成）。不要把实际值写进代码或聊天；本地开发只写入被 Git 忽略的 `.dev.vars`。Notion 集成除读取权限外，还需要在 Notion 开发者门户启用 **Update content** 权限，并保持连接到「阅读节选」数据库。新配置需要部署后生效。
 
@@ -60,10 +64,10 @@ RSS 条目只输出标题、指向水墨屏详情页 `/r/{6 位短码}` 的链�
 
 ```sh
 npx wrangler d1 migrations apply HIGHLIGHTS_DB --local
-npm run dev -- --ip 0.0.0.0
+npm run dev -- --host 0.0.0.0
 ```
 
-本地数据保存在本机 `.wrangler/`；这两个命令都不创建远程资源。`wrangler.highlights.local.jsonc` 也可用于独立本地测试，其数据库 ID 是占位符，不可用于部署。双击划线需要 JavaScript、`fetch` 和 `URLSearchParams`；密码弹窗在不支持 `dialog.showModal` 时使用回退显示；重绘已存划线不依赖这些新增操作所需的 API，但仍需要 JavaScript。浏览器不支持这些功能或关闭 JavaScript 时仍可正常阅读。若 Notion 内容或本地数据库不通，现有文章仍可阅读，划线保存会失败。
+本地数据保存在本机 `.wrangler/`；这两个命令都不创建远程资源。`wrangler.highlights.local.jsonc` 也可用于独立本地 D1 测试，其数据库 ID 是占位符。若 Notion 内容或本地数据库不通，现有文章仍可阅读，划线保存会失败。
 
 远程数据库已创建并应用初始迁移。后续上线前，先检查并执行待应用的远程迁移（`npx wrangler d1 migrations apply HIGHLIGHTS_DB --remote`），再部署 Worker；现有自动部署不会自动执行迁移。部署凭据需具备相应 D1 权限。数据库内含阅读痕迹，请自行管理访问和备份。
 

@@ -1,0 +1,294 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useLocation } from "@tanstack/react-router";
+import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
+import type { MarkdownNode } from "../explanation-markdown.ts";
+import type { ReadCategory, ReaderArticle } from "../reader-data.ts";
+import { ReadingBody, type ParagraphSelection } from "./body.tsx";
+import { ReaderDialog } from "./dialog.tsx";
+import { articleKey, articleQuery, listKey, performAction, ReaderError, readerSearch, type ReaderAction } from "./queries.ts";
+import { useReaderScroll } from "./reading.ts";
+
+export function ArticleRoute({ code, category, page, shared }: {
+  code: string; category: ReadCategory; page: number; shared: boolean;
+}) {
+  const query = useQuery(articleQuery(code, shared, category, page));
+  if (query.isPending) return <main><p role="status">正在加载…</p></main>;
+  if (!query.data) {
+    const missing = query.error instanceof ReaderError && query.error.status === 404;
+    return <main>
+      <p role={missing ? undefined : "alert"}>{query.error?.message ?? "未找到文章。"}</p>
+      {!missing && <button type="button" className="other-link" onClick={() => void query.refetch()}>重试</button>}
+      <p><Link to="/read" search={readerSearch(category, page)}>返回列表</Link></p>
+    </main>;
+  }
+  return <Article data={query.data} category={category} page={page} />;
+}
+
+function markdown(nodes: MarkdownNode[]): ReactNode[] {
+  return nodes.map((node, index) => node.type === "text" ? node.text
+    : createElement(node.tag, { key: index, href: node.href, start: node.start }, markdown(node.children)));
+}
+
+function isModelAction(action: ReaderAction) {
+  return action.type === "original" || action.type === "explain";
+}
+
+function Article({ data, category, page }: { data: ReaderArticle; category: ReadCategory; page: number }) {
+  const { item, actions } = data;
+  const queryClient = useQueryClient();
+  const hash = useLocation({ select: location => location.hash });
+  const main = useRef<HTMLElement>(null);
+  const { progress, gutter } = useReaderScroll(main, actions ? item.code : undefined, true, Boolean(hash));
+  const highlights = actions?.highlights ?? [];
+  const anchoredMark = highlights.find(mark => hash === `hl-${mark.id}`);
+  const hasOriginal = data.original.length > 0;
+  const [showOriginal, setShowOriginal] = useState(anchoredMark?.field === "original" && hasOriginal);
+  const [selected, setSelected] = useState<ParagraphSelection | null>(null);
+  const [pinPrompt, setPinPrompt] = useState<ReaderAction | null>(null);
+  const [resultPanel, setResultPanel] = useState<ReaderAction | null>(null);
+  const [failure, setFailure] = useState<{ message: string; retry?: ReaderAction } | null>(null);
+  const [addedLater, setAddedLater] = useState(false);
+
+  useEffect(() => {
+    const previous = document.title;
+    document.title = item.title;
+    return () => { document.title = previous; };
+  }, [item.title]);
+
+  useEffect(() => {
+    if (!anchoredMark) return;
+    if (anchoredMark.field !== "terms") setShowOriginal(anchoredMark.field === "original" && hasOriginal);
+    const frame = requestAnimationFrame(() => document.getElementById(hash)?.scrollIntoView({ block: "center" }));
+    return () => cancelAnimationFrame(frame);
+  }, [anchoredMark?.id, anchoredMark?.field, hasOriginal, hash]);
+
+  const mutation = useMutation({
+    mutationFn: ({ action, pin }: { action: ReaderAction; pin?: string }) => performAction(item.code, action, pin),
+    onSuccess: async (result, { action }) => {
+      if (action.type === "favorite") {
+        queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current =>
+          current?.actions ? { ...current, actions: { ...current.actions, favorite: Boolean(result.favorite) } } : current);
+        await queryClient.invalidateQueries({ queryKey: listKey("favorites") });
+      }
+      if (action.type === "highlight" || action.type === "delete") {
+        const saved = result.highlight;
+        queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current => {
+          if (!current?.actions) return current;
+          const updated = current.actions.highlights.filter(mark => mark.id !== (saved?.id ?? result.id));
+          if (saved) updated.push(saved);
+          return { ...current, actions: { ...current.actions, highlights: updated } };
+        });
+        await queryClient.invalidateQueries({ queryKey: listKey("highlights") });
+      }
+    },
+  });
+
+  function run(action: ReaderAction, pin?: string) {
+    if (mutation.isPending) return;
+    setFailure(null);
+    if (!pin && isModelAction(action)) setResultPanel(action);
+    mutation.mutate({ action, pin }, {
+      onError(error) {
+        if (error instanceof ReaderError && error.requiresPin) {
+          setResultPanel(null);
+          setPinPrompt(action);
+        } else {
+          setPinPrompt(null);
+          if (isModelAction(action)) {
+            if (pin) setResultPanel(action);
+          } else {
+            setFailure({ message: error.message, retry: action });
+          }
+        }
+      },
+      onSuccess() {
+        setPinPrompt(null);
+        if (action.type === "add-later") setAddedLater(true);
+        if (action.type === "delete" && hash === `hl-${action.data.id}`) {
+          history.replaceState(history.state, "", location.pathname + location.search);
+        }
+        if (pin && isModelAction(action)) setResultPanel(action);
+      },
+    });
+  }
+
+  function paragraphAction(type: "highlight" | "delete" | "explain" | "original") {
+    if (!selected) return;
+    setSelected(null);
+    if (type === "delete") {
+      if (selected.highlightId) run({ type, data: { action: "delete", id: selected.highlightId } });
+      return;
+    }
+    const { start, end, quote } = selected.paragraph;
+    if (end === start) return;
+    if (end - start > 1500) {
+      setFailure({ message: "段落最多 1500 字。" });
+      return;
+    }
+    const field = selected.field;
+    const params: Record<string, string> = type === "highlight"
+      ? { field, start: String(start), end: String(end), quote }
+      : { action: type, field, ranges: JSON.stringify([{ start, end, quote }]) };
+    run({ type, data: params, quote });
+  }
+
+  const search = readerSearch(category, page);
+  const originalTitle = data.originalTitle || item.title;
+  const origTitleLang = data.originalTitle ? data.originalLang : item.titleLang;
+  const returnAnchor = category === "highlights" && anchoredMark ? hash : item.code;
+  return (
+    <div className="reader-surface" {...gutter}>
+      <main ref={main}>
+        <article>
+          <h1 lang={item.titleLang}>{item.title}</h1>
+          {(hasOriginal || item.author) && <p>
+            {hasOriginal && <button className="other-link" type="button" aria-controls="original-body"
+              aria-expanded={showOriginal} onClick={() => setShowOriginal(value => !value)}>{showOriginal ? "显示翻译" : "显示原文"}</button>}
+            {hasOriginal && item.author && " · "}{item.author}
+          </p>}
+          <ReadingBody id={hasOriginal ? "translated-body" : undefined} field={data.field} lang={data.lang}
+            paragraphs={data.body} highlights={highlights} hidden={showOriginal}
+            select={actions?.highlightsEnabled ? setSelected : undefined} />
+          {hasOriginal && <ReadingBody id="original-body" field="original" lang={data.originalLang}
+            paragraphs={data.original} highlights={highlights} hidden={!showOriginal}
+            select={actions?.highlightsEnabled ? setSelected : undefined} />}
+          {actions && <p className="other">
+            <button type="button" className="other-link" disabled={mutation.isPending || addedLater}
+              aria-label={addedLater ? "已加入待读" : "待读"}
+              onClick={() => run({ type: "add-later", data: {} })}>
+              <span role="status">{addedLater ? "已加入待读" : "待读"}</span>
+            </button>{" "}
+            <button type="button" className="other-link" disabled={mutation.isPending}
+              aria-label={actions.favorite ? "取消收藏" : "收藏"}
+              onClick={() => run({ type: "favorite", data: { favorite: actions.favorite ? "0" : "1" } })}>
+              <span role="status">{actions.favorite ? "取消收藏" : "收藏"}</span>
+            </button>{" "}
+            <a className="other-link" href={actions.notionUrl}>管理</a>{" "}
+            <ShareButton code={item.code} />
+          </p>}
+          <hr />
+          <p className="detail-metadata">
+            {(data.originalUrl || data.originalTitle && data.originalTitle !== item.title) && <>
+              原文：{data.originalUrl ? <a className="metadata-link" href={data.originalUrl} lang={origTitleLang}>
+                {originalTitle}</a> : <span lang={origTitleLang}>{originalTitle}</span>}<br />
+            </>}
+            {data.publisher && <>来源：{data.publisher}<br /></>}
+            {data.chapter && <>章节：{data.chapter}<br /></>}
+            日期：{data.date || "—"}
+          </p>
+          {data.terms.length > 0 && <><hr /><p>名词解释</p>
+            <ReadingBody field="terms" paragraphs={data.terms} highlights={highlights}
+              select={actions?.highlightsEnabled ? setSelected : undefined} /></>}
+        </article>
+        {actions && <nav className="nav-row" aria-label="文章导航">
+          {actions.prevCode
+            ? <Link to="/r/$code" params={{ code: actions.prevCode }} search={search}>上一篇</Link>
+            : <span className="is-disabled">上一篇</span>}
+          <Link to="/read" search={search} hash={returnAnchor}>返回列表</Link>
+          {actions.nextCode
+            ? <Link to="/r/$code" params={{ code: actions.nextCode }} search={search}>下一篇</Link>
+            : <span className="is-disabled">下一篇</span>}
+        </nav>}
+      </main>
+      <div className="progress" aria-hidden="true"><span className="progress-bar" style={{ width: `${progress * 100}%` }} /></div>
+      {selected && <ReaderDialog id="body-actions" label="正文操作" mode={selected.highlightId ? "mark" : "body"} dismiss={() => setSelected(null)}>
+        <div id="body-preview-scroll"><p id="body-preview">{selected.paragraph.quote}</p></div>
+        <div id="body-actions-buttons">
+          {selected.highlightId ? <button id="body-unhighlight" type="button" onClick={() => paragraphAction("delete")}>取消划线</button>
+            : <>
+              {hasOriginal && selected.field === "translation" && <button id="body-toggle" type="button" disabled={mutation.isPending} onClick={() => paragraphAction("original")}>显示原文</button>}
+              <button id="body-explain" type="button" disabled={mutation.isPending} onClick={() => paragraphAction("explain")}>解释</button>
+              <button id="body-highlight" type="button" disabled={mutation.isPending} onClick={() => paragraphAction("highlight")}>划线</button>
+            </>}
+          <button className="dialog-dismiss" aria-label="关闭正文操作" type="button" onClick={() => setSelected(null)}>关闭</button>
+        </div>
+      </ReaderDialog>}
+      {pinPrompt && <ReaderDialog id="favorite-dialog" label="收藏验证" dismiss={() => setPinPrompt(null)}>
+        <PinForm pending={mutation.isPending} error={mutation.isError && mutation.error instanceof ReaderError && mutation.error.requiresPin
+          ? (mutation.error.message === "请输入 6 位密码。" ? "" : mutation.error.message) : undefined}
+          submit={pin => run(pinPrompt, pin)} cancel={() => setPinPrompt(null)} />
+      </ReaderDialog>}
+      {failure && <ReaderDialog id="highlight-error" label="操作失败" dismiss={() => setFailure(null)}>
+        <p role="alert">{failure.message}</p>
+        <div><button type="button" onClick={() => setFailure(null)}>关闭</button>
+          {failure.retry && <button type="button" onClick={() => run(failure.retry!)}>重试</button>}
+        </div>
+      </ReaderDialog>}
+      {resultPanel && (resultPanel.type === "original" ? (
+        <ReaderDialog id="original-match-dialog" label="原文匹配" dismiss={() => setResultPanel(null)}>
+          <div id="original-match-content">
+            <section><h2>译文</h2><p id="original-match-current">{resultPanel.quote}</p></section>
+            <section><h2>原文</h2><p id="original-match-text" role="status">
+              {mutation.isPending ? "正在匹配原文…" : mutation.error?.message ?? mutation.data?.paragraph ?? "未找到匹配段落。"}
+            </p></section>
+          </div>
+          <button className="dialog-dismiss" type="button" onClick={() => setResultPanel(null)}>关闭</button>
+        </ReaderDialog>
+      ) : (
+        <ReaderDialog id="explanation-dialog" label="段落解释" dismiss={() => setResultPanel(null)}>
+          <div id="explanation-text" aria-live="polite">{mutation.isPending ? "正在解释…"
+            : mutation.error?.message ?? (mutation.data?.markdown ? markdown(mutation.data.markdown) : mutation.data?.explanation)}</div>
+          <button className="dialog-dismiss" type="button" onClick={() => setResultPanel(null)}>关闭</button>
+        </ReaderDialog>
+      ))}
+    </div>
+  );
+}
+
+function PinForm({ pending, error, submit, cancel }: {
+  pending: boolean; error?: string; submit: (pin: string) => void; cancel: () => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [pin, setPin] = useState("");
+  useEffect(() => {
+    if (error) {
+      setPin("");
+      input.current?.focus();
+    }
+  }, [error]);
+  return <>
+    <form onSubmit={event => {
+      event.preventDefault();
+      if (!pending && /^[0-9]{6}$/.test(pin)) submit(pin);
+    }}>
+      <p><label htmlFor="pin">请输入 6 位密码</label></p>
+      <div className="pin-wrap pin-enhanced">
+        <input ref={input} id="pin" name="pin" type="password" autoFocus inputMode="numeric" autoComplete="current-password"
+          maxLength={6} value={pin} disabled={pending} onChange={event => {
+            const value = event.currentTarget.value.replace(/\D/g, "");
+            setPin(value);
+            if (value.length === 6) submit(value);
+          }} />
+        <div className="pin-slots" aria-hidden="true">
+          {Array.from({ length: 6 }, (_, index) => <span key={index}
+            className={index < pin.length ? "filled" : index === pin.length ? "active" : undefined} />)}
+        </div>
+      </div>
+      <p id="favorite-error" role="alert">{error}</p>
+      {pending && <p role="status">正在验证…</p>}
+    </form>
+    <button type="button" className="favorite-close" onClick={cancel}>取消</button>
+  </>;
+}
+
+function ShareButton({ code }: { code: string }) {
+  const [status, setStatus] = useState("分享");
+  async function share() {
+    const value = new URL(`/s/${code}`, location.origin).href;
+    try {
+      await navigator.clipboard.writeText(value);
+      setStatus("已复制");
+    } catch {
+      const input = document.createElement("textarea");
+      input.value = value;
+      input.style.position = "fixed";
+      input.style.left = "-10000px";
+      document.body.appendChild(input);
+      input.select();
+      try { setStatus(document.execCommand("copy") ? "已复制" : "复制失败"); }
+      catch { setStatus("复制失败"); }
+      finally { input.remove(); }
+    }
+  }
+  return <button type="button" className="other-link" aria-label={status} onClick={() => void share()}><span role="status">{status}</span></button>;
+}
