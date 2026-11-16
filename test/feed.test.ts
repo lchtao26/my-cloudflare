@@ -1320,7 +1320,7 @@ test("e-ink detail renders linked metadata on every device and reuses the image 
   assert.match(html, /来源：某出版社/);
   assert.match(html, /章节：第一章/);
   assert.match(html, /日期：2025-06-12/);
-  assert.match(html, /<\/div>\n<p class="other"><button type="button" class="other-link" id="read-later" data-url="\/read\/add-later\/[A-Za-z0-9]{6}"><span role="status">加入待读<\/span><\/button> <a class="other-link" id="favorite-link" data-favorite="false" href="\/read\/favorite\/[A-Za-z0-9]{6}\?favorite=1"><span id="favorite-status" role="status">收藏<\/span><\/a> <a class="other-link" href="https:\/\/www\.notion\.so\/excerpt-1">管理<\/a> <button type="button" class="other-link" id="share-copy"[^>]*><span id="share-status" role="status">分享<\/span><\/button><\/p>[\s\S]*?<hr \/>\n<p class="detail-metadata">/);
+  assert.match(html, /<\/div>\n<p class="other"><button type="button" class="other-link" id="read-later" data-url="\/read\/add-later\/[A-Za-z0-9]{6}"><span role="status">待读<\/span><\/button> <a class="other-link" id="favorite-link" data-favorite="false" href="\/read\/favorite\/[A-Za-z0-9]{6}\?favorite=1"><span id="favorite-status" role="status">收藏<\/span><\/a> <a class="other-link" href="https:\/\/www\.notion\.so\/excerpt-1">管理<\/a> <button type="button" class="other-link" id="share-copy"[^>]*><span id="share-status" role="status">分享<\/span><\/button><\/p>[\s\S]*?<hr \/>\n<p class="detail-metadata">/);
   assert.match(html, /<dialog id="favorite-dialog" aria-label="收藏验证">/);
   assert.doesNotMatch(html, /数据来源：|分享链接：/);
   assert.match(html, new RegExp(`src="https://example\\.workers\\.dev/read/p/${pageId}/${blockId}"`));
