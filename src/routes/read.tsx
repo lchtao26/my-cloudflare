@@ -60,10 +60,12 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
           <ul>
             {data.items.map(item => (
               <li key={item.code} lang={item.titleLang}>
-                <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search}>{item.title}</Link>
-                {(item.source || item.author) && <p className="meta" lang="zh-CN">
-                  {[item.source, item.author].filter(Boolean).join(" · ")}
-                </p>}
+                <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search}>
+                  {item.title}
+                  {(item.source || item.author) && <p className="meta" lang="zh-CN">
+                    {item.source && <span className="source">{item.source}</span>}{item.source && item.author && " · "}{item.author}
+                  </p>}
+                </Link>
               </li>
             ))}
           </ul>
@@ -72,14 +74,14 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
           <ul>
             {data.items.map(item => {
               const article = item.article;
+              const meta = <p className="meta">{article
+                ? [article.title, article.source, item.located ? "" : "正文已变动，未能定位"].filter(Boolean).join(" · ")
+                : "文章不可用"}</p>;
               return <li key={item.id}>
                 {article && item.located
                   ? <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={search}
-                      hash={`hl-${item.id}`}>{item.quote}</Link>
-                  : item.quote}
-                <p className="meta">{article
-                  ? [article.title, article.source, item.located ? "" : "正文已变动，未能定位"].filter(Boolean).join(" · ")
-                  : "文章不可用"}</p>
+                      hash={`hl-${item.id}`}>{item.quote}{meta}</Link>
+                  : <>{item.quote}{meta}</>}
               </li>;
             })}
           </ul>

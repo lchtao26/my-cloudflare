@@ -546,13 +546,14 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
   const items = excerpts.map((excerpt) => {
     const href = htmlText(`${READ_DETAIL_PREFIX}/${excerpt.code}${categorySearch(category, page)}`);
     const meta = [
-      excerpt.sourceTitle ? einkText(excerpt.sourceTitle) : "",
+      excerpt.sourceTitle ? `<span class="source">${einkText(excerpt.sourceTitle)}</span>` : "",
       excerpt.author ? einkText(excerpt.author) : "",
     ].filter(Boolean).join(" · ");
     return [
       `<li lang="${htmlText(excerpt.titleLang)}">`,
-      `<a class="item-link" href="${href}">${einkText(excerpt.title)}</a>`,
+      `<a class="item-link" href="${href}">${einkText(excerpt.title)}`,
       ...(meta ? [`<p class="meta" lang="zh-CN">${meta}</p>`] : []),
+      "</a>",
       "</li>",
     ].join("");
   }).join("\n");
@@ -959,9 +960,10 @@ async function renderHighlightList(db: D1Database | undefined, env: ConfiguredBi
   const items = rows.map(row => {
     const excerpt = excerpts.get(row.excerpt_number);
     const quote = htmlText(row.quote);
-    const link = excerpt && resolved.has(row.id) ? `<a class="item-link" href="${htmlText(`/r/${excerpt.code}${categorySearch("highlights", page)}#hl-${row.id}`)}">${quote}</a>` : quote;
     const meta = excerpt ? `${einkText(excerpt.title)}${excerpt.sourceTitle ? ` · ${einkText(excerpt.sourceTitle)}` : ""}${resolved.has(row.id) ? "" : " · 正文已变动，未能定位"}` : "文章不可用";
-    return `<li>${link}<p class="meta">${meta}</p></li>`;
+    const content = `${quote}<p class="meta">${meta}</p>`;
+    const link = excerpt && resolved.has(row.id) ? `<a class="item-link" href="${htmlText(`/r/${excerpt.code}${categorySearch("highlights", page)}#hl-${row.id}`)}">${content}</a>` : content;
+    return `<li>${link}</li>`;
   }).join("\n");
   const pageHtml = renderEinkList([], READ_LIST_PATH, "highlights");
   const more = hasMore ? `<a class="btn" id="load-more" href="${htmlText(`${READ_LIST_PATH}${categorySearch("highlights", page + 1)}`)}">下一页</a>` : "";

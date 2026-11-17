@@ -24,6 +24,10 @@ export const EINK_STYLE = [
   "li{border-top:2px solid #000;padding:2rem 0;}",
   "li:last-child{border-bottom:2px solid #000;}",
   "a{color:#000;text-decoration:none;}",
+  "a:visited{color:#767676;}",
+  ".categories a:visited{color:#000;}",
+  ".btn:visited{color:#000;}",
+  ".nav-row a:visited,a.other-link:visited{color:#000;}",
   "a:hover{text-decoration:underline;text-underline-offset:0.35em;}",
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".item-link{display:block;font-weight:700;}",
@@ -37,7 +41,7 @@ export const EINK_STYLE = [
   "body.read-list{padding-top:max(1.25rem,env(safe-area-inset-top, 0px));padding-bottom:calc(8rem + env(safe-area-inset-bottom, 0px));}",
 
   ".categories a[aria-current=page]{background:#000;color:#fff;}",
-  ".meta{font-size:1rem;margin:0.65em 0 0;}",
+  ".meta{font-size:1rem;font-weight:400;margin:0.65em 0 0;}",
   // Responsive type must follow the base heading/meta rules to win the cascade.
   "@media (min-width:440px){body{font-size:1.125rem;padding-right:1.25rem;padding-left:1.25rem;}}",
   "@media (min-width:720px){body{font-size:1.25rem;}h1{font-size:1.65rem;}.meta{font-size:1.0625rem;}main{max-width:36rem;}}",
