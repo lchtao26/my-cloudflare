@@ -30,6 +30,12 @@ export const FavoriteLoginLimit = Sentry.instrumentDurableObjectWithSentry(sentr
 
 const startWithSentry = wrapFetchWithSentry(start);
 
+function noStore(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set("Cache-Control", "no-store");
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 export default Sentry.withSentry(sentryOptions, {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -42,9 +48,7 @@ export default Sentry.withSentry(sentryOptions, {
     if (!isDetail && !/^\/(?:read|s\/[A-Za-z0-9]{6})\/?$/.test(url.pathname)) {
       const response = await worker.fetch(request, env);
       if (!/^\/api\/(?:read\/?|r\/[A-Za-z0-9]{6}\/?)$/.test(url.pathname)) return response;
-      const headers = new Headers(response.headers);
-      headers.set("Cache-Control", "no-store");
-      return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      return noStore(response);
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
@@ -53,9 +57,7 @@ export default Sentry.withSentry(sentryOptions, {
     if (isDetail || import.meta.env.DEV) {
       const response = await startWithSentry.fetch(request);
       if (!isDetail && !/^\/read\/?$/.test(url.pathname)) return response;
-      const headers = new Headers(response.headers);
-      headers.set("Cache-Control", "no-store");
-      return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      return noStore(response);
     }
 
     // The list and share routes use the generated SPA shell.
@@ -64,8 +66,6 @@ export default Sentry.withSentry(sentryOptions, {
       return startWithSentry.fetch(request);
     }
     if (!/^\/read\/?$/.test(url.pathname)) return shell;
-    const headers = new Headers(shell.headers);
-    headers.set("Cache-Control", "no-store");
-    return new Response(shell.body, { status: shell.status, statusText: shell.statusText, headers });
+    return noStore(shell);
   },
 } satisfies ExportedHandler<Env>);

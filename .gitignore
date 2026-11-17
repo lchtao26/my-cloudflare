@@ -4,6 +4,7 @@ node_modules/
 .wrangler/
 dist/
 .tanstack/
+.fallow/
 
 .env.*
 !.env.example

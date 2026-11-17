@@ -1053,6 +1053,16 @@ function einkParagraphs(translation: string, pageId: string, imageBaseUrl: strin
   ).join("\n");
 }
 
+async function appendNotionPage(response: Response, pages: NotionPage[]): Promise<string | null | undefined> {
+  if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
+  const data = await response.json() as NotionQuery;
+  if (data.request_status?.type === "incomplete") throw new Error("Notion query result is incomplete");
+  pages.push(...data.results ?? []);
+  const cursor = data.has_more ? data.next_cursor : null;
+  if (data.has_more && !cursor) throw new Error("Notion returned an incomplete page without a cursor");
+  return cursor;
+}
+
 async function fetchPages(env: ConfiguredBindings, filter?: object): Promise<NotionPage[]> {
   const pages: NotionPage[] = [];
   let cursor: string | null | undefined;
@@ -1073,15 +1083,7 @@ async function fetchPages(env: ConfiguredBindings, filter?: object): Promise<Not
       }),
     });
 
-    if (!response.ok) {
-      throw new Error(`Notion API returned ${response.status}`);
-    }
-
-    const data = await response.json() as NotionQuery;
-    if (data.request_status?.type === "incomplete") throw new Error("Notion query result is incomplete");
-    pages.push(...data.results ?? []);
-    cursor = data.has_more ? data.next_cursor : null;
-    if (data.has_more && !cursor) throw new Error("Notion returned an incomplete page without a cursor");
+    cursor = await appendNotionPage(response, pages);
   } while (cursor && pages.length < FEED_ITEM_LIMIT);
 
   return pages.slice(0, FEED_ITEM_LIMIT);
@@ -1146,12 +1148,7 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string, catego
         ...(cursor ? { start_cursor: cursor } : {}),
       }),
     });
-    if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
-    const data = await response.json() as NotionQuery;
-    if (data.request_status?.type === "incomplete") throw new Error("Notion query result is incomplete");
-    pages.push(...data.results ?? []);
-    cursor = data.has_more ? data.next_cursor : null;
-    if (data.has_more && !cursor) throw new Error("Notion returned an incomplete page without a cursor");
+    cursor = await appendNotionPage(response, pages);
   } while (cursor && pages.length < limit);
 
   return pages.slice(0, limit);
@@ -1251,6 +1248,30 @@ function readerResponse(data: ReaderList | ReaderArticle, method: string, cachea
   });
 }
 
+function highlightRanges(data: URLSearchParams, allowMultiple: boolean): Array<{ start: number; end: number; quote: string }> {
+  const rangesJson = allowMultiple ? data.get("ranges") : null;
+  let ranges: Array<{ start: number; end: number; quote: string }>;
+  if (rangesJson !== null) {
+    try { ranges = JSON.parse(rangesJson); } catch { throw highlightError("选区无效。", 400); }
+    if (!Array.isArray(ranges) || !ranges.length || ranges.length > 1500) throw highlightError("选区无效。", 400);
+  } else {
+    const start = data.get("start") || "";
+    const end = data.get("end") || "";
+    if (!/^(0|[1-9]\d{0,8})$/.test(start) || !/^(0|[1-9]\d{0,8})$/.test(end)) throw highlightError("选区无效。", 400);
+    ranges = [{ start: Number(start), end: Number(end), quote: data.get("quote") || "" }];
+  }
+  let previousEnd = 0, selectedLength = 0;
+  for (const range of ranges) {
+    if (!range || !Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || typeof range.quote !== "string" || range.start < previousEnd || range.end <= range.start || range.end > 999999999) throw highlightError("选区无效。", 400);
+    const clean = canonicalText(range.quote);
+    if (clean.length !== range.end - range.start || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(clean)) throw highlightError("选区无效。", 400);
+    selectedLength += clean.length;
+    if (selectedLength > 1500) throw highlightError("选区无效。", 400);
+    previousEnd = range.end;
+  }
+  return ranges;
+}
+
 const worker = {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
@@ -1276,30 +1297,11 @@ const worker = {
           }
         }
         const field = data.get("field") || "";
-        const startText = data.get("start") || "";
-        const endText = data.get("end") || "";
         const quote = data.get("quote") || "";
         const explaining = data.get("action") === "explain";
         const matchingOriginal = data.get("action") === "original";
         if (!/^(original|translation|terms)$/.test(field)) throw highlightError("选区无效。", 400);
-        let ranges: Array<{ start: number; end: number; quote: string }>;
-        const rangesJson = explaining || matchingOriginal ? data.get("ranges") : null;
-        if (rangesJson !== null) {
-          try { ranges = JSON.parse(rangesJson); } catch { throw highlightError("选区无效。", 400); }
-          if (!Array.isArray(ranges) || !ranges.length || ranges.length > 1500) throw highlightError("选区无效。", 400);
-        } else {
-          if (!/^(0|[1-9]\d{0,8})$/.test(startText) || !/^(0|[1-9]\d{0,8})$/.test(endText)) throw highlightError("选区无效。", 400);
-          ranges = [{ start: Number(startText), end: Number(endText), quote }];
-        }
-        let previousEnd = 0, selectedLength = 0;
-        for (const range of ranges) {
-          if (!range || !Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || typeof range.quote !== "string" || range.start < previousEnd || range.end <= range.start || range.end > 999999999) throw highlightError("选区无效。", 400);
-          const clean = canonicalText(range.quote);
-          if (clean.length !== range.end - range.start || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(clean)) throw highlightError("选区无效。", 400);
-          selectedLength += clean.length;
-          if (selectedLength > 1500) throw highlightError("选区无效。", 400);
-          previousEnd = range.end;
-        }
+        const ranges = highlightRanges(data, explaining || matchingOriginal);
         const { start, end } = ranges[0]!;
         if (!env.NOTION_TOKEN || !env.NOTION_EXCERPTS_DATA_SOURCE_ID) throw highlightError("文章服务未配置。", 503);
         const excerpt = await fetchExcerptByShortId({ NOTION_TOKEN: env.NOTION_TOKEN, NOTION_DATA_SOURCE_ID: env.NOTION_EXCERPTS_DATA_SOURCE_ID }, id);
