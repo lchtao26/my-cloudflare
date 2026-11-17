@@ -1,3 +1,4 @@
+import { captureException } from "@sentry/core";
 export type FavoriteBindings = {
   FAVORITE_PIN?: string;
   FAVORITE_SESSION_SECRET?: string;
@@ -158,7 +159,8 @@ export async function favoriteRequest(
       if (!await env.FAVORITE_LOGIN_LIMIT.getByName("favorite-pin").attempt()) {
         return reply(form(code, query, token, false, "尝试次数过多，请稍后再试。", desired), 429, [], token, { error: "尝试次数过多，请稍后再试。" });
       }
-    } catch {
+    } catch (error) {
+      captureException(error);
       return reply(`<h1>收藏暂不可用</h1><p>请稍后再试。</p>${backLink(code, returnQuery)}`, 503, [], "", { error: "收藏暂不可用，请稍后再试。" });
     }
     if (!await crypto.subtle.verify("HMAC", key, await sign(key, `pin:${env.FAVORITE_PIN}`), encoder.encode(`pin:${pin}`))) {
@@ -173,7 +175,11 @@ export async function favoriteRequest(
     const names = cookieNames(request);
     return reply(`<h1>${desired ? "已收藏" : "已取消收藏"}</h1>${backLink(code, returnQuery)}`, 200, [`${names.session}=${session}; Path=/; Max-Age=${SESSION_SECONDS}${names.secure}; HttpOnly; SameSite=Strict`], "", { ok: true, favorite: desired, ...(typeof result === "object" ? result : {}) });
   } catch (error) {
-    if (error instanceof Response) return error;
+    if (error instanceof Response) {
+      if (error.status >= 500) captureException(new Error(`Favorite operation returned ${error.status}`));
+      return error;
+    }
+    captureException(error);
     return reply(`<h1>收藏失败</h1><p>请稍后再试。</p>${backLink(code, returnQuery)}`, 502, [], "", { error: options.errorMessage || "收藏失败，请稍后再试。" });
   }
 }

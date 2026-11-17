@@ -1,3 +1,4 @@
+import { captureException, logger } from "@sentry/core";
 import { generateRssFeed, type RssFeed } from "feedsmith";
 import { canonicalText, hashText, resolveAnchor } from "./highlight-anchor.ts";
 import { formatText } from "./format-text.ts";
@@ -1502,16 +1503,17 @@ const worker = {
         const showNavigation = detailShortId !== null;
         // Load the selected list in parallel so prev/next follow the same order as /read.
         const excerptPromise = fetchExcerptByShortId(configured, shortId);
-        const highlightPromise = env.HIGHLIGHTS_DB && showNavigation ? Promise.resolve().then(() => env.HIGHLIGHTS_DB!.prepare('SELECT * FROM highlights WHERE excerpt_number=? ORDER BY created_at, id').bind(shortId).all<HighlightRow>()).then(r => r.results).catch(error => { console.error("Failed to load highlights", error); return [] as HighlightRow[]; }) : Promise.resolve([] as HighlightRow[]);
+        const highlightPromise = env.HIGHLIGHTS_DB && showNavigation ? Promise.resolve().then(() => env.HIGHLIGHTS_DB!.prepare('SELECT * FROM highlights WHERE excerpt_number=? ORDER BY created_at, id').bind(shortId).all<HighlightRow>()).then(r => r.results).catch(error => { captureException(error); console.error("Failed to load highlights", error); return [] as HighlightRow[]; }) : Promise.resolve([] as HighlightRow[]);
         const listPromise = env.HIGHLIGHTS_DB && showNavigation && category === "highlights"
           ? Promise.resolve().then(() => env.HIGHLIGHTS_DB!.prepare('SELECT excerpt_number FROM highlights ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?').bind(FEED_ITEM_LIMIT, (page - 1) * FEED_ITEM_LIMIT).all<{ excerpt_number: number }>()).then(async result => {
               const ids = [...new Set(result.results.map(row => row.excerpt_number))];
               const excerpts = await fetchHighlightExcerpts(configured, ids);
               return ids.flatMap(id => excerpts.has(id) ? [excerpts.get(id)!] : []);
-            }).catch(error => { console.error("Failed to load highlight navigation", error); return [] as Excerpt[]; })
+            }).catch(error => { captureException(error); console.error("Failed to load highlight navigation", error); return [] as Excerpt[]; })
           : excerptsViewId && showNavigation && category !== "highlights"
           ? fetchExcerptPages(configured, excerptsViewId, category, page * FEED_ITEM_LIMIT).then((pages) =>
             pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null)).catch((error) => {
+              captureException(error);
               console.error("Failed to load article navigation", error);
               return [] as Excerpt[];
             })
@@ -1613,6 +1615,8 @@ const worker = {
         },
       });
     } catch (error) {
+      logger.error("Failed to build RSS or reader response");
+      captureException(error);
       console.error(coverId || imageIds ? "Failed to load image" : isEinkList || shortId !== null ? "Failed to build e-ink page" : "Failed to build book RSS", error);
       if (readerApi) return highlightError("暂时无法读取，请稍后重试。", 502);
       return new Response(

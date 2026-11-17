@@ -1,3 +1,4 @@
+import { captureException, logger } from "@sentry/core";
 type InstapaperBindings = {
   INSTAPAPER_CONSUMER_ID?: string;
   INSTAPAPER_CONSUMER_SECRET?: string;
@@ -81,6 +82,8 @@ ${items}
 </rss>`;
     return new Response(request.method === "HEAD" ? null : feed, { headers: { "Content-Type": "application/rss+xml; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
   } catch (error) {
+    logger.error("Failed to build Instapaper RSS");
+    captureException(error);
     console.error("Failed to build Instapaper RSS", error);
     return new Response("Feed temporarily unavailable", { status: 502, headers: { "Cache-Control": "no-store" } });
   }

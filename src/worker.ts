@@ -1,9 +1,12 @@
+import * as Sentry from "@sentry/cloudflare";
+import { wrapFetchWithSentry } from "@sentry/tanstackstart-react";
+import { sentryOptions } from "./sentry.server.ts";
 import { DurableObject } from "cloudflare:workers";
 import start from "@tanstack/react-start/server-entry";
 import worker from "./index.ts";
 
 // One shared PIN needs one global counter: per-IP limits can be bypassed with multiple IPs.
-export class FavoriteLoginLimit extends DurableObject {
+class FavoriteLoginLimitBase extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS attempts (time INTEGER NOT NULL)");
@@ -20,7 +23,12 @@ export class FavoriteLoginLimit extends DurableObject {
   }
 }
 
-export default {
+export type FavoriteLoginLimit = FavoriteLoginLimitBase;
+export const FavoriteLoginLimit = Sentry.instrumentDurableObjectWithSentry(sentryOptions, FavoriteLoginLimitBase);
+
+const startWithSentry = wrapFetchWithSentry(start);
+
+export default Sentry.withSentry(sentryOptions, {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (!/^\/(?:read|[rs]\/[A-Za-z0-9]{6})\/?$/.test(url.pathname)) {
@@ -32,11 +40,11 @@ export default {
 
     // Start renders the shell during development and the build's prerender step.
     // Workers serves the generated document for ordinary page requests.
-    if (import.meta.env.DEV) return start.fetch(request);
+    if (import.meta.env.DEV) return startWithSentry.fetch(request);
     const shell = await env.ASSETS.fetch(new Request(new URL("/_shell.html", url), { method: request.method }));
     if (shell.status === 404 && /^\/read\/?$/.test(url.pathname) && request.headers.get("X-TSS_SHELL") === "true") {
-      return start.fetch(request);
+      return startWithSentry.fetch(request);
     }
     return shell;
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env>);

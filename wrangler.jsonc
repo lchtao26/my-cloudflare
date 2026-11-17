@@ -7,6 +7,8 @@
   "compatibility_flags": ["nodejs_compat"],
   "compatibility_date": "2026-10-13",
   "workers_dev": true,
+  "upload_source_maps": true,
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "cache": {
     "enabled": true
   },
@@ -25,6 +27,9 @@
   }],
   "keep_vars": true,
   "vars": {
+    "SENTRY_DSN": "https://a3e70154eb1b06434e77a4bc0dbcd22f@o4512444949921792.ingest.us.sentry.io/4512444977577984",
+    "SENTRY_ENVIRONMENT": "production",
+    "SENTRY_TRACES_SAMPLE_RATE": "0.1",
     "NOTION_DATA_SOURCE_ID": "102a59ab-8748-4725-a2f4-48d5ceeef1b6",
     "NOTION_EXCERPTS_DATA_SOURCE_ID": "e800dfdd-d92c-444a-9f28-455e3eae15f6",
     "NOTION_EXCERPTS_VIEW_ID": "40ae75a1-639c-81f8-b7fe-000c40372432",

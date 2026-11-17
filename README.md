@@ -24,6 +24,20 @@ Cloudflare Worker 从 Notion「书籍推荐」数据库读取最近编辑的前 
 
 Notion 的书籍推荐和阅读节选 RSS 在 Cloudflare 边缘和浏览器中缓存 5 分钟。缓存过期后必须重新读取 Notion；刷新失败时明确返回错误，不再继续返回过期内容。RSS 阅读器自身的抓取间隔仍由阅读器决定。图片缓存为 5 分钟。
 
+## Sentry 错误监控
+
+按 [Sentry 的 TanStack Start + Cloudflare 官方指南](https://docs.sentry.io/platforms/javascript/guides/tanstackstart-react/cloudflare/)接入。Worker 入口和收藏限速 Durable Object 使用 `@sentry/cloudflare`，浏览器使用 `@sentry/tanstackstart-react`。服务端已捕获并返回错误响应的异常也会主动上报；正常的参数错误、未登录和 404 不作为异常上报。本地性能采样率为 100%，生产为 10%，不启用会话回放。自动采集关闭用户信息、Cookie、HTTP 头、请求与响应正文、查询参数值、AI 输入输出及数据库参数，避免收集 PIN、凭据和文章正文。
+
+本地将 `.env.example` 复制为 `.env`，填写前端的公开 DSN `VITE_SENTRY_DSN`。前端使用 `my-cloudflare-frontend` 项目；Worker 使用 `wrangler.jsonc` 中的 `SENTRY_DSN`，对应 `my-cloudflare-server` 项目。未配置 DSN 时不发送事件。本地环境标记为 `development`，生产环境标记为 `production`，可用 `VITE_SENTRY_TRACES_SAMPLE_RATE`（浏览器）和 `SENTRY_TRACES_SAMPLE_RATE`（Worker）调整采样率。
+
+浏览器通过官方 `tunnel: true` 和 Worker 的 `serveTunnelIntegration` 同源转发事件，避免直连 Sentry 被浏览器或网络拦截。转发仅接受前后端项目的 DSN；未知 DSN 返回 403。
+
+源码映射通过官方 `sentryTanstackStart` Vite 插件上传。构建时在 `.env` 或 CI 配置 `SENTRY_ORG`、`SENTRY_PROJECT` 和 `SENTRY_AUTH_TOKEN`；自建 Sentry 还需设置 `SENTRY_URL`。认证 Token 仅用于构建，不可加 `VITE_` 前缀，不能提交到仓库。插件在完整配置后启用隐藏 source maps 并在上传后清理生成的映射文件；缺少上传配置时不生成客户端映射。
+
+公开的生产配置保存在 `.env.production`，不包含认证 Token。源码映射会上传到 `SENTRY_PROJECT` 列出的前后端两个项目。GitHub 自动部署使用 `production` 环境：将 `SENTRY_AUTH_TOKEN` 设为该环境的 Secret。配置完成后重新构建并部署。Cloudflare 自身的 source map 上传也已开启，用于 Worker 日志中的源码定位。
+
+验证时，在本地浏览器控制台运行 `throw new Error("Sentry browser setup test")`，然后检查 Sentry 的 development 环境；服务端可临时在本地 Worker 的 fetch 中抛出测试异常，确认收到事件后删除该行。不要把用于抛错的测试路由部署到生产。
+
 ## Instapaper 稍后读 RSS
 
 `/read/later.xml` 输出 Instapaper 书签的 RSS，默认读取 25 条未读书签；可使用 `limit` 和 `folder_id` 查询参数调整，例如 `/read/later.xml?limit=50&folder_id=starred`。Worker 需要配置 `INSTAPAPER_CONSUMER_ID`、`INSTAPAPER_CONSUMER_SECRET`、`INSTAPAPER_OAUTH_TOKEN` 和 `INSTAPAPER_OAUTH_TOKEN_SECRET` 四个 Secret，本地开发可填写到 `.dev.vars`。订阅地址无需登录即可读取书签，请妥善保管；接口不缓存内容。
