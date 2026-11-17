@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated, useLocation } from "@tanstack/react-router";
-import { createElement, useCallback, useRef, useState, type ReactNode, type RefCallback } from "react";
+import { createElement, useCallback, useRef, useState, type MouseEvent, type ReactNode, type RefCallback } from "react";
 import type { MarkdownNode } from "../explanation-markdown.ts";
 import type { ReadCategory, ReaderArticle } from "../reader-data.ts";
 import { ReadingBody, type ParagraphSelection } from "./body.tsx";
@@ -12,6 +12,16 @@ import { useReaderScroll } from "./reading.ts";
 export type InitialArticle =
   | { data: ReaderArticle; error?: never }
   | { data?: never; error: { message: string; status: number } };
+
+function backToPreviousPage(event: MouseEvent<HTMLAnchorElement>) {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey ||
+    (event.currentTarget.target && event.currentTarget.target !== "_self") || event.currentTarget.hasAttribute("download") ||
+    window.history.length <= 1) return;
+  try {
+    window.history.back();
+    event.preventDefault();
+  } catch {}
+}
 
 export function ArticleRoute({ code, category, page, shared, initial }: {
   code: string; category: ReadCategory; page: number; shared: boolean; initial?: InitialArticle;
@@ -30,7 +40,7 @@ export function ArticleRoute({ code, category, page, shared, initial }: {
     return <main>
       <p role={missing ? undefined : "alert"}>{error?.message ?? "未找到文章。"}</p>
       {!missing && <button type="button" className="other-link" onClick={() => void query.refetch()}>重试</button>}
-      <p><Link to="/read" search={readerSearch(category, page)}>返回列表</Link></p>
+      <p><Link to="/read" search={readerSearch(category, page)} onClick={backToPreviousPage}>返回列表</Link></p>
     </main>;
   }
   return <Article data={query.data} category={category} page={page} hydrated={hydrated} />;
@@ -203,7 +213,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
           {actions.prevCode
             ? <Link to="/r/$code" params={{ code: actions.prevCode }} search={search}>上一篇</Link>
             : <span className="is-disabled">上一篇</span>}
-          <Link to="/read" search={search}>返回列表</Link>
+          <Link to="/read" search={search} onClick={backToPreviousPage}>返回列表</Link>
           {actions.nextCode
             ? <Link to="/r/$code" params={{ code: actions.nextCode }} search={search}>下一篇</Link>
             : <span className="is-disabled">下一篇</span>}

@@ -617,9 +617,20 @@ function einkNav(listPath: string, neighbors: EinkNeighbors, category: ReadCateg
   const next = neighbors.nextCode
     ? `<a href="${htmlText(`${READ_DETAIL_PREFIX}/${neighbors.nextCode}${categorySearch(category, page)}`)}">${einkText("下一篇")}</a>`
     : `<span class="is-disabled">${einkText("下一篇")}</span>`;
-  const back = `<a href="${htmlText(`${listPath}${categorySearch(category, page)}`)}">${einkText("返回列表")}</a>`;
+  const back = `<a href="${htmlText(`${listPath}${categorySearch(category, page)}`)}" id="back-to-list">${einkText("返回列表")}</a>`;
   return `<nav class="nav-row"${hidden ? " hidden" : ""}>\n${prev}\n${back}\n${next}\n</nav>`;
 }
+
+const EINK_DETAIL_BACK = `<script>(function(){
+  var link=document.getElementById('back-to-list');
+  if(!link)return;
+  link.addEventListener('click',function(event){
+    if(event.defaultPrevented||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||(typeof event.button==='number'&&event.button!==0))return;
+    if((link.target&&link.target!=='_self')||link.hasAttribute('download'))return;
+    if(!window.history||typeof window.history.back!=='function'||window.history.length<=1)return;
+    try{window.history.back();event.preventDefault();}catch(err){}
+  },false);
+})();</script>`;
 
 // Detail pages: blank-margin tap paging, bottom progress bar, and localStorage resume.
 // Links and buttons keep their default click behavior.
@@ -842,7 +853,7 @@ export function renderEinkDetail(
     excerptDetailBody(excerpt, imageBaseUrl, showNavigation, category, page, highlightsEnabled && showNavigation),
     "</article>",
     nav,
-  ].join("\n"), true, EINK_DETAIL_CHROME + (showNavigation ? EINK_FAVORITE_CHROME + (highlightsEnabled ? highlightChrome(excerpt.code, highlights) : "") : ""), "detail");
+  ].join("\n"), true, EINK_DETAIL_CHROME + (showNavigation ? EINK_DETAIL_BACK + EINK_FAVORITE_CHROME + (highlightsEnabled ? highlightChrome(excerpt.code, highlights) : "") : ""), "detail");
 }
 
 type HighlightRow = {
