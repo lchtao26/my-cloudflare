@@ -5,6 +5,7 @@ import type { MarkdownNode } from "../explanation-markdown.ts";
 import type { ReadCategory, ReaderArticle } from "../reader-data.ts";
 import { ReadingBody, type ParagraphSelection } from "./body.tsx";
 import { ReaderDialog } from "./dialog.tsx";
+import { LoadingStatus } from "./loading.tsx";
 import { articleKey, articleQuery, listKey, performAction, ReaderError, readerSearch, type ReaderAction } from "./queries.ts";
 import { useReaderScroll } from "./reading.ts";
 
@@ -23,7 +24,7 @@ export function ArticleRoute({ code, category, page, shared, initial }: {
     refetchOnMount: !initial || hydrated,
   });
   const error = query.error ?? initial?.error;
-  if (query.isPending && (!error || query.isFetching)) return <main><p role="status">正在加载…</p></main>;
+  if (query.isPending && (!error || query.isFetching)) return <main><LoadingStatus /></main>;
   if (!query.data) {
     const missing = error != null && "status" in error && error.status === 404;
     return <main>

@@ -3,6 +3,7 @@ import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
 import { useCallback, useRef, type MouseEvent, type RefCallback } from "react";
 import { READ_CATEGORIES, readCategory } from "../reader-data.ts";
 import { listQuery, readerSearch, validateReaderSearch } from "../reader/queries.ts";
+import { LoadingStatus } from "../reader/loading.tsx";
 import { usePullToRefresh } from "../reader/pull-to-refresh.ts";
 import { useReaderScroll } from "../reader/reading.ts";
 
@@ -67,7 +68,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
             </Link>
           ))}
         </nav>
-        {query.isPending && <p role="status">正在加载…</p>}
+        {query.isPending && <LoadingStatus />}
         {query.isError && <p role="alert">{query.error.message} <button type="button" className="other-link" disabled={refreshing} onClick={() => void refresh()}>重试</button></p>}
         {data && !data.items.length && (
           <p>{data.kind === "highlights" && !data.available ? "划线数据库未配置" : "暂无条目"}</p>
