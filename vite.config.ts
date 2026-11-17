@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       cloudflare({ viteEnvironment: { name: "ssr" } }),
-      tanstackStart({ spa: { enabled: true, maskPath: "/read" } }),
+      tanstackStart({ spa: { enabled: true, maskPath: "/s/000000" } }),
       react(),
       sentryTanstackStart({
         org: env.SENTRY_ORG,

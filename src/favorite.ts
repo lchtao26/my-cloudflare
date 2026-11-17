@@ -57,6 +57,11 @@ async function sessionValid(request: Request, key: CryptoKey, pin: string): Prom
   return crypto.subtle.verify("HMAC", key, signed, encoder.encode(`session:${expiry}:${pin}`));
 }
 
+export async function isReadAuthorized(request: Request, env: FavoriteBindings): Promise<boolean> {
+  if (!env.FAVORITE_PIN || !/^\d{6}$/.test(env.FAVORITE_PIN) || !env.FAVORITE_SESSION_SECRET || env.FAVORITE_SESSION_SECRET.length < 32 || !env.FAVORITE_LOGIN_LIMIT) return false;
+  return sessionValid(request, await hmacKey(env.FAVORITE_SESSION_SECRET), env.FAVORITE_PIN);
+}
+
 function response(render: DocumentRenderer, body: string, status = 200, cookies: string[] = [], nonce = ""): Response {
   const headers = new Headers({
     "Content-Type": "text/html; charset=utf-8",

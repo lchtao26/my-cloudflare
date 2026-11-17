@@ -59,7 +59,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const { item, actions } = data;
   const queryClient = useQueryClient();
   const hash = useLocation({ select: location => location.hash });
-  const { progress, gutter, mainRef } = useReaderScroll(actions ? item.code : undefined, true, Boolean(hash));
+  const { progress, syncError, gutter, mainRef } = useReaderScroll(actions ? item.code : undefined, true, Boolean(hash));
   const highlights = actions?.highlights ?? [];
   const anchoredMark = highlights.find(mark => hash === `hl-${mark.id}`);
   const hasOriginal = data.original.length > 0;
@@ -168,6 +168,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
     <div className="reader-surface" {...gutter}>
       <title>{item.title}</title>
       <main ref={setMain}>
+        {syncError && <p role="status">阅读进度暂未同步，请检查网络后继续阅读。</p>}
         <article>
           <h1 lang={item.titleLang}>{item.title}</h1>
           <p className="article-byline">
