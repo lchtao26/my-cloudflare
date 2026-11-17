@@ -172,10 +172,10 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
           <h1 lang={item.titleLang}>{item.title}</h1>
           <p className="article-byline">
             <span className="author-row"><span>{data.date || "—"}</span>{item.author && <span>{item.author}</span>}</span>
+            {actions && <Link className="other-link" to="/read" search={readerSearch()} onClick={backToPreviousPage}>返回</Link>}
             {hasOriginal && <span className="body-view-action"><button className="other-link" type="button" aria-controls="original-body"
               aria-expanded={showOriginal} onClick={() => setShowOriginal(value => !value)}>{showOriginal ? "显示翻译" : "显示原文"}</button>
             </span>}
-            {actions && <Link className="other-link" to="/read" search={readerSearch()} onClick={backToPreviousPage}>返回</Link>}
           </p>
           <ReadingBody id={hasOriginal ? "translated-body" : undefined} field={data.field} lang={data.lang}
             paragraphs={data.body} highlights={highlights} hidden={showOriginal}

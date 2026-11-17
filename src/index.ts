@@ -822,7 +822,7 @@ export function renderEinkDetail(
   return einkDocument(excerpt.title, [
     "<article>",
     `<h1 lang="${htmlText(excerpt.titleLang)}">${einkText(excerpt.title)}</h1>`,
-    `<p class="article-byline"><span class="author-row"><span>${einkText(excerpt.publishedDate || "—")}</span>${excerpt.author ? `<span>${einkText(excerpt.author)}</span>` : ""}</span>${showNavigation && !excerpt.chinese && excerpt.body && excerpt.originalBody ? '<span class="body-view-action" id="body-view-toggle-prefix" hidden><button type="button" class="other-link" id="body-view-toggle" aria-controls="original-body" aria-expanded="false" hidden>显示原文</button></span>' : ""}${showNavigation ? `<a class="other-link" href="${htmlText(listPath)}" data-back>返回</a>` : ""}</p>`,
+    `<p class="article-byline"><span class="author-row"><span>${einkText(excerpt.publishedDate || "—")}</span>${excerpt.author ? `<span>${einkText(excerpt.author)}</span>` : ""}</span>${showNavigation ? `<a class="other-link" href="${htmlText(listPath)}" data-back>返回</a>` : ""}${showNavigation && !excerpt.chinese && excerpt.body && excerpt.originalBody ? '<span class="body-view-action" id="body-view-toggle-prefix" hidden><button type="button" class="other-link" id="body-view-toggle" aria-controls="original-body" aria-expanded="false" hidden>显示原文</button></span>' : ""}</p>`,
     excerptDetailBody(excerpt, imageBaseUrl, showNavigation, category, page, highlightsEnabled && showNavigation),
     "</article>",
     nav,
