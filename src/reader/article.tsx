@@ -154,7 +154,6 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const search = readerSearch(category, page);
   const originalTitle = data.originalTitle || item.title;
   const origTitleLang = data.originalTitle ? data.originalLang : item.titleLang;
-  const returnAnchor = hydrated && category === "highlights" && anchoredMark ? hash : item.code;
   return (
     <div className="reader-surface" {...gutter}>
       <title>{item.title}</title>
@@ -204,7 +203,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
           {actions.prevCode
             ? <Link to="/r/$code" params={{ code: actions.prevCode }} search={search}>上一篇</Link>
             : <span className="is-disabled">上一篇</span>}
-          <Link to="/read" search={search} hash={returnAnchor}>返回列表</Link>
+          <Link to="/read" search={search}>返回列表</Link>
           {actions.nextCode
             ? <Link to="/r/$code" params={{ code: actions.nextCode }} search={search}>下一篇</Link>
             : <span className="is-disabled">下一篇</span>}

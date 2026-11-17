@@ -492,43 +492,6 @@ function einkDocument(
   ].join("\n");
 }
 
-// Keep the list's history entry anchored to the article being opened, including
-// when it already has an older fragment from a previous "返回列表" navigation.
-// Hash targets are scrolled toward the middle of the viewport (not flush top).
-const EINK_LIST_NAV = [
-  "<script>",
-  "(function(){",
-  "function centerHash(){",
-  "try{",
-  "var hash=window.location&&window.location.hash;",
-  "if(!hash)return;",
-  "var id=decodeURIComponent(hash.slice(1));",
-  "if(!id||!document||typeof document.getElementById!=='function')return;",
-  "var row=document.getElementById(id);",
-  "if(!row||typeof row.scrollIntoView!=='function')return;",
-  "row.scrollIntoView({block:'center'});",
-  "}catch(err){}",
-  "}",
-  "centerHash();",
-  "if(window.addEventListener){",
-  "window.addEventListener('load',centerHash,false);",
-  "window.addEventListener('hashchange',centerHash,false);",
-  "}",
-  "if(!window.history||!window.history.replaceState)return;",
-  "document.addEventListener('click',function(e){",
-  "if(e.defaultPrevented||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||(typeof e.button==='number'&&e.button!==0))return;",
-  "var link=e.target;",
-  "while(link&&link!==document.body&&link.tagName!=='A')link=link.parentNode;",
-  "if(!link||link.tagName!=='A'||(' '+link.className+' ').indexOf(' item-link ')<0)return;",
-  "if((link.target&&link.target!=='_self')||link.hasAttribute('download'))return;",
-  "var row=link.parentNode;",
-  "if(!row||row.tagName!=='LI'||!row.id)return;",
-  "try{history.replaceState(history.state,'',location.pathname+location.search+'#'+encodeURIComponent(row.id));}catch(err){}",
-  "},false);",
-  "})();",
-  "</script>",
-].join("\n");
-
 const EINK_LIST_PAGING = [
   "<script>",
   "(function(){",
@@ -615,7 +578,7 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
       excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
     ].filter(Boolean).join(" · ");
     return [
-      `<li id="${htmlText(excerpt.code)}" lang="${htmlText(excerpt.titleLang)}" tabindex="-1">`,
+      `<li lang="${htmlText(excerpt.titleLang)}">`,
       `<a class="item-link" href="${href}">${einkText(excerpt.title)}</a>`,
       ...(meta ? [`<p class="meta" lang="zh-CN">${meta}</p>`] : []),
       "</li>",
@@ -628,9 +591,9 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
     ).join("")}</nav>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
     ...((items || hasMore) ? [
-      `<div class="list-actions" id="list-actions"><a class="btn" id="back-to-top" href="#" hidden>返回顶部</a>${hasMore ? `<a class="btn" id="load-more" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}${excerpts.length ? `#${excerpts[excerpts.length - 1]!.code}` : ""}`)}">加载更多</a>` : ""}</div>`,
+      `<div class="list-actions" id="list-actions"><a class="btn" id="back-to-top" href="#" hidden>返回顶部</a>${hasMore ? `<a class="btn" id="load-more" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}`)}">加载更多</a>` : ""}</div>`,
     ] : []),
-  ].join("\n"), false, EINK_LIST_NAV + "\n" + EINK_LIST_PAGING + "\n" + EINK_LIST_BACK_TO_TOP, "read-list");
+  ].join("\n"), false, EINK_LIST_PAGING + "\n" + EINK_LIST_BACK_TO_TOP, "read-list");
 }
 
 export type EinkNeighbors = {
@@ -647,14 +610,14 @@ export function neighborsFor(excerpts: Excerpt[], code: string): EinkNeighbors |
   };
 }
 
-function einkNav(listPath: string, code: string, neighbors: EinkNeighbors, category: ReadCategory, page: number, hidden = false): string {
+function einkNav(listPath: string, neighbors: EinkNeighbors, category: ReadCategory, page: number, hidden = false): string {
   const prev = neighbors.prevCode
     ? `<a href="${htmlText(`${READ_DETAIL_PREFIX}/${neighbors.prevCode}${categorySearch(category, page)}`)}">${einkText("上一篇")}</a>`
     : `<span class="is-disabled">${einkText("上一篇")}</span>`;
   const next = neighbors.nextCode
     ? `<a href="${htmlText(`${READ_DETAIL_PREFIX}/${neighbors.nextCode}${categorySearch(category, page)}`)}">${einkText("下一篇")}</a>`
     : `<span class="is-disabled">${einkText("下一篇")}</span>`;
-  const back = `<a href="${htmlText(`${listPath}${categorySearch(category, page)}#${code}`)}">${einkText("返回列表")}</a>`;
+  const back = `<a href="${htmlText(`${listPath}${categorySearch(category, page)}`)}">${einkText("返回列表")}</a>`;
   return `<nav class="nav-row"${hidden ? " hidden" : ""}>\n${prev}\n${back}\n${next}\n</nav>`;
 }
 
@@ -872,7 +835,7 @@ export function renderEinkDetail(
   highlightsEnabled = false,
 ): string {
   const navNeighbors = neighbors ?? { prevCode: null, nextCode: null };
-  const nav = einkNav(listPath, excerpt.code, navNeighbors, category, page, !showNavigation);
+  const nav = einkNav(listPath, navNeighbors, category, page, !showNavigation);
   return einkDocument(excerpt.title, [
     "<article>",
     `<h1 lang="${htmlText(excerpt.titleLang)}">${einkText(excerpt.title)}</h1>`,
@@ -924,7 +887,7 @@ function canon(s){return s.replace(/\\s/g,'')}
 function nodes(body){var a=[];function walk(n){for(var child=n.firstChild;child;child=child.nextSibling){if(child.nodeType===3)a.push(child);else walk(child)}}walk(body);return a}
 function paint(row){if(document.getElementById('hl-'+row.id))return;var body=document.querySelector('.excerpt-body[data-field="'+row.field+'"]');if(!body)return;var list=nodes(body),pos=0,first=null;list.forEach(function(n){var value=n.nodeValue||'', begin=-1,end=-1;for(var i=0;i<value.length;i++){if(!/\\s/.test(value.charAt(i))){if(pos>=row.start&&pos<row.end){if(begin<0)begin=i;end=i+1}pos++}}if(begin>=0){var selected=n.splitText(begin);selected.splitText(end-begin);var mark=document.createElement('mark');mark.className='hl';mark.setAttribute('data-hl',row.id);selected.parentNode.insertBefore(mark,selected);mark.appendChild(selected);if(!first)first=mark}});if(first){var anchor=document.createElement('span');anchor.id='hl-'+row.id;first.parentNode.insertBefore(anchor,first)}}
 rows.forEach(paint);
-function jump(){var back=document.querySelector('.nav-row a[href^=\"/read?tab=highlights\"]');if(back&&location.hash.indexOf('#hl-')===0)back.hash=location.hash;if(!/^#hl-[0-9a-f-]+$/i.test(location.hash))return;var target=document.getElementById(location.hash.slice(1));if(!target)return;var body=target;while(body&&(' '+(body.className||'')+' ').indexOf(' excerpt-body ')<0)body=body.parentNode;if(body&&body.hidden){var other=document.querySelector('.excerpt-body:not([hidden])');if(other)other.hidden=true;body.hidden=false;if(window.syncBodyViewToggle)window.syncBodyViewToggle()}if(typeof target.scrollIntoView==='function'){try{target.scrollIntoView({block:'center'})}catch(e){target.scrollIntoView()}}}
+function jump(){if(!/^#hl-[0-9a-f-]+$/i.test(location.hash))return;var target=document.getElementById(location.hash.slice(1));if(!target)return;var body=target;while(body&&(' '+(body.className||'')+' ').indexOf(' excerpt-body ')<0)body=body.parentNode;if(body&&body.hidden){var other=document.querySelector('.excerpt-body:not([hidden])');if(other)other.hidden=true;body.hidden=false;if(window.syncBodyViewToggle)window.syncBodyViewToggle()}if(typeof target.scrollIntoView==='function'){try{target.scrollIntoView({block:'center'})}catch(e){target.scrollIntoView()}}}
 window.addEventListener('load',jump);jump();
 if(!window.fetch||!dialog||typeof URLSearchParams==='undefined')return;
 var csrf='',busy=false,errorDialog=document.getElementById('highlight-error'),errorMessage=document.getElementById('highlight-error-message'),errorRetry=document.getElementById('highlight-error-retry'),errorClose=document.getElementById('highlight-error-close'),retryAction=null;
@@ -1009,16 +972,12 @@ async function loadHighlightList(db: D1Database | undefined, env: ConfiguredBind
 async function renderHighlightList(db: D1Database | undefined, env: ConfiguredBindings, page: number): Promise<string> {
   if (!db) return renderEinkList([], READ_LIST_PATH, "highlights").replace("暂无条目", "划线数据库未配置");
   const { rows, excerpts, resolved, hasMore } = await loadHighlightList(db, env, page);
-  const anchoredCodes = new Set<string>();
   const items = rows.map(row => {
     const excerpt = excerpts.get(row.excerpt_number);
-    const id = htmlText(row.id);
     const quote = htmlText(row.quote);
     const link = excerpt && resolved.has(row.id) ? `<a class="item-link" href="${htmlText(`/r/${excerpt.code}${categorySearch("highlights", page)}#hl-${row.id}`)}">${quote}</a>` : quote;
     const meta = excerpt ? `${einkText(excerpt.title)}${excerpt.sourceTitle ? ` · ${einkText(excerpt.sourceTitle)}` : ""}${resolved.has(row.id) ? "" : " · 正文已变动，未能定位"}` : "文章不可用";
-    const articleAnchor = excerpt && !anchoredCodes.has(excerpt.code) ? `<span id="${htmlText(excerpt.code)}"></span>` : "";
-    if (excerpt) anchoredCodes.add(excerpt.code);
-    return `<li id="hl-${id}">${articleAnchor}${link}<p class="meta">${meta}</p></li>`;
+    return `<li>${link}<p class="meta">${meta}</p></li>`;
   }).join("\n");
   const pageHtml = renderEinkList([], READ_LIST_PATH, "highlights");
   const more = hasMore ? `<a class="btn" id="load-more" href="${htmlText(`${READ_LIST_PATH}${categorySearch("highlights", page + 1)}`)}">下一页</a>` : "";

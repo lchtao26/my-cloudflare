@@ -23,11 +23,6 @@ export const EINK_STYLE = [
   "ul{list-style:none;margin:0;padding:0;}",
   "li{border-top:2px solid #000;padding:2rem 0;}",
   "li:last-child{border-bottom:2px solid #000;}",
-  // Fragment return from detail: no UA focus ring (scroll centering is JS).
-  "li:focus{outline:none;}",
-  "li:target{position:relative;padding-left:0.9rem;}",
-  // Center the marker on the title's first line; retain the old offset for older readers.
-  "li:target::before{content:\"\";position:absolute;left:0;top:2.35rem;top:calc(2rem + 0.525em);width:0;height:0;border-top:0.35em solid transparent;border-bottom:0.35em solid transparent;border-left:0.55em solid #000;}",
   "a{color:#000;text-decoration:none;}",
   "a:hover{text-decoration:underline;text-underline-offset:0.35em;}",
   "a:focus-visible{outline:3px solid #000;outline-offset:3px;}",

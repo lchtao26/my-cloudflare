@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
-import { useCallback, useRef, type MouseEvent, type RefCallback } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useCallback } from "react";
 import { READ_CATEGORIES, readCategory } from "../reader-data.ts";
 import { listQuery, readerSearch, validateReaderSearch } from "../reader/queries.ts";
 import { LoadingStatus } from "../reader/loading.tsx";
@@ -12,11 +12,6 @@ export const Route = createFileRoute("/read")({
   validateSearch: validateReaderSearch,
   component: ReadingList,
 });
-
-function rememberArticle(event: MouseEvent<HTMLAnchorElement>, anchor: string) {
-  if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-  history.replaceState(history.state, "", `${location.pathname}${location.search}#${anchor}`);
-}
 
 function ReadingList() {
   const { tab, page = 1 } = Route.useSearch();
@@ -31,8 +26,6 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
     placeholderData: category === "highlights" ? undefined : keepPreviousData,
   });
   const data = query.data;
-  const hash = useLocation({ select: location => location.hash });
-  const appliedAnchor = useRef<string | null>(null);
   const reload = useCallback(async () => {
     try {
       await queryClient.fetchQuery({ ...listQuery(category, page, "reload"), staleTime: 0, networkMode: "always" });
@@ -41,16 +34,6 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
   const { surfaceRef, indicatorHeight, label, refreshing, refresh } = usePullToRefresh(reload);
   const { gutter, canReturnToTop, mainRef } = useReaderScroll(undefined, Boolean(data));
   const search = readerSearch(category, page);
-  const anchorRef = useCallback<RefCallback<HTMLElement>>(element => {
-    if (!element || !data || query.isPlaceholderData || !hash) return;
-    // A refresh replaces the data for the same location. Apply its anchor only once.
-    const anchor = `${page}:${hash}`;
-    if (appliedAnchor.current === anchor) return;
-    appliedAnchor.current = anchor;
-    element.scrollIntoView({ block: "center" });
-  }, [data, hash, page, query.isPlaceholderData]);
-  const articleAnchors = new Set<string>();
-  const lastItem = data?.kind === "articles" ? data.items.at(-1)?.code : undefined;
 
   return (
     <div className="reader-surface" ref={surfaceRef} {...gutter}>
@@ -76,10 +59,8 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
         {data?.kind === "articles" && data.items.length > 0 && (
           <ul>
             {data.items.map(item => (
-              <li key={item.code} id={item.code} lang={item.titleLang} tabIndex={-1}
-                ref={hash === item.code ? anchorRef : undefined}>
-                <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search}
-                  onClick={event => rememberArticle(event, item.code)}>{item.title}</Link>
+              <li key={item.code} lang={item.titleLang}>
+                <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search}>{item.title}</Link>
                 {(item.source || item.author) && <p className="meta" lang="zh-CN">
                   {[item.source, item.author ? `作者：${item.author}` : ""].filter(Boolean).join(" · ")}
                 </p>}
@@ -90,15 +71,11 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
         {data?.kind === "highlights" && data.items.length > 0 && (
           <ul>
             {data.items.map(item => {
-              const anchor = `hl-${item.id}`;
               const article = item.article;
-              const first = article && !articleAnchors.has(article.code);
-              if (article) articleAnchors.add(article.code);
-              return <li key={item.id} id={anchor} ref={hash === anchor ? anchorRef : undefined}>
-                {first && <span id={article.code} />}
+              return <li key={item.id}>
                 {article && item.located
                   ? <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={search}
-                      hash={anchor} onClick={event => rememberArticle(event, anchor)}>{item.quote}</Link>
+                      hash={`hl-${item.id}`}>{item.quote}</Link>
                   : item.quote}
                 <p className="meta">{article
                   ? [article.title, article.source, item.located ? "" : "正文已变动，未能定位"].filter(Boolean).join(" · ")
@@ -117,7 +94,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
             {data.hasMore && (query.isPlaceholderData
               ? <button className="btn" type="button" disabled>加载中…</button>
               : <Link className="btn" id="load-more" to="/read" search={readerSearch(category, page + 1)}
-                  hash={lastItem} resetScroll={category === "highlights"}>{category === "highlights" ? "下一页" : "加载更多"}</Link>)}
+                  resetScroll={category === "highlights"}>{category === "highlights" ? "下一页" : "加载更多"}</Link>)}
           </div>
         )}
       </main>
