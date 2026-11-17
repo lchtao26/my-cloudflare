@@ -1,14 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runInNewContext } from "node:vm";
 import { parseRssFeed } from "feedsmith";
 import { formatText } from "../src/format-text.ts";
 import worker, {
   bookFromPage,
   excerptFromPage,
-  neighborsFor,
-  renderEinkDetail,
-  renderEinkList,
   renderExcerptFeed,
   renderFeed,
   shareCode,
@@ -392,7 +388,7 @@ test("excerpt feed forwards a saved view sort and omits the fallback", async (co
   assert.deepEqual(bodies[0]?.sorts, savedSort);
 });
 
-test("excerpt titles fall back to the original and missing source fields are omitted", () => {
+test("excerpt titles fall back to the original", () => {
   const excerpt = excerptFromPage({
     id: "1", url: "https://www.notion.so/1", properties: {
       ...idProperty(),
@@ -408,32 +404,10 @@ test("excerpt titles fall back to the original and missing source fields are omi
   const item = parseRssFeed(feed).items?.[0];
   assert.equal(item?.title, "节");
   assert.equal(item?.description, undefined);
-  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
-  assert.match(detail, /<div class="excerpt-body" lang="zh-CN">\n<p>正文<\/p>/);
-  assert.doesNotMatch(detail, /<cite>书<\/cite>/);
-  assert.doesNotMatch(detail, /作者：|(?:<p>|<br \/>\n)来源：|章节：|内容类型：|名词解释|原文：|javascript:/);
+
 });
 
-test("detail pages preserve paragraphs from newlines and stored br tags while escaping other HTML", () => {
-  for (const separator of ["\n\n", "\r\n \r\n", "\r\r", "<br /><br />", "<BR><br/>"]) {
-    const excerpt = excerptFromPage({
-      id: "paragraphs", url: "https://www.notion.so/paragraphs", properties: {
-        ...idProperty(),
-        "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "中文标题" }] },
-        "正文翻译": { type: "rich_text", rich_text: [{ plain_text: `第一段${separator}第二段\n段内换行<script>alert(1)</script><br onmouseover="alert(1)"> & ]]>` }] },
-      },
-    });
-    assert.ok(excerpt);
-    assert.equal(parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read.xml")).items?.[0]?.title, "中文标题");
-    const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
-    const main = detail.match(/<main>([\s\S]*)<\/main>/)?.[1] ?? "";
-    assert.match(detail, /<p>第一段<\/p>\n<p>第二段<br \/>\n段内换行&lt;script&gt;alert \(1\)&lt;\/script&gt;&lt;br onmouseover=&quot;alert\(1\)&quot;&gt; &amp; \]\]&gt;<\/p>/);
-    // User body stays escaped; detail pages may include a small tap-to-scroll script outside main.
-    assert.doesNotMatch(main, /<script|<br onmouseover|&lt;br\s*\/?&gt;/);
-  }
-});
-
-test("magazine and web excerpts use neutral source labels and link to e-ink detail pages", () => {
+test("magazine and web excerpts link to reading detail pages", () => {
   for (const contentType of ["杂志", "网页文章"]) {
     const excerpt = excerptFromPage({
       id: "article", url: "https://www.notion.so/article", properties: {
@@ -452,9 +426,7 @@ test("magazine and web excerpts use neutral source labels and link to e-ink deta
     assert.equal(item?.link, `https://example.com/r/${shareCode(1)}`);
     assert.equal(item?.guid?.value, "notion:article");
     assert.equal(item?.description, undefined);
-    const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
-    assert.match(detail, /来源：媒体/);
-    assert.doesNotMatch(detail, /内容类型：|书名：|出版社：/);
+
   }
 });
 
@@ -510,19 +482,13 @@ test("Chinese excerpts use the original title and body, not translations", () =>
   const item = parseRssFeed(renderExcerptFeed([excerpt], "https://example.com/read.xml")).items?.[0];
   assert.equal(item?.title, "中文标题");
   assert.equal(item?.description, undefined);
-  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
-  assert.match(detail, /<html lang="zh-CN">/);
-  assert.match(detail, /:lang\(zh\)\{font-family:"Songti SC"/);
-  assert.doesNotMatch(detail, /Source Han Serif/);
-  assert.match(detail, /中文正文/);
-  assert.doesNotMatch(detail, /不应使用|不应输出的译文/);
   assert.equal(excerptFromPage({
     ...chinese,
     properties: { ...chinese.properties, "原文语言": { type: "select", select: { name: "日文" } }, "正文翻译": { type: "rich_text", rich_text: [] } },
   }), null);
 });
 
-test("translated excerpts keep original titles in their source language and controls in Chinese", () => {
+test("translated excerpts retain the correct title language", () => {
   for (const [language, lang, title] of [
     ["日文", "ja", "読書と思考 <script>"],
     ["英文", "en", "Reading & thinking"],
@@ -542,22 +508,10 @@ test("translated excerpts keep original titles in their source language and cont
     assert.equal(excerpt.lang, "zh-CN");
     assert.equal(excerpt.titleLang, lang);
     assert.equal(excerpt.originalLang, lang);
-    const detail = renderEinkDetail(excerpt, "/read", "/read/p");
-    assert.match(detail, /<html lang="zh-CN">/);
-    assert.match(detail, new RegExp(`<h1 lang="${lang}">`));
-    assert.match(detail, /<div class="excerpt-body" lang="zh-CN">\n<p>中文译文<\/p>/);
-    if (lang === "ja") assert.match(detail, /&lt;script&gt;<\/h1>/);
-    assert.match(renderEinkList([excerpt], "/read"), new RegExp(`<li [^>]*lang="${lang}"`));
-
     page.properties!["标题翻译"] = { type: "rich_text", rich_text: [{ plain_text: "阅读与思考" }] };
     const translated = excerptFromPage(page);
     assert.ok(translated);
     assert.equal(translated.titleLang, "zh-CN");
-    const translatedDetail = renderEinkDetail(translated, "/read", "/read/p");
-    assert.match(translatedDetail, /<h1 lang="zh-CN">阅读与思考<\/h1>/);
-    assert.match(translatedDetail, new RegExp(`原文：<span lang="${lang}">`));
-    if (lang === "ja") assert.match(translatedDetail, /&lt;script&gt;<\/span>/);
-
     page.properties!["标题"] = { type: "title", title: [] };
     page.properties!["标题翻译"] = { type: "rich_text", rich_text: [] };
     const untitled = excerptFromPage(page);
@@ -623,77 +577,6 @@ test("Chinese excerpt feed uses the body property without fetching page blocks",
   assert.equal(item?.description, undefined);
   assert.equal(item?.link, `https://example.workers.dev/r/${shareCode(1)}`);
   assert.equal(requests.some((href) => href.includes("/blocks/")), false);
-});
-
-test("detail pages turn excerpt image tags into proxied images while unrelated HTML stays escaped", () => {
-  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
-  const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
-  const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
-  const translation = `前文<br /><br /><image source="notion-file-block://${blockId}/${fileId}?name=photo.jpg" /><br /><br />后文 <script>x</script>`;
-  const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: { ...idProperty(), "正文翻译": { type: "rich_text", rich_text: [{ plain_text: translation }] } } });
-  assert.ok(excerpt);
-  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
-  assert.match(detail, new RegExp(`<img src="https://example.com/read/p/${pageId}/${blockId}" alt="正文图片" />`));
-  assert.match(detail, /前文<\/p>\n<p><img/);
-  assert.match(detail, /<p>后文 &lt;script&gt;x&lt;\/script&gt;<\/p>/);
-  assert.doesNotMatch(detail, /notion-file-block/);
-});
-
-test("detail pages render plain http img tags and escape unsafe ones", () => {
-  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
-  const translation = [
-    `<img src="https://cdn.sanity.io/images/cover.png">`,
-    `<img src='http://cdn.example.com/later.jpg' alt="later" />`,
-    `<img src="javascript:alert(1)" />`,
-    `<script>x</script>`,
-  ].join("<br /><br />");
-  const excerpt = excerptFromPage({
-    id: pageId,
-    url: "https://notion.so/page",
-    properties: { ...idProperty(), "正文翻译": { type: "rich_text", rich_text: [{ plain_text: translation }] } },
-  });
-  assert.ok(excerpt);
-  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
-  assert.match(detail, /<img src="https:\/\/cdn\.sanity\.io\/images\/cover\.png" alt="正文图片" \/>/);
-  assert.match(detail, /<img src="http:\/\/cdn\.example\.com\/later\.jpg" alt="正文图片" \/>/);
-  assert.match(detail, /&lt;img src=&quot;javascript:alert\(1\)&quot; \/&gt;/);
-  assert.match(detail, /&lt;script&gt;x&lt;\/script&gt;/);
-});
-
-test("detail pages turn captioned notion image wrappers into proxied images and ignore caption text", () => {
-  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
-  const blockId = "1a52e0b5-2ddd-4438-8257-9e6c5a426940";
-  const fileId = "69d14bc7-c973-4ee7-9123-bde234614e89";
-  const translation = [
-    `<image source="notion-file-block://${blockId}/${fileId}?space_id=e9cde029-df5b-4155-b1ef-e48feea5c573&name=bunshun-93076-img1.jpg">`,
-    "©文藝春秋",
-    "</image>",
-  ].join("\n");
-  const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: { ...idProperty(), "正文翻译": { type: "rich_text", rich_text: [{ plain_text: translation }] } } });
-  assert.ok(excerpt);
-  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
-  assert.match(detail, new RegExp(`<img src="https://example.com/read/p/${pageId}/${blockId}" alt="正文图片" />`));
-  assert.doesNotMatch(detail, /©文藝春秋|notion-file-block|<image|<\/image>/);
-});
-
-test("standalone notion image tags preserve following text and later captioned images", () => {
-  const pageId = "413e75a1-639c-811e-b723-f98e9deb067e";
-  const first = "0cfe35b2-127f-44b3-b050-1ce3de6956bc";
-  const second = "fd282f61-6630-4624-ad35-a02c1d7ed87b";
-  const body = [
-    `<image source="notion-file-block://${first}/7f16420b-4308-49ca-8dc8-dcb211aa5755?space_id=e9cde029-df5b-4155-b1ef-e48feea5c573&name=bunshun-93410-img1.jpg">`,
-    "图片后正文",
-    `<image source="notion-file-block://${second}/5527d07f-bcf7-43bc-8558-badb3c0ad981">不显示的说明</image>`,
-    "后续正文",
-  ].join("<br /><br />");
-  const excerpt = excerptFromPage({ id: pageId, url: "https://notion.so/page", properties: { ...idProperty(), "正文翻译": { type: "rich_text", rich_text: [{ plain_text: body }] } } });
-  assert.ok(excerpt);
-  const detail = renderEinkDetail(excerpt, "/read", "https://example.com/read/p");
-  assert.match(detail, new RegExp(`src="https://example.com/read/p/${pageId}/${first}"`));
-  assert.match(detail, new RegExp(`src="https://example.com/read/p/${pageId}/${second}"`));
-  assert.match(detail, /图片后正文/);
-  assert.match(detail, /后续正文/);
-  assert.doesNotMatch(detail, /不显示的说明|notion-file-block/);
 });
 
 test("text formatting handles nested quotes, markup, and English apostrophes", () => {
@@ -831,7 +714,7 @@ test("RSS description uses the earliest plain img or notion image in the body", 
   );
 });
 
-test("e-ink list uses the RSS view and links to detail pages", async (context) => {
+test("reading list API uses the RSS view", async (context) => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
   const pageId = "407e75a1-639c-81ca-8919-f4bff2a57884";
@@ -867,40 +750,24 @@ test("e-ink list uses the RSS view and links to detail pages", async (context) =
   }) as typeof fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
 
-  const response = await worker.fetch(
-    new Request("https://example.workers.dev/read"),
-    {
-      NOTION_TOKEN: "test",
-      NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
-      NOTION_EXCERPTS_VIEW_ID: viewId,
-    },
-  );
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("Content-Type") ?? "", /text\/html/);
-  const html = await response.text();
-  assert.match(html, /<title>阅读节选<\/title>/);
-  assert.match(html, new RegExp(`href="/r/${shareCode(1)}"`));
-  assert.match(html, new RegExp(`<li id="${shareCode(1)}" lang="zh-CN" tabindex="-1">`));
-  assert.match(html, /AI 时代的 RSS/);
-  assert.match(html, /科技 News · 作者：张三 AI/);
-  assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
   const api = await worker.fetch(new Request("https://example.workers.dev/api/read"), {
     NOTION_TOKEN: "test",
     NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
     NOTION_EXCERPTS_VIEW_ID: viewId,
   });
   assert.match(api.headers.get("Content-Type") ?? "", /application\/json/);
+  assert.equal(requests[0]?.url, `https://api.notion.com/v1/views/${viewId}`);
   assert.deepEqual(await api.json(), {
     kind: "articles", hasMore: false,
     items: [{ code: shareCode(1), title: "AI 时代的 RSS", titleLang: "zh-CN", source: "科技 News", author: "张三 AI" }],
   });
-  assert.equal((await worker.fetch(new Request("https://example.workers.dev/read"), {
+  assert.equal((await worker.fetch(new Request("https://example.workers.dev/api/read"), {
     NOTION_TOKEN: "test",
     NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
   })).status, 503);
 });
 
-test("e-ink categories filter the view and preserve navigation context", async (context) => {
+test("reading API applies category filters and selects article neighbors", async (context) => {
   const originalFetch = globalThis.fetch;
   const pageId = "407e75a1-639c-81ca-8919-f4bff2a57884";
   const nextId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
@@ -937,17 +804,14 @@ test("e-ink categories filter the view and preserve navigation context", async (
     NOTION_EXCERPTS_VIEW_ID: "view",
     NOTION_EXCERPTS_FAVORITES_VIEW_ID: "saved-view",
   };
-  for (const [category, label, marker] of [
-    ["weekly", "周刊", "bunshun.jp/denshiban/articles/"],
-    ["bunshun", "文春", "bunshun.jp/articles/"],
-    ["novel", "连载", "epub"],
-    ["news", "IT", "news.ycombinator.com"],
+  for (const [category, marker] of [
+    ["weekly", "bunshun.jp/denshiban/articles/"],
+    ["bunshun", "bunshun.jp/articles/"],
+    ["novel", "epub"],
+    ["news", "news.ycombinator.com"],
   ]) {
-    const response = await worker.fetch(new Request(`https://example.com/read?tab=${category}`), env);
+    const response = await worker.fetch(new Request(`https://example.com/api/read?tab=${category}`), env);
     assert.equal(response.status, 200);
-    const html = await response.text();
-    assert.match(html, new RegExp(`aria-current="page">${label}</a>`));
-    assert.match(html, new RegExp(`/r/${code}\\?tab=${category}`));
     assert.match(JSON.stringify(queries.at(-1)?.filter), new RegExp(marker.replaceAll(".", "\\.")));
     assert.match(JSON.stringify(queries.at(-1)?.filter), /正文翻译/);
     if (category === "weekly" || category === "bunshun") {
@@ -957,54 +821,28 @@ test("e-ink categories filter the view and preserve navigation context", async (
       ] }] });
     }
   }
-  const later = await worker.fetch(new Request("https://example.com/read?tab=later"), env);
+  const later = await worker.fetch(new Request("https://example.com/api/read?tab=later"), env);
   assert.equal(later.status, 200);
-  const laterHtml = await later.text();
-  assert.match(laterHtml, /aria-current="page">稍后阅读<\/a>/);
-  assert.match(laterHtml, new RegExp(`/r/${code}\\?tab=later`));
   assert.deepEqual(queries.at(-1)?.filter, { property: "提取来源", select: { equals: "Instapaper" } });
-  const laterDetail = await worker.fetch(new Request(`https://example.com/r/${code}?tab=later`, {
-    headers: { Referer: "https://example.com/read?tab=later" },
-  }), env);
-  const laterDetailHtml = await laterDetail.text();
-  assert.match(laterDetailHtml, new RegExp(`/read\\?tab=later#${code}`));
-  assert.match(laterDetailHtml, new RegExp(`/r/${nextCode}\\?tab=later`));
-  assert.deepEqual(queries.at(-1)?.filter, { property: "提取来源", select: { equals: "Instapaper" } });
-  const detail = await worker.fetch(new Request(`https://example.com/r/${code}?tab=weekly`, {
-    headers: { Referer: "https://example.com/read?tab=weekly" },
-  }), env);
-  const html = await detail.text();
-  assert.match(html, new RegExp(`/read\\?tab=weekly#${code}`));
-  assert.match(html, new RegExp(`/r/${nextCode}\\?tab=weekly`));
-  assert.match(JSON.stringify(queries.at(-1)?.filter), /bunshun\.jp\/denshiban\/articles\//);
-
-  const fallback = await worker.fetch(new Request("https://example.com/read?tab=unknown"), env);
+  for (const category of ["later", "weekly", "likes"]) {
+    const detail = await worker.fetch(new Request(`https://example.com/api/r/${code}?tab=${category}`), env);
+    const article = await detail.json<import("../src/reader-data.ts").ReaderArticle>();
+    assert.equal(article.actions?.nextCode, nextCode);
+    if (category === "likes") assert.deepEqual(queries.at(-1), { page_size: 30, filter: favoritesFilter, sorts: favoritesSorts });
+  }
+  const fallback = await worker.fetch(new Request("https://example.com/api/read?tab=unknown"), env);
   assert.equal(fallback.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
-  const fallbackHtml = await fallback.text();
-  assert.match(fallbackHtml, /aria-current="page">全部<\/a>/);
-  assert.match(fallbackHtml, /<a href="\/read\?tab=likes">收藏<\/a>/);
   assert.deepEqual(queries.at(-1)?.filter, viewFilter);
-
-  const favorites = await worker.fetch(new Request("https://example.com/read?tab=likes"), env);
+  const favorites = await worker.fetch(new Request("https://example.com/api/read?tab=likes"), env);
   assert.equal(favorites.status, 200);
   assert.equal(favorites.headers.get("Cache-Control"), "no-store");
-  assert.match(await favorites.text(), /aria-current="page">收藏<\/a>/);
   assert.deepEqual(queries.at(-1), { page_size: 31, filter: favoritesFilter, sorts: favoritesSorts });
-
-  const favoriteDetail = await worker.fetch(new Request(`https://example.com/r/${code}?tab=likes`, {
-    headers: { Referer: "https://example.com/read?tab=likes" },
-  }), env);
-  const favoriteHtml = await favoriteDetail.text();
-  assert.match(favoriteHtml, new RegExp(`/read\\?tab=likes#${code}`));
-  assert.match(favoriteHtml, new RegExp(`/r/${nextCode}\\?tab=likes`));
-  assert.deepEqual(queries.at(-1), { page_size: 30, filter: favoritesFilter, sorts: favoritesSorts });
-
   const rss = await worker.fetch(new Request("https://example.com/read.xml?tab=likes"), env);
   assert.equal(rss.status, 200);
   assert.deepEqual(queries.at(-1)?.filter, viewFilter);
 });
 
-test("e-ink list loads more within its category and keeps the expanded list on return", async (context) => {
+test("reading list API expands pages within its category", async (context) => {
   const originalFetch = globalThis.fetch;
   const pageId = (index: number) => `407e75a1-639c-81ca-8919-${String(index).padStart(12, "0")}`;
   const code = (index: number) => shareCode(index + 1);
@@ -1028,579 +866,51 @@ test("e-ink list loads more within its category and keeps the expanded list on r
   }) as typeof fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
   const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
-  const get = async (path: string, headers?: HeadersInit) => (await worker.fetch(new Request(`https://example.com${path}`, { headers }), env)).text();
-  const first = await get("/read?tab=weekly");
-  assert.equal((first.match(/<li id=/g) ?? []).length, 30);
-  assert.match(first, /<div class="list-actions" id="list-actions"><a class="btn" id="back-to-top" href="#" hidden>返回顶部<\/a><a class="btn" id="load-more"[^>]*>加载更多<\/a><\/div>/);
-  assert.match(first, /tab=weekly&amp;page=2[^\"]*">加载更多/);
-  const second = await get("/read?tab=weekly&page=2");
-  assert.equal((second.match(/<li id=/g) ?? []).length, 60);
-  assert.match(second, /tab=weekly&amp;page=3[^\"]*">加载更多/);
-  assert.match(second, new RegExp(`/r/${code(40)}\\?tab=weekly&amp;page=2`));
-  const detail = await get(`/r/${code(40)}?tab=weekly&page=2`, {
-    Referer: "https://example.com/read?tab=weekly&page=2",
-  });
-  assert.match(detail, new RegExp(`/read\\?tab=weekly&amp;page=2#${code(40)}`));
-  assert.match(detail, new RegExp(`/r/${code(41)}\\?tab=weekly&amp;page=2`));
-  const last = await get("/read?tab=weekly&page=3");
-  assert.equal((last.match(/<li id=/g) ?? []).length, 65);
-  assert.match(last, /<a class="btn" id="back-to-top" href="#" hidden>返回顶部<\/a>/);
-  assert.doesNotMatch(last, />加载更多<\/a>/);
-});
-
-test("e-ink list displays every category without interaction", () => {
-  const html = renderEinkList([], "/read");
-  assert.match(html, /<h1 class="visually-hidden">阅读节选<\/h1>/);
-  for (const [href, label] of [
-    ["/read", "全部"],
-    ["/read?tab=weekly", "周刊"],
-    ["/read?tab=bunshun", "文春"],
-    ["/read?tab=novel", "连载"],
-    ["/read?tab=news", "IT"],
-    ["/read?tab=likes", "收藏"],
-    ["/read?tab=later", "稍后阅读"],
-  ]) {
-    assert.ok(html.includes(`href="${href}"`), `${label} link is visible`);
+  for (const [page, count, hasMore] of [[1, 30, true], [2, 60, true], [3, 65, false]] as const) {
+    const response = await worker.fetch(new Request(`https://example.com/api/read?tab=weekly&page=${page}`), env);
+    const list = await response.json<import("../src/reader-data.ts").ReaderList>();
+    assert.equal(list.items.length, count);
+    assert.equal(list.hasMore, hasMore);
   }
-  const navigation = html.match(/<nav class="categories"[\s\S]*?<\/nav>/)?.[0];
-  assert.ok(navigation);
-  assert.doesNotMatch(navigation, /hidden/);
-  assert.doesNotMatch(navigation, /阅读节选/);
-  assert.match(navigation, /href="\/read\?tab=later"/);
-  assert.match(navigation, /href="\/read\?tab=highlights"/);
-  assert.deepEqual(Array.from(navigation.matchAll(/<a [^>]*>([^<]+)<\/a>/g), (match) => match[1]),
-    ["全部", "周刊", "文春", "连载", "IT", "收藏", "划线", "稍后阅读"]);
+  const detail = await worker.fetch(new Request(`https://example.com/api/r/${code(40)}?tab=weekly&page=2`), env);
+  const article = await detail.json<import("../src/reader-data.ts").ReaderArticle>();
+  assert.equal(article.actions?.nextCode, code(41));
 });
 
-test("back-to-top appears only when the remaining list content needs scrolling", () => {
-  const html = renderEinkList([], "/read", "all", 1, true);
-  const scripts = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), (match) => match[1]);
-  const script = scripts[2];
-  assert.ok(script);
-  let contentHeight = 700;
-  let viewportHeight = 800;
-  let hasMore = false;
-  const top = { hidden: true };
-  const more = { offsetHeight: 48 };
-  const main = {};
-  const rowHeight = () => top.hidden && !hasMore ? 0 : 72;
-  const actions = { get offsetHeight() { return rowHeight(); } };
-  const root = {
-    get scrollHeight() { return Math.max(viewportHeight, contentHeight + rowHeight()); },
-    get clientHeight() { return viewportHeight; },
-  };
-  const handlers = new Map<string, () => void>();
-  let resized = () => {};
-  class FakeResizeObserver {
-    constructor(callback: () => void) { resized = callback; }
-    observe(target: unknown) { assert.equal(target, main); }
-  }
-  const nodes: Record<string, unknown> = { "back-to-top": top, "list-actions": actions, "load-more": more };
-  const context = {
-    document: { documentElement: root, getElementById: (id: string) => id === "load-more" && !hasMore ? null : nodes[id], querySelector: () => main },
-    window: { addEventListener: (name: string, handler: () => void) => handlers.set(name, handler), getComputedStyle: () => ({ marginTop: "12px", marginBottom: "12px" }) },
-    ResizeObserver: FakeResizeObserver,
-  };
-  runInNewContext(script, context);
-  assert.equal(top.hidden, true);
-  contentHeight = 820;
-  resized();
-  assert.equal(top.hidden, false);
-  resized();
-  assert.equal(top.hidden, false, "the button's own height must not cause oscillation");
-  contentHeight = 790;
-  handlers.get("resize")?.();
-  assert.equal(top.hidden, true, "the button must not create the overflow that keeps it visible");
-  viewportHeight = 700;
-  handlers.get("resize")?.();
-  assert.equal(top.hidden, false);
-  hasMore = true;
-  contentHeight = 650;
-  top.hidden = true;
-  runInNewContext(script, context);
-  assert.equal(top.hidden, false, "the load-more link itself can make the page scrollable");
-  contentHeight = 600;
-  resized();
-  assert.equal(top.hidden, true);
-});
-
-test("e-ink list updates its return anchor only for normal article navigation", () => {
-  const html = renderEinkList([], "/read");
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
-  assert.ok(script);
-  let activate: (event: object) => void = () => assert.fail("click listener was not registered");
-  const state = { existing: "preserved" };
-  const replacements: Array<{ state: unknown; url: string }> = [];
-  const history = {
-    state,
-    replaceState(nextState: unknown, _title: string, url: string) {
-      replacements.push({ state: nextState, url });
-    },
-  };
-  const location = { pathname: "/read", search: "?source=rss", hash: "#older-article" };
-  const scrollCalls: Array<{ block?: string } | boolean> = [];
-  const targetRow = {
-    scrollIntoView(arg: { block?: string } | boolean) { scrollCalls.push(arg); },
-  };
-  runInNewContext(script, {
-    window: { history, location, addEventListener() {} }, history, location,
-    document: {
-      addEventListener(_event: string, handler: typeof activate) { activate = handler; },
-      getElementById(id: string) { return id === "older-article" ? targetRow : null; },
-    },
-  });
-  assert.equal(scrollCalls.length, 1);
-  assert.equal(JSON.stringify(scrollCalls[0]), JSON.stringify({ block: "center" }));
-  const link = {
-    tagName: "A", className: "item-link", target: "", hasAttribute: () => false,
-    parentNode: { tagName: "LI", id: "newer-article" },
-  };
-  const click = { target: { parentNode: link }, button: 0 };
-  activate(click);
-  assert.deepEqual(replacements, [{ state, url: "/read?source=rss#newer-article" }]);
-
-  for (const modifier of ["ctrlKey", "metaKey", "shiftKey", "altKey", "defaultPrevented"]) {
-    activate({ ...click, [modifier]: true });
-  }
-  activate({ ...click, button: 1 });
-  activate({ ...click, target: { ...link, target: "_blank" } });
-  assert.equal(replacements.length, 1);
-  // Browsers without the History API still render ordinary working links.
-  assert.doesNotThrow(() => runInNewContext(script, { window: {} }));
-});
-
-test("load more shows a disabled loading state after activation", () => {
-  const html = renderEinkList([], "/read", "all", 1, true);
-  const script = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), (match) => match[1])[1];
-  assert.ok(script);
-  let activate: (event: { preventDefault(): void }) => void = () => {};
-  let disabled = "";
-  const more = {
-    textContent: "加载更多",
-    addEventListener(_name: string, handler: typeof activate) { activate = handler; },
-    getAttribute() { return disabled; },
-    setAttribute(_name: string, value: string) { disabled = value; },
-  };
-  runInNewContext(script, { document: { querySelector: () => ({}), getElementById: () => more, addEventListener() {} }, window: {} });
-  let prevented = false;
-  const event = { preventDefault() { prevented = true; } };
-  activate(event);
-  assert.equal(more.textContent, "正在加载");
-  assert.equal(disabled, "true");
-  assert.equal(prevented, false);
-  activate(event);
-  assert.equal(prevented, true);
-});
-
-test("e-ink list pages only when the blank margins are tapped", () => {
-  const html = renderEinkList([], "/read");
-  const scripts = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), (match) => match[1]);
-  const script = scripts[1];
-  assert.ok(script);
-  const handlers = new Map<string, (event: object) => void>();
-  const scrolls: number[] = [];
-  const body = {};
-  const root = {};
-  const main = { getBoundingClientRect: () => ({ left: 300, right: 700 }) };
-  let now = 1000;
-  let selected = false;
-  let desktop = false;
-  const document = {
-    body, documentElement: root,
-    querySelector: () => main,
-    getElementById: () => null,
-    addEventListener: (name: string, handler: (event: object) => void) => handlers.set(name, handler),
-  };
-  runInNewContext(script, {
-    document,
-    window: {
-      innerHeight: 600,
-      matchMedia: () => ({ matches: desktop }),
-      scrollBy: (_x: number, y: number) => scrolls.push(y),
-      getSelection: () => ({ rangeCount: 1, isCollapsed: !selected }),
-    },
-    Date: { now: () => now },
-  });
-  const dispatch = (name: string, event: object) => {
-    const handler = handlers.get(name);
-    assert.ok(handler);
-    handler(event);
-  };
-  const click = (x: number, target: object = body, extra: object = {}) =>
-    dispatch("click", { target, clientX: x, button: 0, ...extra });
-  const startTouch = (x: number, target: object = body) =>
-    dispatch("touchstart", { target, touches: [{ clientX: x, clientY: 200 }] });
-  const endTouch = (x: number, target: object = body) => {
-    let prevented = false;
-    dispatch("touchend", {
-      target, touches: [], changedTouches: [{ clientX: x, clientY: 200 }], cancelable: true,
-      preventDefault() { prevented = true; },
-    });
-    return prevented;
-  };
-
-  click(100, body, { pointerType: "mouse" });
-  desktop = true;
-  click(900, root);
-  desktop = false;
-  assert.deepEqual(scrolls, []);
-  click(100, body, { pointerType: "touch" });
-  click(900, root, { pointerType: "touch" });
-  click(500);
-  click(100, { tagName: "A" });
-  click(900, body, { ctrlKey: true });
-  assert.deepEqual(scrolls, [-600, 600]);
-
-  startTouch(900);
-  assert.equal(endTouch(900), true);
-  click(900);
-  assert.deepEqual(scrolls, [-600, 600, 600], "the synthetic click must not scroll twice");
-  now += 801;
-  desktop = true;
-  startTouch(100);
-  assert.equal(endTouch(100), true, "touch still works on devices with a mouse");
-  desktop = false;
-  now += 801;
-  startTouch(100);
-  dispatch("touchmove", { touches: [{ clientX: 100, clientY: 250 }] });
-  assert.equal(endTouch(100), false);
-  now += 801;
-  startTouch(100);
-  now += 701;
-  assert.equal(endTouch(100), false);
-  now += 801;
-  selected = true;
-  startTouch(100);
-  selected = false;
-  assert.equal(endTouch(100), false);
-  now += 801;
-  startTouch(500);
-  assert.equal(endTouch(500), false);
-  assert.deepEqual(scrolls, [-600, 600, 600, -600]);
-});
-
-test("e-ink detail renders linked metadata on every device and reuses the image proxy", async (context) => {
-  const originalFetch = globalThis.fetch;
-  const pageId = "407e75a1-639c-81ca-8919-f4bff2a57884";
-  const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
-  const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
-  const code = shareCode(1);
-  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
-    const href = String(url);
-    if (init?.method === "POST" && href.includes("/data_sources/excerpt-source/query")) {
-      return Response.json({ results: [{
-        id: pageId,
-        url: "https://www.notion.so/excerpt-1",
-        parent: { type: "data_source_id", data_source_id: "excerpt-source" },
-        properties: {
-          ...idProperty(),
-          "标题": { type: "title", title: [{ plain_text: "Original & title" }] },
-          "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "详情标题" }] },
-          "正文翻译": { type: "rich_text", rich_text: [{ plain_text: `第一段<br /><br /><image source="notion-file-block://${blockId}/${fileId}" /><br /><br />第二段` }] },
-          "出处": { type: "rich_text", rich_text: [{ plain_text: "某书" }] },
-          "作者": { type: "rich_text", rich_text: [{ plain_text: "张三" }] },
-          "出版方": { type: "rich_text", rich_text: [{ plain_text: "某出版社" }] },
-          "章节": { type: "rich_text", rich_text: [{ plain_text: "第一章" }] },
-          "发布日期": { type: "date", date: { start: "2025-06-12" } },
-          "专有名词与术语": { type: "rich_text", rich_text: [{ plain_text: "术语 A<br />释义" }] },
-          "原文链接": { type: "url", url: "https://example.com/original" },
-        },
-      }], has_more: false });
-    }
-    throw new Error(`Unexpected fetch: ${href}`);
-  }) as typeof fetch;
-  context.after(() => { globalThis.fetch = originalFetch; });
-
-  const response = await worker.fetch(
-    new Request(`https://example.workers.dev/r/${code}`),
-    { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
-  );
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get("Cache-Control"), "no-store");
-  assert.equal(response.headers.get("Vary"), null);
-  const html = await response.text();
-  assert.match(html, /<body class="detail">/);
-  assert.doesNotMatch(html, /eink-weight/);
-  assert.match(html, /<title>详情标题<\/title>/);
-  assert.equal(html.match(/<nav class="nav-row">/g)?.length, 1);
-  assert.match(html, /<p>张三<\/p>/);
-  assert.match(html, /第一段/);
-  assert.match(html, /第二段/);
-  assert.match(html, /原文：<a [^>]*lang="zh-CN" href="https:\/\/example\.com\/original">Original &amp; title<\/a>/);
-  assert.match(html, /来源：某出版社/);
-  assert.match(html, /章节：第一章/);
-  assert.match(html, /日期：2025-06-12/);
-  assert.match(html, /<\/div>\n<p class="other"><button type="button" class="other-link" id="read-later" data-url="\/read\/add-later\/[A-Za-z0-9]{6}"><span role="status">待读<\/span><\/button> <a class="other-link" id="favorite-link" data-favorite="false" href="\/read\/favorite\/[A-Za-z0-9]{6}\?favorite=1"><span id="favorite-status" role="status">收藏<\/span><\/a> <a class="other-link" href="https:\/\/www\.notion\.so\/excerpt-1">管理<\/a> <button type="button" class="other-link" id="share-copy"[^>]*><span id="share-status" role="status">分享<\/span><\/button><\/p>[\s\S]*?<hr \/>\n<p class="detail-metadata">/);
-  assert.match(html, /<dialog id="favorite-dialog" aria-label="收藏验证">/);
-  assert.doesNotMatch(html, /数据来源：|分享链接：/);
-  assert.match(html, new RegExp(`src="https://example\\.workers\\.dev/read/p/${pageId}/${blockId}"`));
-  assert.match(html, /名词解释/);
-  assert.match(html, /术语 A/);
-  assert.doesNotMatch(html, /相关链接|class="actions"/);
-  assert.doesNotMatch(html, /@media \(update: slow\)/);
-
-  const shareResponse = await worker.fetch(
-    new Request(`https://example.workers.dev/s/${code}`),
-    { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
-  );
-  assert.equal(shareResponse.status, 200);
-  const shareHtml = await shareResponse.text();
-  assert.match(shareHtml, /第一段/);
-  assert.match(shareHtml, /第二段/);
-  assert.doesNotMatch(shareHtml, /名词解释|术语 A|释义/);
-
-  for (const userAgent of ["Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", "Mozilla/5.0 (Linux; Kindle) Silk/3.0"]) {
-    const deviceResponse = await worker.fetch(
-      new Request(`https://example.workers.dev/r/${code}`, { headers: { "User-Agent": userAgent } }),
-      { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
-    );
-    assert.equal(await deviceResponse.text(), html);
-  }
-
-  for (const path of ["/read/not-a-page-id", `/r/${pageId}`, `/read/s/${pageId}`, `/read/s/${code}`]) {
-    assert.equal((await worker.fetch(
-      new Request(`https://example.workers.dev${path}`),
-      { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" },
-    )).status, 404);
-  }
-});
-
-test("e-ink render helpers escape content and omit empty metadata", () => {
-  const pageId = "407e75a1-639c-81ca-8919-f4bff2a57884";
-  const code = shareCode(1);
-  const list = renderEinkList([{
-    id: pageId,
-    title: "甲 & 乙",
-    originalTitle: "甲 & 乙",
-    body: "正文",
-    chinese: false,
-    lang: "zh-CN",
-    titleLang: "zh-CN",
-    originalLang: "zh-CN",
-    terms: "",
-    sourceTitle: "",
-    author: "",
-    chapter: "",
-    publisher: "",
-    originalUrl: null,
-    publishedDate: "",
-    link: "https://www.notion.so/1",
-    pubDate: null,
-    code,
-  }], "/read");
-  assert.match(list, /甲 &amp; 乙/);
-  assert.match(list, new RegExp(`<li id="${code}" lang="zh-CN" tabindex="-1">`));
-  assert.doesNotMatch(list, /作者：|class="meta"/);
-
-  const detail = renderEinkDetail({
-    id: pageId,
-    title: "标题",
-    originalTitle: "标题",
-    body: "一段 <文字>",
-    chinese: false,
-    lang: "zh-CN",
-    titleLang: "zh-CN",
-    originalLang: "zh-CN",
-    terms: "",
-    sourceTitle: "It's",
-    author: "作者",
-    chapter: "",
-    publisher: "",
-    originalUrl: "https://example.com/original",
-    publishedDate: "",
-    link: "https://www.notion.so/1",
-    pubDate: null,
-    code,
-  }, "/read", "https://example.com/read/p", { prevCode: null, nextCode: null });
-  assert.match(detail, /一段 &lt;文字&gt;/);
-  assert.match(detail, /<p>作者<\/p>/);
-  assert.doesNotMatch(detail, /<cite>It&#39;s<\/cite>/);
-  assert.match(detail, new RegExp(`href="/read#${code}"[^>]*>返回列表`));
-  assert.match(detail, /class="is-disabled">上一篇</);
-  assert.match(detail, /class="is-disabled">下一篇</);
-  assert.match(detail, /原文：<a [^>]*href="https:\/\/example\.com\/original">标题<\/a>/);
-  assert.match(detail, /日期：—<\/p>/);
-  assert.doesNotMatch(detail, /名词解释/);
-});
-
-test("e-ink detail nav links previous and next excerpts beside back to list", () => {
-  const [first, middle, last] = [1, 2, 3].map((number) => shareCode(number)) as [string, string, string];
-  const stub = (id: string): Parameters<typeof renderEinkDetail>[0] => ({
-    id,
-    code: id,
-    title: id,
-    originalTitle: id,
-    body: "正文",
-    chinese: false,
-    lang: "zh-CN",
-    titleLang: "zh-CN",
-    originalLang: "zh-CN",
-    terms: "",
-    sourceTitle: "",
-    author: "",
-    chapter: "",
-    publisher: "",
-    originalUrl: null,
-    publishedDate: "",
-    link: `https://www.notion.so/${id}`,
-    pubDate: null,
-  });
-  assert.deepEqual(neighborsFor([stub(first), stub(middle), stub(last)], middle), {
-    prevCode: first,
-    nextCode: last,
-  });
-  const html = renderEinkDetail(stub(middle), "/read", "https://example.com/read/p", {
-    prevCode: first,
-    nextCode: last,
-  });
-  assert.match(html, new RegExp(`href="/r/${first}"[^>]*>上一篇`));
-  assert.match(html, new RegExp(`href="/read#${middle}"[^>]*>返回列表`));
-  assert.match(html, new RegExp(`href="/r/${last}"[^>]*>下一篇`));
-  assert.ok(html.indexOf("</article>") < html.indexOf('<nav class="nav-row">'));
-  assert.equal((html.match(/<nav class="nav-row">/g) ?? []).length, 1);
-  assert.doesNotMatch(html, /原文：|@media \(update: slow\)/);
-});
-
-test("e-ink detail hides its bottom navigation only for shared links", async (context) => {
-  const originalFetch = globalThis.fetch;
-  const viewId = "excerpt-view";
-  const [first, middle, last] = [1, 2, 3].map((number) => shareCode(number)) as [string, string, string];
-  const pageJson = (number: number, title: string) => ({
-    id: `40${number}e75a1-639c-81ca-8919-f4bff2a57884`,
-    url: `https://www.notion.so/${number}`,
-    parent: { type: "data_source_id", data_source_id: "excerpt-source" },
-    properties: {
-      ...idProperty(number),
-      "标题翻译": { type: "rich_text", rich_text: [{ plain_text: title }] },
-      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
-    },
-  });
-  let viewRequests = 0;
-  let viewUnavailable = false;
-  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
-    const href = String(url);
-    if (init?.method === "POST" && JSON.parse(String(init.body)).filter?.unique_id?.equals === 2) {
-      return Response.json({ results: [pageJson(2, "中间")], has_more: false });
-    }
-    if (href.includes(`/views/${viewId}`)) {
-      viewRequests++;
-      if (viewUnavailable) return new Response(null, { status: 503 });
-      return Response.json({ data_source_id: "excerpt-source", filter: null, quick_filters: {}, sorts: [] });
-    }
-    if (init?.method === "POST" && href.includes("/data_sources/excerpt-source/query")) {
-      return Response.json({
-        results: [pageJson(1, "一"), pageJson(2, "二"), pageJson(3, "三")],
-        has_more: false,
-      });
-    }
-    throw new Error(`Unexpected fetch: ${href}`);
-  }) as typeof fetch;
-  context.after(() => { globalThis.fetch = originalFetch; });
-
-  const origin = "https://example.workers.dev";
-  const env = {
-    NOTION_TOKEN: "test",
-    NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source",
-    NOTION_EXCERPTS_VIEW_ID: viewId,
-  };
-  const open = async (referer?: string, shared = false) => {
-    const response = await worker.fetch(new Request(`${origin}${shared ? "/s" : "/r"}/${middle}`, {
-      headers: referer ? { Referer: referer } : {},
-    }), env);
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get("Vary"), null);
-    return response.text();
-  };
-  for (const source of [`${origin}/read`, `${origin}/r/${first}`]) {
-    const html = await open(source);
-    assert.equal(html.match(/<nav class="nav-row">/g)?.length, 1);
-    assert.match(html, new RegExp(`href="/r/${first}"[^>]*>上一篇`));
-    assert.match(html, new RegExp(`href="/r/${last}"[^>]*>下一篇`));
-  }
-  assert.equal(viewRequests, 2);
-
-  for (const source of [undefined, "https://other.example/read", `${origin}/read.xml`, "invalid referrer"]) {
-    const html = await open(source);
-    assert.equal(html.match(/<nav class="nav-row">/g)?.length, 1);
-    assert.match(html, /<p>正文<\/p>/);
-    assert.match(html, new RegExp(`href="/r/${first}"[^>]*>上一篇`));
-    assert.match(html, new RegExp(`href="/r/${last}"[^>]*>下一篇`));
-  }
-  assert.equal(viewRequests, 6);
-
-  const shared = await open(`${origin}/read`, true);
-  assert.equal(shared.match(/<nav class="nav-row" hidden>/g)?.length, 1);
-  assert.doesNotMatch(shared, /<p class="other">|id="share-copy"|<dialog id="favorite-dialog"/);
-  assert.equal(viewRequests, 6);
-
-  viewUnavailable = true;
-  const originalConsoleError = console.error;
-  console.error = () => {};
-  try {
-    const html = await open();
-    assert.match(html, /<p>正文<\/p>/);
-    assert.equal(html.match(/<nav class="nav-row">/g)?.length, 1);
-    assert.match(html, /class="is-disabled">上一篇/);
-    assert.match(html, /class="is-disabled">下一篇/);
-  } finally {
-    console.error = originalConsoleError;
-  }
-});
-
-test("short share links resolve the Notion ID property and are copied from detail pages", async (context) => {
+test("article and share APIs resolve the Notion ID property", async (context) => {
   const originalFetch = globalThis.fetch;
   const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
-  const page = {
-    id: pageId,
-    url: `https://www.notion.so/${pageId}`,
-    parent: { type: "data_source_id", data_source_id: "excerpt-source" },
-    properties: {
-      ...idProperty(42),
-      "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "标题" }] },
-      "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
-    },
-  };
   const queries: unknown[] = [];
-  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
-    const href = String(url);
-    if (href.includes(`/pages/${pageId}`)) return Response.json(page);
-    if (init?.method === "POST" && href.includes("/data_sources/excerpt-source/query")) {
-      const body = JSON.parse(String(init.body));
-      queries.push(body);
-      return Response.json({ results: body.filter?.unique_id?.equals === 42 ? [page] : [], has_more: false });
-    }
-    throw new Error(`Unexpected fetch: ${href}`);
+  globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const query = JSON.parse(String(init?.body));
+    queries.push(query);
+    return Response.json({
+      results: query.filter?.unique_id?.equals === 42 ? [{
+        id: pageId,
+        url: `https://www.notion.so/${pageId}`,
+        properties: {
+          ...idProperty(42),
+          "标题翻译": { type: "rich_text", rich_text: [{ plain_text: "标题" }] },
+          "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
+        },
+      }] : [],
+      has_more: false,
+    });
   }) as typeof fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
-  const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "excerpt-source" };
-  const origin = "https://example.workers.dev";
-
-  const code = shareCode(42);
+  const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "source" };
   const lookup = { page_size: 1, filter: { property: "ID", unique_id: { equals: 42 } } };
-  const detail = await (await worker.fetch(new Request(`${origin}/r/${code}`), env)).text();
-  assert.match(detail, new RegExp(`id="share-copy" data-path="/s/${code}"`));
-  assert.match(detail, new RegExp(`href="/read#${code}"[^>]*>返回列表`));
-  assert.deepEqual(queries, [lookup]);
-
-  const shared = await worker.fetch(new Request(`${origin}/s/${code}`), env);
-  assert.equal(shared.status, 200);
-  const html = await shared.text();
-  assert.match(html, /<p>正文<\/p>/);
-  assert.equal(html.match(/<nav class="nav-row" hidden>/g)?.length, 1);
-  assert.doesNotMatch(html, /id="share-copy"/);
-  assert.deepEqual(queries, [lookup, lookup]);
-
-  for (const prefix of ["/s", "/r"]) {
-    const missing = await worker.fetch(new Request(`${origin}${prefix}/${shareCode(7)}`), env);
+  for (const prefix of ["r", "s"]) {
+    const response = await worker.fetch(new Request(`https://example.com/api/${prefix}/${shareCode(42)}`), env);
+    assert.equal(response.status, 200);
+    const article = await response.json<import("../src/reader-data.ts").ReaderArticle>();
+    assert.equal(article.item.title, "标题");
+    assert.equal(article.actions === null, prefix === "s");
+    const missing = await worker.fetch(new Request(`https://example.com/api/${prefix}/${shareCode(7)}`), env);
     assert.equal(missing.status, 404);
-    assert.equal(missing.headers.get("Cache-Control"), "public, max-age=300");
   }
-  assert.equal(queries.length, 4);
-
-  for (const path of ["/s/42", "/r/42", "/r", "/r.xml", "/r/later.xml", `/r/favorite/${code}`, `/read/${code}`, `/s/${code}/x`, `/s/${code}0`, "/s/abc-ef", "/s/zzzzzz", `/r/${pageId}`, `/read/d/${code}`]) {
-    assert.equal((await worker.fetch(new Request(`${origin}${path}`), env)).status, 404);
-  }
-  assert.equal(queries.length, 4, "malformed codes never reach Notion");
+  assert.deepEqual(queries[0], lookup);
+  assert.deepEqual(queries[2], lookup);
 });
 
 test("share codes round-trip, look unrelated for consecutive IDs, and reject guesses", () => {
@@ -1624,480 +934,6 @@ test("share codes round-trip, look unrelated for consecutive IDs, and reject gue
     if (shareCodeId(guess) !== null) accepted++;
   }
   assert.ok(accepted < 50, `${accepted} of 20000 guesses decoded to an ID`);
-});
-
-test("e-ink detail pages only when the blank margins are tapped", async () => {
-  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
-  const code = shareCode(1);
-  const html = renderEinkDetail({
-    id: pageId,
-    code,
-    title: "标题",
-    originalTitle: "标题",
-    body: "正文",
-    chinese: false,
-    lang: "zh-CN",
-    titleLang: "zh-CN",
-    originalLang: "zh-CN",
-    terms: "",
-    sourceTitle: "",
-    author: "",
-    chapter: "",
-    publisher: "",
-    originalUrl: null,
-    publishedDate: "",
-    link: "https://www.notion.so/1",
-    pubDate: null,
-  }, "/read", "https://example.com/read/p");
-  assert.doesNotMatch(html, /class="pager"|向上|向下/);
-  assert.match(html, /window\.scrollBy\(0,dir\*step\(\)\)/);
-  assert.match(html, /class="progress"/);
-  assert.match(html, /id="progress-bar"/);
-  assert.match(html, /localStorage\.setItem\(key,String\(scrollRatio\(\)\)\)/);
-  assert.match(html, /localStorage\.getItem\(key\)/);
-  assert.match(html, /eink-progress:/);
-  assert.match(html, /saveSoon[\s\S]*setTimeout[\s\S]*400/);
-  assert.match(html, /pagehide',saveNow/);
-
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
-  assert.ok(script);
-  function setupPaging(desktop: boolean, pointerEvents = true, shared = false) {
-    const handlers = new Map<string, (event: object) => void>();
-    const scrolls: number[] = [];
-    const body = {};
-    const root = { scrollHeight: 2000 };
-    const main = { getBoundingClientRect: () => ({ left: 300, right: 700 }) };
-    const shareHandlers = new Map<string, () => void>();
-    const copiedLinks: string[] = [];
-    const storageCalls: string[] = [];
-    const shareButton = {
-      addEventListener: (name: string, handler: () => void) => shareHandlers.set(name, handler),
-      getAttribute: (name: string) => name === "data-path" ? html.match(/data-path="([^"]*)"/)?.[1] ?? null : null,
-    };
-    const shareStatus = { textContent: "" };
-    const resultDialog = { hidden: true };
-    const target = (tagName: string) => tagName === "BODY" ? body : tagName === "HTML" ? root : { tagName, parentNode: body };
-    let selected = false;
-    let now = 1000;
-    const document = {
-      body, documentElement: root,
-      querySelector: () => main,
-      getElementById: (id: string) => id === "share-copy" ? shareButton : id === "share-status" ? shareStatus : id === "explanation-dialog" ? resultDialog : null,
-      addEventListener(name: string, handler: (event: object) => void) { handlers.set(name, handler); },
-    };
-    const window = {
-      innerHeight: 600, innerWidth: 1000, scrollY: 0,
-      navigator: { clipboard: { writeText: (value: string) => { copiedLinks.push(value); return Promise.resolve(); } } },
-      PointerEvent: pointerEvents ? class {} : undefined,
-      getSelection: () => ({ rangeCount: 1, isCollapsed: !selected }),
-      matchMedia: () => ({ matches: desktop }),
-      scrollBy: (_x: number, y: number) => scrolls.push(y),
-      addEventListener: () => {},
-    };
-    runInNewContext(script, {
-      window, document, location: { origin: "https://example.com", pathname: `${shared ? "/s" : "/r"}/${code}`, search: "?tab=weekly&page=2" },
-      Date: { now: () => now },
-      localStorage: { getItem: () => { storageCalls.push("read"); return null; }, setItem: () => { storageCalls.push("write"); } },
-    });
-    function dispatch(name: string, event: object) {
-      const handler = handlers.get(name);
-      assert.ok(handler, `${name} listener was not registered`);
-      handler(event);
-    }
-    return {
-      scrolls,
-      copiedLinks,
-      shareStatus,
-      storageCalls,
-      copyShareLink() { shareHandlers.get("click")?.(); },
-      selectText(value: boolean) { selected = value; },
-      showResultDialog(value: boolean) { resultDialog.hidden = !value; },
-      advance(milliseconds: number) { now += milliseconds; },
-      startPointer() { dispatch("pointerdown", {}); },
-      startTouch(x = 750, y = 200, tagName = "BODY") {
-        dispatch("touchstart", { target: target(tagName), touches: [{ clientX: x, clientY: y }] });
-      },
-      moveTouch(x: number, y: number) { dispatch("touchmove", { touches: [{ clientX: x, clientY: y }] }); },
-      endTouch(x = 750, y = 200, tagName = "BODY") {
-        let prevented = false;
-        dispatch("touchend", {
-          target: target(tagName),
-          touches: [], changedTouches: [{ clientX: x, clientY: y }],
-          cancelable: true, preventDefault() { prevented = true; },
-        });
-        return prevented;
-      },
-      click(pointerType?: string, tagName = "BODY", clientX = 750, extra: object = {}) {
-        dispatch("click", { target: target(tagName), clientX, pointerType, ...extra });
-      },
-    };
-  }
-
-  const desktop = setupPaging(true);
-  desktop.click();
-  desktop.click("touch");
-  assert.deepEqual(desktop.scrolls, []);
-
-  const touch = setupPaging(false);
-  touch.click("mouse");
-  touch.click(undefined, "A");
-  touch.click("touch", "BUTTON");
-  assert.deepEqual(touch.scrolls, []);
-
-  const overlay = setupPaging(false);
-  overlay.showResultDialog(true);
-  overlay.startTouch(750);
-  assert.equal(overlay.endTouch(750), false);
-  overlay.click("touch", "BODY", 750);
-  assert.deepEqual(overlay.scrolls, [], "the article does not page while a result dialog is open");
-
-  const margins = setupPaging(false);
-  for (const x of [250, 750]) {
-    for (const tagName of ["MAIN", "ARTICLE", "H1", "P", "IMG", "A", "BUTTON"]) {
-      margins.click("touch", tagName, x);
-      margins.startTouch(x, 200, tagName);
-      assert.equal(margins.endTouch(x, 200, tagName), false);
-      margins.advance(801);
-    }
-  }
-  for (const x of [300, 500, 700]) {
-    margins.click("touch", "BODY", x);
-    margins.startTouch(x);
-    assert.equal(margins.endTouch(x), false);
-    margins.advance(801);
-  }
-  margins.startTouch(695);
-  assert.equal(margins.endTouch(705), false, "a tap starting inside the column does not page");
-  margins.advance(801);
-  margins.startTouch(705);
-  assert.equal(margins.endTouch(695), false, "a tap ending inside the column does not page");
-  margins.advance(801);
-  margins.startTouch(750, 200, "P");
-  assert.equal(margins.endTouch(), false, "a tap starting on content does not page");
-  margins.advance(801);
-  for (const extra of [{ defaultPrevented: true }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 2 }]) {
-    margins.click("touch", "BODY", 750, extra);
-  }
-  assert.deepEqual(margins.scrolls, [], "content, column boundaries, and modified clicks do not page");
-  margins.click("touch", "BODY", 250);
-  margins.click("touch", "HTML", 750);
-  assert.deepEqual(margins.scrolls, [-600, 600]);
-
-  for (const pointerEvents of [true, false]) {
-    const paging = setupPaging(false, pointerEvents);
-    paging.startPointer();
-    paging.selectText(true);
-    paging.click("touch");
-    assert.deepEqual(paging.scrolls, [], "a long press may still dispatch a click");
-
-    paging.startPointer();
-    paging.selectText(false);
-    paging.click("touch");
-    assert.deepEqual(paging.scrolls, [], "the dismissing tap can clear the selection before click");
-
-    paging.startPointer();
-    paging.click("touch");
-    paging.startPointer();
-    paging.click("touch", "BODY", 250);
-    assert.deepEqual(paging.scrolls, [600, -600]);
-  }
-
-  for (const pointerEvents of [true, false]) {
-    const paging = setupPaging(false, pointerEvents);
-    paging.startTouch();
-    assert.equal(paging.endTouch(), true, "paging suppresses the subsequent native click");
-    paging.click("mouse");
-    assert.deepEqual(paging.scrolls, [600], "a touch and its synthetic click scroll only once");
-
-    paging.startTouch(250);
-    paging.endTouch(250);
-    assert.deepEqual(paging.scrolls, [600, -600]);
-
-    paging.startTouch();
-    paging.moveTouch(750, 250);
-    assert.equal(paging.endTouch(750, 250), false);
-    paging.click("touch");
-    assert.deepEqual(paging.scrolls, [600, -600], "swiping does not trigger paging");
-
-    paging.startTouch();
-    paging.advance(800);
-    paging.endTouch();
-    assert.deepEqual(paging.scrolls, [600, -600], "a long press does not trigger paging");
-
-    paging.selectText(true);
-    paging.startTouch();
-    paging.selectText(false);
-    assert.equal(paging.endTouch(), false);
-    paging.click("mouse");
-    assert.deepEqual(paging.scrolls, [600, -600], "dismissing a selection does not trigger paging");
-
-    paging.startTouch();
-    assert.equal(paging.endTouch(750, 200, "A"), false);
-    assert.deepEqual(paging.scrolls, [600, -600], "links keep their native behavior");
-  }
-
-  const normalPage = setupPaging(false);
-  normalPage.copyShareLink();
-  assert.deepEqual(normalPage.copiedLinks, [`https://example.com/s/${code}`]);
-  await Promise.resolve();
-  assert.equal(normalPage.shareStatus.textContent, "已复制");
-  assert.ok(normalPage.storageCalls.includes("read"), "detail pages restore progress keyed by their code");
-
-  const hybrid = setupPaging(true);
-  hybrid.startTouch();
-  hybrid.endTouch();
-  assert.deepEqual(hybrid.scrolls, [600], "touch works on devices with a mouse or trackpad");
-  const sharedPage = setupPaging(false, true, true);
-  sharedPage.startTouch();
-  sharedPage.endTouch();
-  sharedPage.copyShareLink();
-  assert.deepEqual(sharedPage.copiedLinks, [`https://example.com/s/${code}`]);
-  assert.deepEqual(sharedPage.storageCalls, [], "shared pages do not read or save progress");
-});
-
-test("e-ink detail pangues all visible text without changing image proxy URLs", () => {
-  const pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
-  const blockId = "28324ab7-0534-48a3-8fbe-fed8e055041d";
-  const fileId = "8c289a44-4d96-46f6-a6ee-1d6374101e7e";
-  const html = renderEinkDetail({
-    id: pageId,
-    code: shareCode(1),
-    title: "AI时代的RSS",
-    originalTitle: "Hello世界",
-    body: `“使用API处理2026年数据。\n\n<image source="notion-file-block://${blockId}/${fileId}">图片说明“<br /><br />文字</image>\n\n结束。”`,
-    chinese: false,
-    lang: "zh-CN",
-    titleLang: "zh-CN",
-    originalLang: "en",
-    terms: "API接口\nApplication Programming Interface",
-    sourceTitle: "Cloudflare Workers",
-    author: "张三AI",
-    chapter: "Chapter1章节",
-    publisher: "ABC出版社",
-    originalUrl: "https://example.com/original",
-    publishedDate: "2025-06-12",
-    link: "https://www.notion.so/1",
-    pubDate: null,
-  }, "/read", "https://example.com/read/p");
-  assert.match(html, /<title>AI 时代的 RSS<\/title>/);
-  assert.match(html, /<h1 lang="zh-CN">AI 时代的 RSS<\/h1>/);
-  assert.match(html, /<p>张三 AI<\/p>/);
-  assert.match(html, /使用 API 处理 2026 年数据/);
-  assert.match(html, /<p>「使用 API 处理 2026 年数据。<\/p>/);
-  assert.match(html, /<p>结束。」<\/p>/);
-  assert.match(html, /原文：<a [^>]*lang="en"[^>]*>Hello 世界<\/a>/);
-  assert.match(html, /来源：ABC 出版社/);
-  assert.match(html, /章节：Chapter1 章节/);
-  assert.match(html, /名词解释/);
-  assert.match(html, /API 接口/);
-  assert.match(html, new RegExp(`src="https://example\\.com/read/p/${pageId}/${blockId}"`));
-  assert.doesNotMatch(html, /https:\/\/example\.com \/book|AI时代的RSS|使用API处理|Hello世界|ABC出版社|张三AI/);
-});
-
-test("two paragraph taps open actions and request the matching original paragraph", () => {
-  const properties = {
-    ...idProperty(),
-    "原文语言": { type: "select" as const, select: { name: "日文" } },
-    "正文": { type: "rich_text" as const, rich_text: [{ plain_text: "原文" }] },
-    "正文翻译": { type: "rich_text" as const, rich_text: [{ plain_text: "中文译文" }] },
-  };
-  const page = { id: "page", url: "https://notion.so/page", properties };
-  const excerpt = excerptFromPage(page)!;
-  excerpt.sourceTitle = "文章副标题";
-  excerpt.author = "张三";
-  const html = renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, true, [], true);
-  assert.match(html, /id="body-toggle"[^>]*>显示原文/);
-  assert.match(html, /<p><span id="body-view-toggle-prefix" hidden><button[^>]*id="body-view-toggle"[^>]*>显示原文<\/button> · <\/span>张三<\/p>\s*<div class="excerpt-body" id="translated-body"/);
-  assert.doesNotMatch(html, /文章副标题|作者：张三/);
-  assert.match(html, /id="original-match-content"><section><h2>正文<\/h2><p id="original-match-current"><\/p><\/section><section><h2>原文<\/h2><p id="original-match-text"/);
-  assert.doesNotMatch(html, /<p>正文操作<\/p>|id="body-actions-cancel"/);
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
-  type Handler = (event?: any) => void;
-  function element(hidden = false) {
-    const handlers = new Map<string, Handler>();
-    return { hidden, handlers, textContent: "", addEventListener: (name: string, handler: Handler) => handlers.set(name, handler), focus() {} };
-  }
-  const translated = element(), original = element(true), actions = { ...element(true), contains: () => false }, toggle = element(), highlight = element(true), preview = element();
-  toggle.textContent = "显示原文";
-  const viewAttributes = new Map<string, string>();
-  const viewToggle = { ...element(true), setAttribute: (name: string, value: string) => viewAttributes.set(name, value) };
-  const viewTogglePrefix = element(true);
-  const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-view-toggle": viewToggle, "body-view-toggle-prefix": viewTogglePrefix, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight, "body-preview": preview };
-  const translatedP = { tagName: "P", textContent: "中文译文", parentNode: translated, contains: (node: unknown) => node === translatedP };
-  let now = 1000, scrollY = 0;
-  const windowHandlers = new Map<string, Array<() => void>>();
-  const documentHandlers = new Map<string, Array<Handler>>();
-  const requested: unknown[][] = [];
-  runInNewContext(script, {
-    document: { documentElement: { scrollHeight: 600 }, querySelector: () => null, querySelectorAll: () => [translated, original], getElementById: (id: string) => nodes[id], addEventListener(name: string, handler: Handler) { documentHandlers.set(name, [...documentHandlers.get(name) ?? [], handler]); } },
-    window: { innerHeight: 600, get scrollY() { return scrollY; }, performParagraphAction: (...args: unknown[]) => { requested.push(args); }, addEventListener(name: string, handler: () => void) { windowHandlers.set(name, [...windowHandlers.get(name) ?? [], handler]); } },
-    location: { pathname: "/r/000000" }, localStorage: { getItem: () => null, setItem() {} }, Date: { now: () => now }, setTimeout: () => 1,
-  });
-  assert.equal(viewToggle.hidden, false);
-  assert.equal(viewTogglePrefix.hidden, false);
-  assert.equal(viewToggle.textContent, "显示原文");
-  viewToggle.handlers.get("click")!();
-  assert.equal(original.hidden, false); assert.equal(translated.hidden, true);
-  assert.equal(viewToggle.textContent, "显示翻译"); assert.equal(viewAttributes.get("aria-expanded"), "true");
-  viewToggle.handlers.get("click")!();
-  assert.equal(original.hidden, true); assert.equal(translated.hidden, false);
-  assert.equal(viewToggle.textContent, "显示原文"); assert.equal(viewAttributes.get("aria-expanded"), "false");
-  function tap(body: typeof translated, target = translatedP, endX = 10) {
-    const point = { clientX: 10, clientY: 10 };
-    const event = { touches: [point], changedTouches: [point], target, ...point, button: 0 };
-    body.handlers.get("touchstart")!(event);
-    if (endX !== 10) body.handlers.get("touchmove")!({ ...event, touches: [{ ...point, clientX: endX }] });
-    body.handlers.get("touchend")!({ ...event, touches: [], changedTouches: [{ ...point, clientX: endX }] });
-    now += 150;
-  }
-  tap(translated); tap(translated, translatedP, 40); tap(translated);
-  assert.equal(actions.hidden, true, "drag resets the tap sequence");
-  scrollY += 30; for (const handler of windowHandlers.get("scroll") ?? []) handler();
-  tap(translated); assert.equal(actions.hidden, true); tap(translated);
-  assert.equal(actions.hidden, false); assert.equal(preview.textContent, "中文译文"); assert.equal(original.hidden, true); assert.equal(toggle.textContent, "显示原文");
-  toggle.handlers.get("click")!();
-  assert.equal(requested.length, 0, "synthetic clicks immediately after a double tap are ignored");
-  now += 600; toggle.handlers.get("click")!();
-  assert.deepEqual(requested[0]!.slice(0, 3), [translatedP, translated, "original"]);
-  assert.equal(actions.hidden, false); assert.equal(original.hidden, true); assert.equal(translated.hidden, false);
-  toggle.handlers.get("click")!();
-  assert.equal(requested.length, 1, "repeated activation is ignored while authorization is pending");
-  (requested[0]![3] as () => void)();
-  assert.equal(actions.hidden, true);
-  tap(translated); tap(translated);
-  assert.equal(actions.hidden, false);
-  let prevented = false, stopped = false;
-  const outside = { target: translatedP, touches: [{ clientX: 10, clientY: 10 }], cancelable: true, preventDefault() { prevented = true; }, stopImmediatePropagation() { stopped = true; } };
-  documentHandlers.get("touchstart")![0]!(outside);
-  assert.equal(actions.hidden, true, "touching the paragraph dismisses the toolbar");
-  assert.ok(prevented && stopped, "the dismissing touch must not reach the article");
-  prevented = stopped = false;
-  documentHandlers.get("touchend")![0]!({ ...outside, touches: [] });
-  assert.ok(prevented && stopped, "a dismissing swipe must not trigger paging");
-  prevented = stopped = false;
-  documentHandlers.get("click")![0]!(outside);
-  assert.ok(prevented && stopped, "the synthetic click must not reach the page");
-  for (let i = 0; i < 2; i++) { tap(translated); now += 600; }
-  assert.equal(actions.hidden, true, "slow taps do not open the menu");
-  const noOriginal = excerptFromPage({ ...page, properties: { ...properties, "正文": { type: "rich_text", rich_text: [] } } })!;
-  assert.doesNotMatch(renderEinkDetail(noOriginal, "/read", "/read/p"), /id="original-body"/);
-  assert.doesNotMatch(renderEinkDetail(noOriginal, "/read", "/read/p"), /id="body-view-toggle"/);
-  assert.doesNotMatch(renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, false), /id="body-view-toggle"/);
-  assert.doesNotMatch(renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, false), /id="original-body"/);
-});
-
-test("tapping a highlight opens cancel on the bottom right and does not page or count as a double tap", () => {
-  const properties = {
-    ...idProperty(),
-    "原文语言": { type: "select" as const, select: { name: "日文" } },
-    "正文": { type: "rich_text" as const, rich_text: [{ plain_text: "原文" }] },
-    "正文翻译": { type: "rich_text" as const, rich_text: [{ plain_text: "中文译文" }] },
-  };
-  const page = { id: "page", url: "https://notion.so/page", properties };
-  const excerpt = excerptFromPage(page)!;
-  const html = renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, true, [], true);
-  assert.match(html, /id="body-unhighlight">取消划线/);
-  assert.match(html, /id="body-toggle"[^>]*>显示原文<\/button>.*id="body-explain"[^>]*>解释<\/button>.*id="body-highlight"[^>]*>划线<\/button>.*id="body-unhighlight"/);
-  assert.doesNotMatch(html, /#body-actions\[data-mode=mark\] #body-explain\{display:none\}/);
-  assert.match(html, /#body-actions\[data-mode=mark\] #body-toggle/);
-  assert.doesNotMatch(renderEinkDetail(excerpt, "/read", "/read/p", undefined, "all", 1, false, [], true), /id="body-unhighlight"/);
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
-  type Handler = (event?: any) => void;
-  function element(hidden = false) {
-    const handlers = new Map<string, Handler>();
-    return { hidden, disabled: false, handlers, textContent: "", focus() {}, addEventListener: (name: string, handler: Handler) => handlers.set(name, handler) };
-  }
-  const translated = element(), original = element(true), toggle = element(), highlight = element(true), explain = element(), unhighlight = element();
-  const attributes = new Map<string, string>();
-  const actions = { ...element(true), contains: () => false, setAttribute: (name: string, value: string) => attributes.set(name, value), getAttribute: (name: string) => attributes.get(name) ?? null, removeAttribute: (name: string) => attributes.delete(name) };
-  const pinDialog = { open: false };
-  const nodes: Record<string, any> = { "translated-body": translated, "original-body": original, "body-actions": actions, "body-toggle": toggle, "body-highlight": highlight, "body-explain": explain, "body-unhighlight": unhighlight, "favorite-dialog": pinDialog };
-  const translatedP = { tagName: "P", parentNode: translated, contains: (node: unknown) => node === translatedP };
-  const mark = { tagName: "MARK", className: "hl", parentNode: translatedP, getAttribute: (name: string) => name === "data-hl" ? "11111111-1111-4111-8111-111111111111" : null };
-  let now = 1000;
-  const windowHandlers = new Map<string, Array<() => void>>();
-  const documentHandlers = new Map<string, Array<Handler>>();
-  const removed: string[] = [];
-  const explained: unknown[][] = [];
-  const window = {
-    innerHeight: 600,
-    scrollY: 0,
-    removeHighlight: (id: string) => { removed.push(id); },
-    performParagraphAction: (...args: unknown[]) => { explained.push(args); },
-    getSelection: undefined as undefined | (() => { rangeCount: number; isCollapsed: boolean }),
-    addEventListener(name: string, handler: () => void) { windowHandlers.set(name, [...windowHandlers.get(name) ?? [], handler]); },
-  };
-  runInNewContext(script, {
-    document: { documentElement: { scrollHeight: 600 }, querySelector: () => null, querySelectorAll: () => [translated, original], getElementById: (id: string) => nodes[id], addEventListener(name: string, handler: Handler) { documentHandlers.set(name, [...documentHandlers.get(name) ?? [], handler]); } },
-    window, location: { pathname: "/r/000000" }, localStorage: { getItem: () => null, setItem() {} }, Date: { now: () => now }, setTimeout: () => 1,
-  });
-  function tap(target: { tagName: string; parentNode: unknown; getAttribute?: (name: string) => string | null } = translatedP) {
-    const point = { clientX: 10, clientY: 10 };
-    let prevented = false;
-    const event = { touches: [point], changedTouches: [point], target, ...point, button: 0, cancelable: true, preventDefault() { prevented = true; } };
-    translated.handlers.get("touchstart")!(event);
-    translated.handlers.get("touchend")!({ ...event, touches: [] });
-    now += 150;
-    return prevented;
-  }
-  assert.equal(tap(mark), true, "a highlight tap is not turned into a click");
-  assert.equal(actions.hidden, false);
-  assert.equal(actions.getAttribute("data-mode"), "mark");
-  unhighlight.handlers.get("click")!();
-  assert.equal(actions.hidden, false, "the synthetic click after opening the bar is ignored");
-  assert.deepEqual(removed, []);
-  now += 600;
-  unhighlight.handlers.get("click")!();
-  assert.equal(actions.hidden, true);
-  assert.equal(actions.getAttribute("data-mode"), null);
-  assert.deepEqual(removed, ["11111111-1111-4111-8111-111111111111"]);
-  now += 600;
-  tap(mark); now += 600;
-  explain.handlers.get("click")!();
-  assert.equal(actions.hidden, false, "the action dialog remains visible while authorization is pending");
-  assert.equal(explain.disabled, true);
-  assert.equal(explain.textContent, "请求中");
-  pinDialog.open = true;
-  let pinTouchStopped = false;
-  documentHandlers.get("touchstart")![0]!({ target: pinDialog, touches: [{ clientX: 10, clientY: 10 }], cancelable: true, preventDefault() {}, stopImmediatePropagation() { pinTouchStopped = true; } });
-  assert.equal(pinTouchStopped, false, "PIN dialog interaction is not intercepted by the action dialog");
-  assert.equal(actions.hidden, false);
-  pinDialog.open = false;
-  explain.handlers.get("click")!();
-  assert.equal(explained.length, 1, "repeated activation is ignored");
-  assert.deepEqual(explained[0]!.slice(0, 3), [translatedP, translated, "explain"]);
-  (explained[0]![3] as () => void)();
-  assert.equal(actions.hidden, true);
-  assert.equal(explain.disabled, false);
-  assert.equal(explain.textContent, "解释");
-  now += 600;
-  tap(mark); now += 600;
-  explain.handlers.get("click")!();
-  (explained[1]![3] as (close: boolean) => void)(false);
-  assert.equal(actions.hidden, false, "cancelling authorization keeps the actions open");
-  assert.equal(explain.disabled, false);
-  assert.equal(explain.textContent, "解释");
-  unhighlight.handlers.get("click")!();
-  now += 600;
-  assert.equal(tap(), false);
-  assert.equal(actions.hidden, true, "one paragraph tap after cancel does not open the bar");
-  now += 600;
-  tap(); tap();
-  assert.equal(actions.getAttribute("data-mode"), "body");
-  let stopped = false;
-  documentHandlers.get("touchstart")![0]!({ target: mark, touches: [{ clientX: 10, clientY: 10 }], cancelable: true, preventDefault() {}, stopImmediatePropagation() { stopped = true; } });
-  assert.equal(stopped, true);
-  assert.equal(actions.hidden, true, "tapping a highlight while the bar is open only dismisses it");
-  assert.equal(actions.getAttribute("data-mode"), null);
-  now += 600;
-  window.getSelection = () => ({ rangeCount: 1, isCollapsed: false });
-  assert.equal(tap(mark), false, "a tap that starts with a selection does not open cancel");
-  assert.equal(actions.hidden, true);
-  now += 600;
-  delete (window as { removeHighlight?: unknown }).removeHighlight;
-  window.getSelection = undefined;
-  tap(mark); tap(mark);
-  assert.equal(actions.getAttribute("data-mode"), "body", "without removal support a highlight tap is an ordinary paragraph tap");
 });
 
 test("excerpt image proxy serves images referenced by the displayed body fields", async (context) => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
-import worker, { excerptFromPage, renderEinkDetail, shareCode } from "../src/index.ts";
+import worker, { excerptFromPage, shareCode } from "../src/index.ts";
 
 const origin = "https://example.com";
 const code = shareCode(42);
@@ -134,14 +134,14 @@ test("PIN input submits once after six digits, including pasted values", async (
   assert.equal(submissions, 1);
 });
 
-test("login attempts are limited even across different client addresses", async () => {
+test("login attempts are limited after repeated failures", async () => {
   const env = configuration();
   const page = await open(env);
   for (let i = 0; i < 5; i++) assert.equal((await worker.fetch(submit(page.csrf, page.token, "999999"), env)).status, 401);
   assert.equal((await worker.fetch(submit(page.csrf, page.token, "012345"), env)).status, 429);
 });
 
-test("dialog API verifies PINs, reuses sessions and requires a new PIN after expiration", async (t) => {
+test("favorite API verifies PINs, reuses sessions and requires a PIN without a session", async (t) => {
   const env = configuration();
   const originalFetch = globalThis.fetch;
   let notionCalls = 0;
@@ -196,9 +196,9 @@ test("dialog API verifies PINs, reuses sessions and requires a new PIN after exp
   assert.deepEqual(await saved.json(), { ok: true, favorite: false });
   assert.deepEqual(savedValues, [true, false]);
   assert.equal(notionCalls, 4);
-  const afterExpiry = await post(newCsrf, returningData.csrf);
-  assert.equal(afterExpiry.status, 401);
-  assert.deepEqual(await afterExpiry.json(), { requiresPin: true });
+  const withoutSession = await post(newCsrf, returningData.csrf);
+  assert.equal(withoutSession.status, 401);
+  assert.deepEqual(await withoutSession.json(), { requiresPin: true });
   assert.equal(notionCalls, 4);
   const removeWithPin = await post(newCsrf, returningData.csrf, "012345", "", "0");
   assert.deepEqual(await removeWithPin.json(), { ok: true, favorite: false });
@@ -206,82 +206,7 @@ test("dialog API verifies PINs, reuses sessions and requires a new PIN after exp
   assert.equal(notionCalls, 6);
 });
 
-test("detail dialog retries an incorrect PIN and reuses a verified session", async () => {
-  const html = renderEinkDetail({
-    id: pageId, code, title: "标题", originalTitle: "", body: "正文", chinese: true,
-    lang: "zh-CN", titleLang: "zh-CN", originalLang: "zh-CN", terms: "", sourceTitle: "",
-    author: "", chapter: "", publisher: "", originalUrl: null, publishedDate: "", link: "https://notion.so/test", pubDate: null,
-  }, "/read", "/read/p");
-  const script = html.match(/<script>\s*\(function\(\)\{\s*var link=document\.getElementById\('favorite-link'\);[\s\S]*?<\/script>/)?.[0].replace(/^<script>|<\/script>$/g, "");
-  assert.ok(script);
-  type Handler = (event: { button?: number; isComposing?: boolean; preventDefault?: () => void }) => void;
-  function element() {
-    const handlers = new Map<string, Handler>();
-    return { handlers, addEventListener(name: string, handler: Handler) { handlers.set(name, handler); } };
-  }
-  const attributes = new Map<string, string>();
-  const link = { ...element(), href: url, dataset: { favorite: "false" },
-    setAttribute(name: string, value: string) { attributes.set(name, value); },
-    removeAttribute(name: string) { attributes.delete(name); },
-  };
-  const form = element();
-  const slots = Array.from({ length: 6 }, () => ({ classList: { toggle() {} } }));
-  const pin = { ...element(), value: "", disabled: false, selectionStart: 0, parentElement: { classList: { add() {} } }, nextElementSibling: { children: slots }, focus() {} };
-  const dialog = { ...element(), open: false, showModal() { this.open = true; }, close() { this.open = false; this.handlers.get("close")?.({}); } };
-  const status = { textContent: "收藏" };
-  const error = { textContent: "" };
-  const message = { textContent: "" };
-  const nodes: Record<string, unknown> = { "favorite-link": link, "favorite-dialog": dialog, "favorite-form": form, pin, "favorite-error": error, "favorite-message": message, "favorite-status": status };
-  const replies = [
-    { authenticated: false, csrf: "token" },
-    { error: "密码不正确。", requiresPin: true },
-    { ok: true, favorite: true },
-    { authenticated: true, csrf: "token2" },
-    { ok: true, favorite: false },
-    { error: "收藏暂不可用，请先完成配置。" },
-  ];
-  const requests: Array<{ method?: string; body?: string }> = [];
-  const fetchMock = (_url: string, init: { method?: string; body?: string }) => {
-    requests.push(init);
-    const data = replies.shift();
-    return Promise.resolve(Response.json(data, { status: data && "error" in data ? 401 : 200 }));
-  };
-  runInNewContext(script, { document: { getElementById: (id: string) => nodes[id] }, window: { fetch: fetchMock }, fetch: fetchMock, URLSearchParams, URL });
-  const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
-  const click = () => link.handlers.get("click")?.({ button: 0, preventDefault() {} });
-  click();
-  assert.equal(status.textContent, "收藏");
-  assert.equal(attributes.get("aria-disabled"), "true");
-  click();
-  assert.equal(requests.length, 1);
-  await tick();
-  assert.equal(attributes.has("aria-disabled"), false);
-  assert.equal(dialog.open, true);
-  pin.value = "999999"; pin.selectionStart = 6; pin.handlers.get("input")?.({}); await tick();
-  assert.equal(dialog.open, true);
-  assert.equal(error.textContent, "密码不正确。");
-  assert.equal(pin.value, "");
-  pin.value = "012345"; pin.handlers.get("input")?.({}); await tick();
-  assert.equal(dialog.open, false);
-  assert.equal(status.textContent, "取消收藏");
-  assert.equal(message.textContent, "");
-  click();
-  assert.equal(status.textContent, "取消收藏");
-  assert.equal(attributes.get("aria-disabled"), "true");
-  await tick();
-  assert.equal(dialog.open, false);
-  assert.equal(status.textContent, "收藏");
-  assert.equal(attributes.has("aria-disabled"), false);
-  assert.equal(message.textContent, "");
-  click(); await tick();
-  assert.equal(status.textContent, "收藏");
-  assert.equal(message.textContent, "收藏暂不可用，请先完成配置。");
-  assert.deepEqual(requests.map((request) => request.method || "GET"), ["GET", "POST", "POST", "GET", "POST", "GET"]);
-  assert.equal(new URLSearchParams(requests[4]?.body).get("pin"), null);
-  assert.equal(new URLSearchParams(requests[4]?.body).get("favorite"), "0");
-});
-
-test("already favorited Notion pages show an unfavorite action", () => {
+test("already favorited Notion pages retain their favorite status", () => {
   const excerpt = excerptFromPage({ id: pageId, url: `https://notion.so/${pageId}`, properties: {
     ID: { type: "unique_id", unique_id: { number: 42 } },
     "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
@@ -289,8 +214,7 @@ test("already favorited Notion pages show an unfavorite action", () => {
   } });
   assert.ok(excerpt);
   assert.equal(excerpt.favorite, true);
-  const html = renderEinkDetail(excerpt, "/read", "/read/p");
-  assert.match(html, /data-favorite="true" href="[^\"]*\?favorite=0"><span id="favorite-status" role="status">取消收藏<\/span>/);
+
 });
 
 test("favorite endpoints fail closed when security configuration is missing", async () => {

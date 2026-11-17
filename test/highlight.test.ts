@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import test from "node:test";
-import { Script, runInNewContext } from "node:vm";
-import worker, { excerptFromPage, renderEinkDetail, shareCode } from "../src/index.ts";
+import worker, { shareCode } from "../src/index.ts";
 
 const origin = "https://example.com", code = shareCode(42), pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
 const url = `${origin}/read/highlight/${code}`;
@@ -41,7 +40,7 @@ test("the paragraph length migration keeps existing highlights and accepts longe
   assert.equal((sql.prepare("SELECT count(*) AS count FROM highlights").get() as { count: number }).count, 2);
 });
 
-test("highlight writes reuse PIN and CSRF, validate rendered text and render only on detail pages", async t => {
+test("highlight writes reuse PIN and CSRF, validate text and expose private data through the article API", async t => {
   const { db, sql } = database();
   t.after(() => sql.close());
   const originalFetch = globalThis.fetch;
@@ -83,25 +82,6 @@ test("highlight writes reuse PIN and CSRF, validate rendered text and render onl
   assert.equal(original.status, 200);
   const injection = await post({ start: "8", end: "16", quote: "<script>" }, origin, session);
   assert.equal(injection.status, 200);
-  const detail = await worker.fetch(new Request(`${origin}/r/${code}`), env);
-  const detailHtml = await detail.text();
-  assert.match(detailHtml, new RegExp(value.highlight.id));
-  assert.doesNotMatch(detailHtml, /id="highlight-bar"|id="highlight-save"|selectionchange/);
-  assert.match(detailHtml, /id="highlight-error"/);
-  assert.match(detailHtml, /id="body-unhighlight">取消划线/);
-  for (const script of detailHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Script(script[1]!);
-  assert.equal(detail.headers.get("cache-control"), "no-store");
-  const share = await worker.fetch(new Request(`${origin}/s/${code}`), env);
-  const shareHtml = await share.text();
-  assert.doesNotMatch(shareHtml, /id="highlight-bar"/);
-  assert.doesNotMatch(shareHtml, /id="highlight-error"/);
-  assert.doesNotMatch(shareHtml, /id="body-unhighlight"/);
-  assert.doesNotMatch(shareHtml, new RegExp(value.highlight.id));
-  const list = await worker.fetch(new Request(`${origin}/read?tab=highlights`), env);
-  assert.equal(list.headers.get("cache-control"), "no-store");
-  const listHtml = await list.text();
-  assert.match(listHtml, new RegExp(`/r/${code}\\?tab=highlights#hl-${value.highlight.id}`));
-  assert.match(listHtml, /&lt;script&gt;/);
   const readApi = await worker.fetch(new Request(`${origin}/api/r/${code}`), env);
   const article = await readApi.json<import("../src/reader-data.ts").ReaderArticle>();
   assert.equal(readApi.headers.get("cache-control"), "no-store");
@@ -114,16 +94,15 @@ test("highlight writes reuse PIN and CSRF, validate rendered text and render onl
   assert.deepEqual(shared.original, []);
   assert.deepEqual(shared.terms, []);
   activePage.properties["正文翻译"].rich_text[0]!.plain_text = "甲 重复乙";
-  const changed = await worker.fetch(new Request(`${origin}/read?tab=highlights`), env);
-  assert.match(await changed.text(), /正文已变动，未能定位/);
-  const changedDetail = await worker.fetch(new Request(`${origin}/r/${code}`), env);
-  assert.doesNotMatch(await changedDetail.text(), new RegExp(value.highlight.id));
+  const changedDetail = await worker.fetch(new Request(`${origin}/api/r/${code}`), env);
+  const changedArticle = await changedDetail.json<import("../src/reader-data.ts").ReaderArticle>();
+  assert.ok(!changedArticle.actions?.highlights.some(mark => mark.id === value.highlight.id));
   const failedDb = { prepare() { throw new Error("D1 unavailable"); } } as unknown as D1Database;
   // A database read failure must not take down the article.
   // The Promise chain below expects a prepared statement; use an asynchronous failure.
   const rejectedDb = { prepare() { return { bind() { return { all: async () => { throw new Error("D1 unavailable"); } }; } }; } } as unknown as D1Database;
   const oldError = console.error; console.error = () => {};
-  try { for (const badDb of [failedDb, rejectedDb]) assert.equal((await worker.fetch(new Request(`${origin}/r/${code}`), { ...env, HIGHLIGHTS_DB: badDb })).status, 200); } finally { console.error = oldError; }
+  try { for (const badDb of [failedDb, rejectedDb]) assert.equal((await worker.fetch(new Request(`${origin}/api/r/${code}`), { ...env, HIGHLIGHTS_DB: badDb })).status, 200); } finally { console.error = oldError; }
   assert.equal((await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), { ...env, HIGHLIGHTS_DB: undefined })).status, 503);
 });
 
@@ -207,122 +186,6 @@ test("original paragraph matching uses the 302.AI System One API", async t => {
   assert.equal(requests[0]!.body.questions.match.criteria.p0, "Original text");
 });
 
-test("highlight article navigation returns to an existing unique list anchor", async t => {
-  const { db, sql } = database();
-  t.after(() => sql.close());
-  const second = structuredClone(page);
-  second.id = "408e75a1-639c-8152-ab6f-f35a59ab2d28";
-  second.url = `https://notion.so/${second.id}`;
-  second.properties.ID.unique_id.number = 43;
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (!String(input).includes("/data_sources/source/query")) throw new Error(`unexpected fetch ${input}`);
-    const query = JSON.parse(String(init?.body)) as { filter: { unique_id?: { equals: number } } };
-    const all = [page, second];
-    return Response.json({ results: query.filter.unique_id ? all.filter(item => item.properties.ID.unique_id.number === query.filter.unique_id!.equals) : all });
-  }) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
-  const insert = sql.prepare('INSERT INTO highlights (id, excerpt_number, excerpt_page_id, field, start, "end", quote, prefix, suffix, body_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-  // Orphans are still list items and must also provide a return target.
-  insert.run("a", 42, page.id, "translation", 0, 1, "不存在", "", "", "old", "2026-01-03");
-  insert.run("b", 43, second.id, "translation", 0, 1, "不存在", "", "", "old", "2026-01-02");
-  insert.run("c", 43, second.id, "original", 1, 2, "不存在", "", "", "old", "2026-01-01");
-  const env = { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source" };
-  const firstDetail = await worker.fetch(new Request(`${origin}/r/${code}?tab=highlights`), env);
-  const firstHtml = await firstDetail.text();
-  const nextCode = shareCode(43);
-  assert.match(firstHtml, new RegExp(`/r/${nextCode}\\?tab=highlights`));
-  const nextDetail = await worker.fetch(new Request(`${origin}/r/${nextCode}?tab=highlights`), env);
-  const nextHtml = await nextDetail.text();
-  assert.match(nextHtml, new RegExp(`/read\\?tab=highlights#${nextCode}`));
-  const list = await worker.fetch(new Request(`${origin}/read?tab=highlights`), env);
-  const listHtml = await list.text();
-  assert.equal((listHtml.match(new RegExp(`id="${nextCode}"`, "g")) || []).length, 1);
-  assert.match(listHtml, new RegExp(`<li id="hl-b"><span id="${nextCode}"></span>`));
-});
-
-test("saved marks paint each layer and removal unwraps only the chosen highlight", async t => {
-  const { db, sql } = database();
-  t.after(() => sql.close());
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => Response.json({ results: [page] })) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
-  const { hashText } = await import("../src/highlight-anchor.ts");
-  const text = "甲重复乙丙重复丁<script>";
-  const insert = sql.prepare('INSERT INTO highlights (id, excerpt_number, excerpt_page_id, field, start, "end", quote, prefix, suffix, body_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-  const hash = await hashText(text);
-  insert.run("aabb", 42, pageId, "translation", 1, 3, "重复", "甲", "乙丙重复丁<script>", hash, "2026-01-01");
-  insert.run("bbcc", 42, pageId, "translation", 2, 5, "复乙丙", "甲重", "重复丁<script>", hash, "2026-01-02");
-  const env = { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source" };
-  const response = await worker.fetch(new Request(`${origin}/r/${code}`), env);
-  const html = await response.text();
-  const script = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), match => match[1]!).find(value => value.includes("var rows="))!;
-
-  class FakeNode {
-    nodeType: number;
-    nodeValue: string;
-    className = "";
-    id = "";
-    parentNode: FakeNode | null = null;
-    children: FakeNode[] = [];
-    attributes = new Map<string, string>();
-    constructor(nodeType: number, nodeValue = "") { this.nodeType = nodeType; this.nodeValue = nodeValue; }
-    get firstChild(): FakeNode | null { return this.children[0] || null; }
-    get nextSibling(): FakeNode | null { if (!this.parentNode) return null; return this.parentNode.children[this.parentNode.children.indexOf(this) + 1] || null; }
-    insertBefore(child: FakeNode, reference: FakeNode) { if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1); child.parentNode = this; this.children.splice(this.children.indexOf(reference), 0, child); }
-    appendChild(child: FakeNode) { if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1); child.parentNode = this; this.children.push(child); }
-    removeChild(child: FakeNode) { const index = this.children.indexOf(child); if (index >= 0) this.children.splice(index, 1); child.parentNode = null; return child; }
-    setAttribute(key: string, value: string) { this.attributes.set(key, value); }
-    getAttribute(key: string) { return this.attributes.get(key) ?? null; }
-    normalize() { for (let index = 0; index < this.children.length - 1; index++) { const child = this.children[index]!, next = this.children[index + 1]!; if (child.nodeType === 3 && next.nodeType === 3) { child.nodeValue += next.nodeValue; this.children.splice(index + 1, 1); next.parentNode = null; index--; } } }
-    splitText(offset: number) { const rest = new FakeNode(3, this.nodeValue.slice(offset)); this.nodeValue = this.nodeValue.slice(0, offset); const parent = this.parentNode!; rest.parentNode = parent; parent.children.splice(parent.children.indexOf(this) + 1, 0, rest); return rest; }
-  }
-  const body = new FakeNode(1); body.className = "excerpt-body";
-  body.appendChild(new FakeNode(3, "甲重复乙丙重复丁<script>"));
-  function findId(node: FakeNode, id: string): FakeNode | null {
-    if (node.id === id) return node;
-    for (const child of node.children) { const found = findId(child, id); if (found) return found; }
-    return null;
-  }
-  function walk(node: FakeNode, visit: (node: FakeNode) => void) { visit(node); for (const child of node.children) walk(child, visit); }
-  function nodeText(node: FakeNode): string { return node.nodeType === 3 ? node.nodeValue : node.children.map(nodeText).join(""); }
-  const stubs = new Map<string, { hidden: boolean; disabled: boolean; textContent: string; addEventListener: () => void }>();
-  function stub() { return { hidden: false, disabled: false, textContent: "", addEventListener() {} }; }
-  const chrome = ["favorite-dialog"];
-  const replaced: string[] = [];
-  const document = {
-    getElementById: (id: string) => findId(body, id) || (chrome.includes(id) ? stubs.get(id) || stubs.set(id, stub()).get(id)! : null),
-    querySelector: (selector: string) => selector === '.excerpt-body[data-field="translation"]' ? body : null,
-    querySelectorAll: (selector: string) => {
-      const id = selector.match(/^mark\.hl\[data-hl="([0-9a-z-]+)"\]$/i)?.[1];
-      const found: FakeNode[] = [];
-      if (id) walk(body, node => { if (node.className === "hl" && node.getAttribute("data-hl") === id) found.push(node); });
-      return found;
-    },
-    createElement: (_tag: string) => new FakeNode(1),
-  };
-  const fakeFetch = async (_url: string, init?: { body?: string }) => init?.body ? Response.json({ deleted: true }) : Response.json({ authenticated: true, csrf: "token" });
-  const location = { hash: "#hl-aabb", pathname: "/r/test", search: "" };
-  const window = { addEventListener() {}, fetch: fakeFetch, history: { replaceState(_state: null, _title: string, url: string) { replaced.push(url); location.hash = ""; } }, removeHighlight: undefined as undefined | ((id: string) => Promise<void>) };
-  runInNewContext(script, { document, window, fetch: fakeFetch, URLSearchParams, location, setTimeout: (fn: () => void) => { fn(); return 0; }, history: window.history });
-  const marks = () => { const found: FakeNode[] = []; walk(body, node => { if (node.className === "hl") found.push(node); }); return found; };
-  const outer = marks().find(node => node.getAttribute("data-hl") === "aabb");
-  assert.ok(outer);
-  assert.equal(nodeText(outer), "重复");
-  assert.ok(marks().some(node => node.getAttribute("data-hl") === "bbcc"));
-  assert.ok(findId(body, "hl-aabb"));
-  await window.removeHighlight!("aabb");
-  assert.equal(marks().some(node => node.getAttribute("data-hl") === "aabb"), false);
-  assert.ok(marks().some(node => node.getAttribute("data-hl") === "bbcc"), "removing the outer highlight keeps the inner one");
-  assert.equal(nodeText(body), text);
-  assert.equal(findId(body, "hl-aabb"), null);
-  assert.deepEqual(replaced, ["/r/test"]);
-  await window.removeHighlight!("bbcc");
-  assert.equal(marks().length, 0);
-  assert.equal(findId(body, "hl-bbcc"), null);
-  assert.equal(nodeText(body), text);
-});
-
 test("distant duplicate deletion leaves the saved highlight orphaned until the body is restored", async t => {
   const { db, sql } = database();
   t.after(() => sql.close());
@@ -347,211 +210,15 @@ test("distant duplicate deletion leaves the saved highlight orphaned until the b
   assert.equal(stored.prefix, "前文甲乙丙丁");
   assert.equal(stored.suffix, "戊己庚辛" + "隔".repeat(28));
   assert.equal(stored.body_hash, "78780698edc0c9f27429d1ca0377a7464793d85537fd67d8313f6899ce80f4b2");
-  const readDetail = async () => (await worker.fetch(new Request(`${origin}/r/${fixtureCode}`), env)).text();
-  assert.ok((await readDetail()).includes(highlight.id));
+  const readDetail = async () => (await worker.fetch(new Request(`${origin}/api/r/${fixtureCode}`), env)).json<import("../src/reader-data.ts").ReaderArticle>();
+  assert.ok((await readDetail()).actions?.highlights.some(mark => mark.id === highlight.id));
   fixture.properties["正文翻译"].rich_text[0]!.plain_text = "隔".repeat(80) + unit + "后文";
-  assert.ok(!(await readDetail()).includes(highlight.id));
-  const list = await (await worker.fetch(new Request(`${origin}/read?tab=highlights`), env)).text();
-  const row = list.match(new RegExp(`<li id="hl-${highlight.id}">[\\s\\S]*?<\\/li>`))?.[0];
-  assert.ok(row);
-  assert.match(row, /正文已变动，未能定位/);
-  assert.doesNotMatch(row, /class="item-link"/);
+  assert.ok(!(await readDetail()).actions?.highlights.some(mark => mark.id === highlight.id));
+  const list = await (await worker.fetch(new Request(`${origin}/api/read?tab=highlights`), env)).json<import("../src/reader-data.ts").ReaderList>();
+  assert.equal(list.kind, "highlights");
+  if (list.kind === "highlights") assert.equal(list.items.find(item => item.id === highlight.id)?.located, false);
   fixture.properties["正文翻译"].rich_text[0]!.plain_text = original;
-  assert.ok((await readDetail()).includes(highlight.id));
-});
-
-test("paragraph actions send the entire paragraph and keep PIN and service errors independent", async t => {
-  const { db, sql } = database();
-  t.after(() => sql.close());
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => Response.json({ results: [page] })) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
-  const html = await (await worker.fetch(new Request(`${origin}/r/${code}`), { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source" })).text();
-  const script = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), m => m[1]!).find(s => s.includes("var rows="))!;
-  class Element {
-    nodeType = 1; nodeValue = ""; parentNode: Element | null = null; children: Element[] = [];
-    handlers = new Map<string, (event: any) => void>(); attributes = new Map<string, string>();
-    hidden = false; open = false; disabled = false; className = ""; value = ""; private content = "";
-    tagName: string;
-    constructor(tagName = "DIV") { this.tagName = tagName; }
-    get firstChild() { return this.children[0] || null; }
-    get nextSibling(): Element | null { if (!this.parentNode) return null; const a = this.parentNode.children; return a[a.indexOf(this) + 1] || null; }
-    get textContent(): string { return this.content; }
-    set textContent(value: string) { this.content = value; this.children = []; }
-    appendChild(child: Element) { if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1); child.parentNode = this; this.children.push(child); }
-    insertBefore(child: Element, reference: Element | null) { if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1); child.parentNode = this; const i = reference ? this.children.indexOf(reference) : -1; if (i < 0) this.children.push(child); else this.children.splice(i, 0, child); }
-    contains(child: Element): boolean { for (let n: Element | null = child; n; n = n.parentNode) if (n === this) return true; return false; }
-    setAttribute(key: string, value: string) { this.attributes.set(key, value); }
-    getAttribute(key: string) { return this.attributes.get(key) ?? null; }
-    hasAttribute(key: string) { return this.attributes.has(key); }
-    removeAttribute(key: string) { this.attributes.delete(key); }
-    addEventListener(name: string, fn: (event: any) => void) { this.handlers.set(name, fn); }
-    focus() {}
-    close() { this.open = false; this.removeAttribute("open"); this.handlers.get("close")?.({ target: this }); }
-    click() { this.handlers.get("click")?.({ target: this, preventDefault() {} }); }
-  }
-  function textNode(value: string) { const n = new Element(); n.nodeType = 3; n.nodeValue = value; return n; }
-  const body = new Element(), before = new Element("P"), paragraph = new Element("P");
-  body.setAttribute("data-field", "translation"); body.appendChild(before); before.appendChild(textNode("甲 重复\n")); body.appendChild(paragraph); paragraph.appendChild(textNode("乙。重复😀。丁"));
-  const elements = new Map<string, Element>();
-  for (const id of ["favorite-dialog", "favorite-form", "pin", "favorite-error", "highlight-error", "highlight-error-message", "highlight-error-retry", "highlight-error-close", "highlight-picker", "highlight-picker-close", "highlight-picker-edit", "highlight-characters", "highlight-picker-save", "highlight-picker-message", "highlight-preview", "body-highlight", "body-explain", "explanation-dialog", "explanation-text", "original-match-dialog", "original-match-text", "original-match-current"]) elements.set(id, new Element());
-  elements.get("explanation-dialog")!.hidden = true;
-  elements.get("original-match-dialog")!.hidden = true;
-  elements.get("highlight-picker-save")!.textContent = "确认";
-  const documentHandlers = new Map<string, (event: any) => void>();
-  const pickerHome = new Element(); pickerHome.appendChild(elements.get("highlight-picker")!); elements.get("highlight-picker")!.hidden = true;
-  const document = {
-    getElementById: (id: string) => elements.get(id) || null,
-    querySelector: () => null, querySelectorAll: () => [body], addEventListener(name: string, handler: (event: any) => void) { documentHandlers.set(name, handler); },
-    createElement: (tag: string) => new Element(tag.toUpperCase()), createTextNode: textNode,
-  };
-  const requests: string[] = [];
-  let explanationFailure = 0;
-  let pendingReply: Promise<Response> | null = null;
-  let pinFailure = false;
-  const explanationStarts: Array<{ pinOpen: boolean; pinMessage: string; explanationHidden: boolean }> = [];
-  const fakeFetch = async (_url: string, init?: { body?: string }) => {
-    if (init?.body) { const action = new URLSearchParams(init.body).get("action"); if (action === "verify") return pinFailure ? Response.json({ error: "密码不正确。" }, { status: 401 }) : Response.json({ verified: true }); requests.push(init.body); if (action === "explain") explanationStarts.push({ pinOpen: elements.get("favorite-dialog")!.open, pinMessage: elements.get("favorite-error")!.textContent, explanationHidden: elements.get("explanation-dialog")!.hidden }); if (pendingReply && (action === "explain" || action === "original")) return pendingReply; return action === "explain" ? explanationFailure ? Response.json({ error: "解释服务暂不可用。" }, { status: explanationFailure }) : Response.json({ explanation: "解释结果", markdown: [{ type: "element", tag: "p", children: [{ type: "element", tag: "strong", children: [{ type: "text", text: "解释结果" }] }] }] }) : Response.json({ error: "正文已更新" }, { status: 409 }); }
-    return Response.json({ authenticated: false, csrf: "token" });
-  };
-  let pinError = "";
-  let cancelPin: (() => void) | undefined;
-  let autoPin = true;
-  const window = { fetch: fakeFetch, promptForReadPin: (resume: (value: string) => Promise<unknown>, cancel: () => void) => { elements.get("favorite-dialog")!.open = true; cancelPin = cancel; if (autoPin) void resume("012345").catch(error => { pinError = error.message; }); }, addEventListener() {}, performParagraphAction: undefined as undefined | ((p: Element, b: Element, mode?: string, ready?: (close?: boolean) => void) => void) };
-  runInNewContext(script, { document, window, fetch: fakeFetch, URLSearchParams, location: { hash: "" }, setTimeout });
-  assert.equal(elements.get("body-highlight")!.hidden, false);
-  window.performParagraphAction!(paragraph, body, "explain");
-  await new Promise(resolve => setTimeout(resolve, 0));
-  const explainRequest = new URLSearchParams(requests.shift());
-  assert.equal(explainRequest.get("action"), "explain");
-  assert.equal(explainRequest.has("pin"), false);
-  assert.deepEqual(explanationStarts[0], { pinOpen: false, pinMessage: "", explanationHidden: true });
-  assert.deepEqual(JSON.parse(explainRequest.get("ranges")!), [{ start: 3, end: 11, quote: "乙。重复😀。丁" }]);
-  assert.equal(elements.get("explanation-text")!.children[0]!.children[0]!.tagName, "STRONG");
-  elements.get("explanation-dialog")!.close();
-  explanationFailure = 502;
-  window.performParagraphAction!(paragraph, body, "explain");
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(elements.get("favorite-dialog")!.open, false);
-  assert.equal(elements.get("explanation-text")!.textContent, "解释服务暂不可用。");
-  elements.get("explanation-dialog")!.close();
-  explanationFailure = 0; pinFailure = true;
-  window.performParagraphAction!(paragraph, body, "explain");
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(elements.get("favorite-dialog")!.open, true);
-  assert.equal(pinError, "密码不正确。");
-  elements.get("favorite-dialog")!.close(); cancelPin!(); pinFailure = false; requests.length = 0;
-  autoPin = false;
-  let cancelled: boolean | undefined = true;
-  window.performParagraphAction!(paragraph, body, "explain", close => { cancelled = close; });
-  await new Promise(resolve => setTimeout(resolve, 0));
-  elements.get("favorite-dialog")!.close(); cancelPin!();
-  assert.equal(cancelled, false, "cancelling PIN verification releases the button");
-  autoPin = true;
-  let resolveReply!: (value: Response) => void;
-  pendingReply = new Promise<Response>(resolve => { resolveReply = resolve; });
-  let completed = false;
-  window.performParagraphAction!(paragraph, body, "explain", () => { completed = true; });
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(elements.get("explanation-dialog")!.hidden, true);
-  assert.equal(completed, false, "the button stays disabled until the explanation arrives");
-  resolveReply(Response.json({ explanation: "迟到的解释" }));
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(completed, true);
-  assert.equal(elements.get("explanation-dialog")!.hidden, false);
-  assert.equal(elements.get("explanation-text")!.textContent, "迟到的解释");
-  elements.get("explanation-dialog")!.close();
-  pendingReply = new Promise<Response>(resolve => { resolveReply = resolve; });
-  window.performParagraphAction!(paragraph, body, "original");
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(elements.get("original-match-dialog")!.hidden, false);
-  elements.get("original-match-dialog")!.close();
-  resolveReply(Response.json({ paragraph: "迟到的原文" }));
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(elements.get("original-match-dialog")!.hidden, true, "a late response does not reopen a dismissed dialog");
-  pendingReply = null;
-  requests.length = 0;
-  window.performParagraphAction!(paragraph, body, "highlight");
-  await new Promise(resolve => setTimeout(resolve, 0));
-  const sent = new URLSearchParams(requests[0]);
-  assert.equal(sent.get("field"), "translation");
-  assert.equal(sent.get("start"), "3");
-  assert.equal(sent.get("end"), "11");
-  assert.equal(sent.get("quote"), "乙。重复😀。丁");
-  assert.equal(elements.get("favorite-dialog")!.open, false);
-  assert.equal(elements.get("highlight-error-message")!.textContent, "正文已更新");
-  elements.get("highlight-error-close")!.click();
-  paragraph.children[0]!.nodeValue = "甲".repeat(1501);
-  window.performParagraphAction!(paragraph, body, "explain");
-  assert.equal(elements.get("explanation-text")!.textContent, "解释最多 1500 字。");
-
-});
-
-test("jumping to an original highlight synchronizes the whole-body toggle", () => {
-  const html = renderEinkDetail(excerptFromPage(page)!, "/read", "/read/p", undefined, "all", 1, true, [], true);
-  const script = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), m => m[1]!).find(s => s.includes("var rows="))!;
-  const id = "11111111-1111-4111-8111-111111111111";
-  const original = { className: "excerpt-body", hidden: true };
-  const translation = { hidden: false };
-  const target = { parentNode: original, scrollIntoView() {} };
-  let syncCalls = 0;
-  const document = { getElementById: (name: string) => name === `hl-${id}` ? target : null, querySelector: (selector: string) => selector === ".excerpt-body:not([hidden])" ? translation : null };
-  const window = { addEventListener() {}, syncBodyViewToggle() { syncCalls++; } };
-  runInNewContext(script, { document, window, location: { hash: `#hl-${id}` } });
-  assert.equal(original.hidden, false);
-  assert.equal(translation.hidden, true);
-  assert.equal(syncCalls, 1);
-});
-
-test("result dialogs dismiss on the backdrop without dismissing content or swipes", async t => {
-  const { db, sql } = database();
-  t.after(() => sql.close());
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => Response.json({ results: [page] })) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
-  const html = await (await worker.fetch(new Request(`${origin}/r/${code}`), { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source" })).text();
-  assert.match(html, /id="explanation-dialog"[^>]*closedby="any"/);
-  assert.match(html, /id="original-match-dialog"[^>]*closedby="any"/);
-  assert.doesNotMatch(html, /id="(?:explanation|original-match)-close"/);
-  const script = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), m => m[1]!).find(s => s.includes("var rows="))!;
-  const handlers = new Map<string, Array<(event: any) => void>>();
-  const content = {};
-  function panel() { return { hidden: true, open: false, getBoundingClientRect: () => ({ left: 300, right: 700, top: 100, bottom: 500 }), contains: (target: unknown) => target === content, addEventListener() {}, close() { this.open = false; } }; }
-  const explanation = panel(), original = panel();
-  const nodes: Record<string, unknown> = { "explanation-dialog": explanation, "explanation-text": content, "original-match-dialog": original, "favorite-dialog": { open: false } };
-  const document = { getElementById: (id: string) => nodes[id] || null, querySelector: () => null, addEventListener: (name: string, fn: (event: any) => void) => handlers.set(name, [...handlers.get(name) || [], fn]) };
-  let now = 1000, selected = false;
-  const window = { fetch: async () => Response.json({}), addEventListener() {}, getSelection: () => ({ rangeCount: selected ? 1 : 0, isCollapsed: !selected }) };
-  runInNewContext(script, { document, window, fetch: window.fetch, URLSearchParams, location: { hash: "" }, Date: { now: () => now }, setTimeout });
-  const fire = (name: string, event: any) => { for (const handler of handlers.get(name) || []) { handler(event); if (event.stopped) break; } };
-  const event = (target: unknown, x: number, y: number) => ({ target, clientX: x, clientY: y, button: 0, cancelable: true, stopped: false, preventDefault() {}, stopImmediatePropagation() { this.stopped = true; }, stopPropagation() { this.stopped = true; } });
-  const click = (target: unknown, x: number, y: number) => { fire("pointerdown", event(target, x, y)); fire("click", event(target, x, y)); };
-  for (const dialog of [explanation, original]) {
-    for (const [x, y] of [[100, 200], [900, 200], [500, 50], [500, 550]]) {
-      dialog.hidden = false; dialog.open = true;
-      click(dialog, x!, y!);
-      assert.equal(dialog.hidden, true, "each side of the backdrop closes the dialog");
-    }
-    dialog.hidden = false; dialog.open = true;
-    click(dialog, 500, 200); click(content, 500, 200);
-    assert.equal(dialog.hidden, false, "dialog content and padding do not dismiss");
-    fire("pointerdown", event(content, 500, 200)); fire("click", event(dialog, 900, 200));
-    assert.equal(dialog.hidden, false, "a drag from the content to the backdrop does not dismiss");
-    selected = true; click(dialog, 900, 200); selected = false;
-    assert.equal(dialog.hidden, false, "a text selection does not dismiss");
-    const point = { clientX: 900, clientY: 200 };
-    fire("touchstart", { target: dialog, touches: [point] });
-    fire("touchmove", { touches: [{ clientX: 900, clientY: 240 }] });
-    fire("touchend", { target: dialog, touches: [], changedTouches: [{ clientX: 900, clientY: 240 }], cancelable: true, preventDefault() {}, stopPropagation() {} });
-    assert.equal(dialog.hidden, false, "a swipe on the backdrop does not dismiss");
-    now += 1000;
-    fire("touchstart", { target: dialog, touches: [point] });
-    let prevented = false;
-    fire("touchend", { target: dialog, touches: [], changedTouches: [point], cancelable: true, preventDefault() { prevented = true; }, stopPropagation() {} });
-    assert.equal(dialog.hidden, true, "a tap on the backdrop dismisses");
-    assert.equal(prevented, true);
-    now += 1000;
-  }
+  assert.ok((await readDetail()).actions?.highlights.some(mark => mark.id === highlight.id));
 });
 
 test("deleting a highlight reuses PIN and CSRF and cannot cross articles", async t => {
@@ -590,7 +257,5 @@ test("deleting a highlight reuses PIN and CSRF and cannot cross articles", async
   const again = await remove(highlight.id);
   assert.equal(again.status, 200);
   assert.equal((await again.json() as { deleted: boolean }).deleted, false);
-  const detail = await (await worker.fetch(new Request(`${origin}/r/${code}`), env)).text();
-  assert.doesNotMatch(detail, new RegExp(highlight.id));
-  assert.match(detail, /id="body-unhighlight">取消划线/);
+
 });

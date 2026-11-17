@@ -78,7 +78,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
           <ul>
             {data.items.map(item => (
               <li key={item.code} id={item.code} lang={item.titleLang} tabIndex={-1}>
-                <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search}
+                <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search} reloadDocument
                   onClick={event => rememberArticle(event, item.code)}>{item.title}</Link>
                 {(item.source || item.author) && <p className="meta" lang="zh-CN">
                   {[item.source, item.author ? `作者：${item.author}` : ""].filter(Boolean).join(" · ")}
@@ -97,7 +97,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
               return <li key={item.id} id={anchor}>
                 {first && <span id={article.code} />}
                 {article && item.located
-                  ? <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={search}
+                  ? <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={search} reloadDocument
                       hash={anchor} onClick={event => rememberArticle(event, anchor)}>{item.quote}</Link>
                   : item.quote}
                 <p className="meta">{article
