@@ -39,7 +39,7 @@ function noStore(response: Response): Response {
 export default Sentry.withSentry(sentryOptions, {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === "/read-auth") return readLogin(request, env);
+    if (url.pathname === "/auth") return readLogin(request, env);
     const progressMatch = url.pathname.match(/^\/api\/progress\/([A-Za-z0-9]{6})$/);
     const blocked = await protectRead(request, env);
     if (blocked) return blocked;

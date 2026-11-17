@@ -1,4 +1,4 @@
-import { favoriteRequest, isReadAuthorized, type FavoriteBindings } from "./favorite.ts";
+import { favoriteRequest, isReadAuthorized, PIN_FIELD, pinFormScript, type FavoriteBindings } from "./favorite.ts";
 import { EINK_STYLE } from "./reader-style.ts";
 
 export async function protectRead(request: Request, env: FavoriteBindings): Promise<Response | null> {
@@ -6,7 +6,7 @@ export async function protectRead(request: Request, env: FavoriteBindings): Prom
   if (!/^\/(?:read\/?|r\/[A-Za-z0-9]{6}\/?|api\/read\/?|api\/r\/[A-Za-z0-9]{6}\/?|api\/progress\/[A-Za-z0-9]{6})$/.test(url.pathname)) return null;
   if (await isReadAuthorized(request, env)) return null;
   if (url.pathname.startsWith("/api/")) return Response.json({ error: "请先授权。" }, { status: 401, headers: { "Cache-Control": "no-store" } });
-  const login = new URL("/read-auth", url.origin);
+  const login = new URL("/auth", url.origin);
   login.searchParams.set("next", url.pathname + url.search);
   return new Response(null, { status: 302, headers: { Location: login.toString(), "Cache-Control": "no-store" } });
 }
@@ -47,8 +47,9 @@ export async function readLogin(request: Request, env: FavoriteBindings): Promis
   if (!tokenResponse.ok) return new Response("授权服务暂不可用，请稍后再试。", { status: 503, headers: { "Cache-Control": "no-store" } });
   const { csrf } = await tokenResponse.json<{ csrf: string }>();
   const escape = (s: string) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-  const responseHeaders = new Headers({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" });
+  const responseHeaders = new Headers({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "same-origin", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${csrf}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'` });
   const csrfCookie = tokenResponse.headers.get("Set-Cookie");
   if (csrfCookie) responseHeaders.append("Set-Cookie", csrfCookie);
-  return new Response(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>阅读授权</title><style>${EINK_STYLE}</style></head><body><main><h1>阅读授权</h1>${error ? `<p role="alert">${escape(error)}</p>` : ""}<form method="post" action="/read-auth?next=${encodeURIComponent(next)}"><input type="hidden" name="csrf" value="${escape(csrf)}"><p><label for="pin">请输入 6 位阅读密码</label></p><input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" pattern="[0-9]{6}" minlength="6" maxlength="6" required><button class="btn" type="submit">进入阅读</button></form></main></body></html>`, { status, headers: responseHeaders });
+  const pinField = error ? PIN_FIELD.replace('id="pin"', 'id="pin" aria-invalid="true" aria-describedby="auth-error"') : PIN_FIELD;
+  return new Response(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>阅读授权</title><style>${EINK_STYLE}body{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}main{width:100%;max-width:24rem;margin:auto;text-align:center}#auth-form .btn{width:100%;font:inherit;font-weight:700;cursor:pointer}#auth-form .pin-enhanced ~ .btn{display:none}</style></head><body><main><form id="auth-form" method="post" action="/auth?next=${encodeURIComponent(next)}"><input type="hidden" name="csrf" value="${escape(csrf)}">${pinField}${error ? `<p id="auth-error" role="alert">${escape(error)}</p>` : ""}<button class="btn" type="submit">进入阅读</button></form></main><script nonce="${escape(csrf)}">${pinFormScript("auth-form")}</script></body></html>`, { status, headers: responseHeaders });
 }

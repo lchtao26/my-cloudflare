@@ -24,6 +24,10 @@ export const PIN_FIELD = '<p><label for="pin">请输入 6 位密码</label></p><
 export const PIN_STYLE = '.pin-wrap{position:relative}input#pin{box-sizing:border-box;display:block;font:1.25rem/1.75 monospace;width:100%;min-height:3rem;padding:0.5rem;border:2px solid #000;border-radius:0;background:#fff;color:#000}input#pin:focus-visible{outline:3px solid #000;outline-offset:3px}.pin-slots{display:none}.pin-enhanced input#pin{position:absolute;inset:0;z-index:1;height:100%;opacity:0}.pin-enhanced .pin-slots{display:flex;height:3rem;pointer-events:none}.pin-slots span{display:flex;align-items:center;justify-content:center;flex:1;min-width:0;border:2px solid #000}.pin-slots span+span{margin-left:0.5rem}.pin-slots span.filled::after{content:"";display:block;width:0.5rem;height:0.5rem;border-radius:50%;background:#000}.pin-enhanced input#pin:focus-visible + .pin-slots span.active{outline:2px solid #000;outline-offset:2px}@media (forced-colors:active){.pin-enhanced input#pin{position:static;opacity:1}.pin-enhanced .pin-slots{display:none}}';
 export const PIN_DARK_STYLE = '@media (prefers-color-scheme:dark){input#pin{background:#111;color:#eee;border-color:#eee}input#pin:focus-visible,.pin-enhanced input#pin:focus-visible + .pin-slots span.active{outline-color:#eee}.pin-slots span{border-color:#eee}.pin-slots span.filled::after{background:#eee}form .btn{background:#111;color:#eee}}';
 
+export function pinFormScript(formId: "favorite-form" | "auth-form"): string {
+  return `(function(){var form=document.getElementById('${formId}');var pin=document.getElementById('pin');if(!pin){form.submit();return}var slots=pin.nextElementSibling.children;var submitted=false;function mark(){var active=Math.min(pin.selectionStart||0,5);for(var i=0;i<slots.length;i++){slots[i].classList.toggle('active',i===active);slots[i].classList.toggle('filled',i<pin.value.length)}}function check(e){mark();if(!submitted&&!(e&&e.isComposing)&&/^[0-9]{6}$/.test(pin.value)){submitted=true;form.submit()}}pin.addEventListener('focus',mark);pin.addEventListener('click',mark);pin.addEventListener('keyup',mark);pin.addEventListener('select',mark);pin.addEventListener('input',check);pin.addEventListener('change',check);pin.addEventListener('compositionend',check);mark();pin.parentElement.classList.add('pin-enhanced')})();`;
+}
+
 function cookie(request: Request, name: string): string {
   for (const part of (request.headers.get("Cookie") || "").split(";")) {
     const [key, ...value] = part.trim().split("=");
@@ -86,7 +90,7 @@ function form(code: string, query: string, token: string, authenticated: boolean
     authenticated ? `<p>${desired ? "正在收藏…" : "正在取消收藏…"}</p>` : PIN_FIELD,
     `<noscript><button type="submit" class="btn">${desired ? "收藏" : "取消收藏"}</button></noscript>`,
     "</form>",
-    `<script nonce="${token}">(function(){var form=document.getElementById('favorite-form');var pin=document.getElementById('pin');if(!pin){form.submit();return}var slots=pin.nextElementSibling.children;var submitted=false;function mark(){var active=Math.min(pin.selectionStart||0,5);for(var i=0;i<slots.length;i++){slots[i].classList.toggle('active',i===active);slots[i].classList.toggle('filled',i<pin.value.length)}}function check(e){mark();if(!submitted&&!(e&&e.isComposing)&&/^[0-9]{6}$/.test(pin.value)){submitted=true;form.submit()}}pin.addEventListener('focus',mark);pin.addEventListener('click',mark);pin.addEventListener('keyup',mark);pin.addEventListener('select',mark);pin.addEventListener('input',check);pin.addEventListener('change',check);pin.addEventListener('compositionend',check);mark();pin.parentElement.classList.add('pin-enhanced')})();</script>`,
+    `<script nonce="${token}">${pinFormScript("favorite-form")}</script>`,
     `<style>body{padding-top:28vh}${PIN_STYLE}form .btn{font:inherit;font-weight:700;color:inherit;background:#fff;cursor:pointer;width:100%}${PIN_DARK_STYLE}</style>`,
   ].join("\n");
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 import { shareCode } from "../src/index.ts";
 import { protectRead, readLogin } from "../src/read-auth.ts";
 import { readProgress } from "../src/read-progress.ts";
@@ -20,17 +21,26 @@ test("reading access requires the existing session and login rejects forged requ
     assert.ok(response);
     assert.equal(response.status, path.startsWith("/api/") ? 401 : 302);
     assert.equal(response.headers.get("Cache-Control"), "no-store");
+    if (!path.startsWith("/api/")) {
+      const location = new URL(response.headers.get("Location")!);
+      assert.equal(location.pathname, "/auth");
+      assert.equal(location.searchParams.get("next"), path);
+    }
   }
   assert.equal(await protectRead(new Request(`${origin}/s/${code}`), env), null);
   assert.equal(await protectRead(new Request(`${origin}/api/s/${code}`), env), null);
-  const loginUrl = `${origin}/read-auth?next=${encodeURIComponent(`/r/${code}?tab=weekly`)}`;
+  const loginUrl = `${origin}/auth?next=${encodeURIComponent(`/r/${code}?tab=weekly`)}`;
   const login = await readLogin(new Request(loginUrl), env);
   const csrfCookie = login.headers.get("set-cookie")!.split(";")[0]!;
   const token = (await login.text()).match(/name="csrf" value="([a-f0-9]+)"/)![1]!;
   const post = (pin: string, requestOrigin = origin, csrf = token) => new Request(loginUrl, { method: "POST", headers: { Origin: requestOrigin, Cookie: csrfCookie, "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, pin }) });
   assert.equal((await readLogin(post("012345", "https://evil.example"), env)).status, 403);
   assert.equal((await readLogin(post("012345", origin, "0".repeat(64)), env)).status, 403);
-  assert.equal((await readLogin(post("999999"), env)).status, 401);
+  const wrongPin = await readLogin(post("999999"), env);
+  assert.equal(wrongPin.status, 401);
+  const errorPage = await wrongPin.text();
+  assert.match(errorPage, /aria-invalid="true" aria-describedby="auth-error"/);
+  assert.ok(errorPage.indexOf('class="pin-slots"') < errorPage.indexOf('id="auth-error"'));
   const success = await readLogin(post("012345"), env);
   assert.equal(success.status, 303);
   assert.equal(success.headers.get("Location"), `/r/${code}?tab=weekly`);
@@ -38,6 +48,40 @@ test("reading access requires the existing session and login rejects forged requ
   assert.match(session, /^__Host-read-session=/);
   assert.equal(await protectRead(new Request(`${origin}/api/r/${code}`, { headers: { Cookie: session } }), env), null);
   assert.ok(await protectRead(new Request(`${origin}/read`, { headers: { Cookie: session } }), { ...env, FAVORITE_PIN: "654321" }));
+});
+
+test("login page reuses the PIN input and submits once when six digits are entered", async () => {
+  const response = await readLogin(new Request(`${origin}/auth?next=%2Fread`), environment());
+  assert.equal(response.headers.get("Referrer-Policy"), "same-origin");
+  const html = await response.text();
+  const nonce = html.match(/<script nonce="([a-f0-9]+)">/)?.[1];
+  const script = html.match(/<script nonce="[a-f0-9]+">([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(nonce && script);
+  assert.ok(response.headers.get("Content-Security-Policy")?.includes(`script-src 'nonce-${nonce}'`));
+  assert.match(html, /<form id="auth-form" method="post" action="\/auth\?next=%2Fread">/);
+  assert.match(html, /<button class="btn" type="submit">进入阅读<\/button>/);
+  assert.equal((html.match(/<span(?: class="active")?><\/span>/g) ?? []).length, 6);
+  const handlers = new Map<string, (event: { isComposing?: boolean }) => void>();
+  const filled = Array(6).fill(false);
+  const pin = {
+    value: "", selectionStart: 0,
+    parentElement: { classList: { add() {} } },
+    nextElementSibling: { children: filled.map((_, index) => ({ classList: { toggle: (name: string, value: boolean) => { if (name === "filled") filled[index] = value; } } })) },
+    addEventListener: (name: string, handler: (event: { isComposing?: boolean }) => void) => handlers.set(name, handler),
+  };
+  let submissions = 0;
+  const form = { submit: () => { submissions++; } };
+  runInNewContext(script, { document: { getElementById: (id: string) => id === "pin" ? pin : form } });
+  pin.value = "01234";
+  handlers.get("input")?.({});
+  assert.equal(submissions, 0);
+  assert.deepEqual(filled, [true, true, true, true, true, false]);
+  pin.value = "012345";
+  handlers.get("input")?.({ isComposing: true });
+  assert.equal(submissions, 0);
+  handlers.get("compositionend")?.({});
+  handlers.get("change")?.({});
+  assert.equal(submissions, 1);
 });
 
 test("progress is shared by article and rejects invalid or cross-origin writes", async t => {

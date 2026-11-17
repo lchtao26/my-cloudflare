@@ -36,7 +36,7 @@ async function requestJson<T>(path: string, init?: RequestInit, fallback = "æš‚æ
   if (!response.ok) {
     if (response.status === 401 && (path.startsWith("/api/read") || path.startsWith("/api/r/")) && typeof window !== "undefined") {
       const next = window.location.pathname + window.location.search + window.location.hash;
-      window.location.assign(`/read-auth?next=${encodeURIComponent(next)}`);
+      window.location.assign(`/auth?next=${encodeURIComponent(next)}`);
     }
     const data = await response.json<{ error?: string; requiresPin?: boolean }>().catch(() => null);
     throw new ReaderError(data?.error || fallback, response.status, data?.requiresPin);
