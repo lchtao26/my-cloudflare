@@ -1,9 +1,9 @@
-import { PIN_STYLE } from "./favorite.ts";
+import { PIN_DARK_STYLE, PIN_STYLE } from "./favorite.ts";
 
 // E-ink: pure black/white, serif, wide leading, capped line length, no motion/hover-only UI.
 export const EINK_STYLE = [
   "*,*::before,*::after{box-sizing:border-box;animation:none!important;transition:none!important;}",
-  "html{-webkit-text-size-adjust:100%;}",
+  "html{-webkit-text-size-adjust:100%;color-scheme:light dark;}",
   "html,body{scrollbar-width:none;-ms-overflow-style:none;}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;width:0;height:0;}",
   // Fixed rem gutters + main max-width (no vw); Kindles often ignore CSS min()/max().
   // OS-bundled faces first: Safari hides user-installed fonts, and partial installs (e.g. Heavy only) render body text too bold in Chrome.
@@ -34,7 +34,7 @@ export const EINK_STYLE = [
   ".categories{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0.2rem;margin:0 0 1rem;}",
   ".visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}",
   ".categories a{min-width:0;display:flex;align-items:center;justify-content:center;min-height:2.2rem;padding:0.2rem 0.1rem;border:1px solid #000;font-size:0.85em;font-weight:700;text-align:center;}",
-  ".categories{position:fixed;z-index:2;left:1.625rem;right:1.625rem;bottom:0;width:auto;max-width:365px;margin:0 auto;padding:0.65rem 0;padding-bottom:calc(0.65rem + env(safe-area-inset-bottom, 0px));background:#fff;border-top:1px solid #000;box-sizing:border-box;}",
+  ".categories{position:fixed;z-index:2;left:1.625rem;right:1.625rem;bottom:0;width:auto;max-width:365px;margin:0 auto;padding:0.65rem 0;padding-bottom:calc(0.65rem + env(safe-area-inset-bottom, 0px));background:#fff;box-sizing:border-box;}",
   ".categories::after{content:'';position:absolute;top:100%;left:0;right:0;height:100vh;background:#fff;pointer-events:none;}",
   "@media (min-width:440px){.categories{left:1.25rem;right:1.25rem;}}",
   "@media (min-width:720px){.categories{left:1.25rem;right:1.25rem;max-width:36rem;}}",
@@ -62,6 +62,7 @@ export const EINK_STYLE = [
   "button.other-link:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".other-link[aria-disabled=true],button.other-link:disabled{opacity:0.4;cursor:default;}",
   PIN_STYLE,
+  PIN_DARK_STYLE,
   "#favorite-dialog:not([open]){display:none;}#favorite-dialog{width:calc(100% - 3rem);max-width:24rem;padding:1.5rem;border:2px solid #000;background:#fff;color:#000;}",
   "#favorite-dialog:modal{overscroll-behavior:contain;}#favorite-dialog::backdrop{background:rgba(0,0,0,0.45);overflow:hidden;overscroll-behavior:contain;}",
   "#favorite-dialog p:first-child{margin-top:0;}#favorite-error:empty,#favorite-message:empty{display:none;}.favorite-close{display:block;margin:1rem auto 0;border:0;background:none;color:inherit;font:inherit;text-decoration:underline;cursor:pointer;min-height:3rem;min-width:3rem;}.favorite-close:focus-visible{outline:3px solid #000;outline-offset:3px;}",
@@ -99,4 +100,6 @@ export const EINK_STYLE = [
   "@keyframes animloader{0%{transform:scale(0);opacity:0.4}100%{transform:scale(1);opacity:0}}",
   ".dialog-dismiss{align-self:flex-end;min-height:2.25rem;margin-top:0.5rem;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;color:#000;font:inherit}",
   "#body-actions .dialog-dismiss:not(:focus-visible),.dialog-dismiss:not(:focus-visible){position:absolute;width:1px;height:1px;min-width:0;min-height:0;padding:0;margin:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}",
+  // Media-query overrides keep the existing light theme usable on older readers.
+  "@media (prefers-color-scheme:dark){body{color:#eee;background:#111}a,.categories a:visited,.btn:visited,.nav-row a:visited,a.other-link:visited{color:#eee}a:visited{color:#aaa}.categories,.categories::after,.list-actions .btn,.btn,.progress,#body-actions,#body-actions button,#favorite-dialog,#highlight-error,#highlight-error button,#explanation-dialog[open],#original-match-dialog[open],.dialog-dismiss{background-color:#111;color:#eee}.categories a[aria-current=page]{background:#eee;color:#111}.categories a[aria-current=page]:visited{color:#111}.list-actions #load-more[aria-disabled=true],.list-actions .btn:disabled{color:#aaa}li,li:last-child,.categories,.categories a,hr,.btn,.progress,#body-actions,#body-actions #body-actions-buttons,#body-actions button,#favorite-dialog,#favorite-dialog .favorite-close,#highlight-error,#highlight-error button,#explanation-dialog[open],#original-match-dialog[open],#original-match-content section+section,#explanation-text blockquote,.dialog-dismiss,mark.hl{border-color:#eee}.progress-bar{background:#eee}.loader{--color-1:#eee}a:focus-visible,.nav-row a:focus-visible,.btn:focus-visible,button.other-link:focus-visible,#highlight-error button:focus-visible,#favorite-dialog .favorite-close:focus-visible{outline-color:#eee}}",
 ].join("");

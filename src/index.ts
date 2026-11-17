@@ -478,6 +478,7 @@ function einkDocument(
     '<html lang="zh-CN">',
     "<head>",
     '<meta charset="utf-8" />',
+    '<meta name="color-scheme" content="light dark" />',
     `<meta name="viewport" content="width=device-width, initial-scale=1${bodyClass === "read-list" ? ", viewport-fit=cover" : ""}" />`,
     '<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />',
     '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />',
