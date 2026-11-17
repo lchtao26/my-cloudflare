@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ArticleRoute } from "../reader/article.tsx";
 
 export const Route = createFileRoute("/s/$code")({
+  ssr: false,
   component: SharedArticle,
 });
 

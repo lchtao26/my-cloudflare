@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation } from "@tanstack/react-router";
+import { Link, useHydrated, useLocation } from "@tanstack/react-router";
 import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
 import type { MarkdownNode } from "../explanation-markdown.ts";
 import type { ReadCategory, ReaderArticle } from "../reader-data.ts";
@@ -8,20 +8,31 @@ import { ReaderDialog } from "./dialog.tsx";
 import { articleKey, articleQuery, listKey, performAction, ReaderError, readerSearch, type ReaderAction } from "./queries.ts";
 import { useReaderScroll } from "./reading.ts";
 
-export function ArticleRoute({ code, category, page, shared }: {
-  code: string; category: ReadCategory; page: number; shared: boolean;
+export type InitialArticle =
+  | { data: ReaderArticle; error?: never }
+  | { data?: never; error: { message: string; status: number } };
+
+export function ArticleRoute({ code, category, page, shared, initial }: {
+  code: string; category: ReadCategory; page: number; shared: boolean; initial?: InitialArticle;
 }) {
-  const query = useQuery(articleQuery(code, shared, category, page));
-  if (query.isPending) return <main><p role="status">正在加载…</p></main>;
+  const hydrated = useHydrated();
+  const query = useQuery({
+    ...articleQuery(code, shared, category, page),
+    initialData: initial?.data,
+    enabled: !initial?.error,
+    refetchOnMount: !initial || hydrated,
+  });
+  const error = query.error ?? initial?.error;
+  if (query.isPending && (!error || query.isFetching)) return <main><p role="status">正在加载…</p></main>;
   if (!query.data) {
-    const missing = query.error instanceof ReaderError && query.error.status === 404;
+    const missing = error != null && "status" in error && error.status === 404;
     return <main>
-      <p role={missing ? undefined : "alert"}>{query.error?.message ?? "未找到文章。"}</p>
+      <p role={missing ? undefined : "alert"}>{error?.message ?? "未找到文章。"}</p>
       {!missing && <button type="button" className="other-link" onClick={() => void query.refetch()}>重试</button>}
       <p><Link to="/read" search={readerSearch(category, page)}>返回列表</Link></p>
     </main>;
   }
-  return <Article data={query.data} category={category} page={page} />;
+  return <Article data={query.data} category={category} page={page} hydrated={hydrated} />;
 }
 
 function markdown(nodes: MarkdownNode[]): ReactNode[] {
@@ -33,7 +44,7 @@ function isModelAction(action: ReaderAction) {
   return action.type === "original" || action.type === "explain";
 }
 
-function Article({ data, category, page }: { data: ReaderArticle; category: ReadCategory; page: number }) {
+function Article({ data, category, page, hydrated }: { data: ReaderArticle; category: ReadCategory; page: number; hydrated: boolean }) {
   const { item, actions } = data;
   const queryClient = useQueryClient();
   const hash = useLocation({ select: location => location.hash });
@@ -42,7 +53,7 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
   const highlights = actions?.highlights ?? [];
   const anchoredMark = highlights.find(mark => hash === `hl-${mark.id}`);
   const hasOriginal = data.original.length > 0;
-  const [showOriginal, setShowOriginal] = useState(anchoredMark?.field === "original" && hasOriginal);
+  const [showOriginal, setShowOriginal] = useState(hydrated && anchoredMark?.field === "original" && hasOriginal);
   const [selected, setSelected] = useState<ParagraphSelection | null>(null);
   const [pinPrompt, setPinPrompt] = useState<ReaderAction | null>(null);
   const [resultPanel, setResultPanel] = useState<ReaderAction | null>(null);
@@ -135,7 +146,7 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
   const search = readerSearch(category, page);
   const originalTitle = data.originalTitle || item.title;
   const origTitleLang = data.originalTitle ? data.originalLang : item.titleLang;
-  const returnAnchor = category === "highlights" && anchoredMark ? hash : item.code;
+  const returnAnchor = hydrated && category === "highlights" && anchoredMark ? hash : item.code;
   return (
     <div className="reader-surface" {...gutter}>
       <main ref={main}>

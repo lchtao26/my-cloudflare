@@ -54,7 +54,7 @@ RSS 条目只输出标题、指向水墨屏详情页 `/r/{6 位短码}` 的链�
 
 ## 阅读节选水墨屏页面
 
-`/read`、`/r/{短码}` 和 `/s/{短码}` 使用 TanStack Start 的 SPA 模式。在浏览器中，React Query 请求 Worker 的 JSON 接口并管理列表、文章和写入状态。页面需要 JavaScript。RSS 订阅地址继续由 Worker 直接返回 XML。
+`/r/{短码}` 由 Worker 使用 TanStack Start 服务端渲染，首次访问返回含标题和正文的 HTML，关闭 JavaScript 也能阅读。`/read` 列表和 `/s/{短码}` 分享页在浏览器端加载。React Query 通过 Worker 的 JSON 接口管理页面切换和写入状态。RSS 订阅地址由 Worker 直接返回 XML。
 
 `npm run dev` 默认监听 `127.0.0.1:8787`，入口为 `http://127.0.0.1:8787/read`。要预览发布产物，运行 `npm run build` 和 `npm run preview`。构建在 `dist/client` 产出页面外壳及静态资源，Wrangler 读取 Vite 生成的部署配置。
 

@@ -43,6 +43,10 @@ async function requestJson<T>(path: string, init?: RequestInit, fallback = "æš‚æ
 export const listKey = (category: ReadCategory) => ["reader", "list", category] as const;
 export const articleKey = (code: string) => ["reader", "article", code] as const;
 
+export function articlePath(code: string, shared: boolean, category: ReadCategory, page: number) {
+  return `/api/${shared ? "s" : "r"}/${encodeURIComponent(code)}${shared ? "" : searchParams(category, page)}`;
+}
+
 export function listQuery(category: ReadCategory, page: number, cache?: RequestCache) {
   return queryOptions({
     queryKey: [...listKey(category), page],
@@ -54,7 +58,7 @@ export function listQuery(category: ReadCategory, page: number, cache?: RequestC
 export function articleQuery(code: string, shared: boolean, category: ReadCategory, page: number) {
   return queryOptions({
     queryKey: [...articleKey(code), shared, category, page],
-    queryFn: ({ signal }) => requestJson<ReaderArticle>(`/api/${shared ? "s" : "r"}/${encodeURIComponent(code)}${shared ? "" : searchParams(category, page)}`, { signal }),
+    queryFn: ({ signal }) => requestJson<ReaderArticle>(articlePath(code, shared, category, page), { signal }),
     staleTime: shared ? 60_000 : 0,
   });
 }

@@ -7,6 +7,7 @@ import { usePullToRefresh } from "../reader/pull-to-refresh.ts";
 import { useReaderScroll } from "../reader/reading.ts";
 
 export const Route = createFileRoute("/read")({
+  ssr: false,
   validateSearch: validateReaderSearch,
   component: ReadingList,
 });

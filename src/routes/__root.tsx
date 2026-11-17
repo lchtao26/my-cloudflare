@@ -4,7 +4,6 @@ import { useState, type ReactNode } from "react";
 import { EINK_STYLE } from "../reader-style.ts";
 
 export const Route = createRootRoute({
-  ssr: false,
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -35,7 +34,7 @@ function ReaderDocument({ children }: { children: ReactNode }) {
       <head><HeadContent /><style>{EINK_STYLE}</style></head>
       <body>
         {children}
-        <noscript><main><p>请启用 JavaScript 阅读，或订阅 <a href="/read.xml">阅读节选 RSS</a>。</p></main></noscript>
+        <noscript><p>启用 JavaScript 可使用完整阅读功能。也可订阅 <a href="/read.xml">阅读节选 RSS</a>。</p></noscript>
         <Scripts />
       </body>
     </html>
