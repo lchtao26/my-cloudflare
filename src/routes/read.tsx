@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, type MouseEvent } from "react";
+import { useCallback, useRef, type MouseEvent, type RefCallback } from "react";
 import { READ_CATEGORIES, readCategory } from "../reader-data.ts";
 import { listQuery, readerSearch, validateReaderSearch } from "../reader/queries.ts";
 import { usePullToRefresh } from "../reader/pull-to-refresh.ts";
@@ -31,31 +31,29 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
   });
   const data = query.data;
   const hash = useLocation({ select: location => location.hash });
-  const surface = useRef<HTMLDivElement>(null);
-  const main = useRef<HTMLElement>(null);
   const appliedAnchor = useRef<string | null>(null);
   const reload = useCallback(async () => {
     try {
       await queryClient.fetchQuery({ ...listQuery(category, page, "reload"), staleTime: 0, networkMode: "always" });
     } catch { /* React Query exposes the error alongside the existing list. */ }
   }, [category, page, queryClient]);
-  const { indicatorHeight, label, refreshing, refresh } = usePullToRefresh(surface, reload);
-  const { gutter, canReturnToTop } = useReaderScroll(main, undefined, Boolean(data));
+  const { surfaceRef, indicatorHeight, label, refreshing, refresh } = usePullToRefresh(reload);
+  const { gutter, canReturnToTop, mainRef } = useReaderScroll(undefined, Boolean(data));
   const search = readerSearch(category, page);
-  useEffect(() => {
-    if (!data || query.isPlaceholderData) return;
+  const anchorRef = useCallback<RefCallback<HTMLElement>>(element => {
+    if (!element || !data || query.isPlaceholderData || !hash) return;
     // A refresh replaces the data for the same location. Apply its anchor only once.
     const anchor = `${page}:${hash}`;
     if (appliedAnchor.current === anchor) return;
     appliedAnchor.current = anchor;
-    if (hash) document.getElementById(hash)?.scrollIntoView({ block: "center" });
+    element.scrollIntoView({ block: "center" });
   }, [data, hash, page, query.isPlaceholderData]);
   const articleAnchors = new Set<string>();
   const lastItem = data?.kind === "articles" ? data.items.at(-1)?.code : undefined;
 
   return (
-    <div className="reader-surface" ref={surface} {...gutter}>
-      <main className="read-list" ref={main}>
+    <div className="reader-surface" ref={surfaceRef} {...gutter}>
+      <main className="read-list" ref={mainRef}>
         <h1 className="visually-hidden">阅读节选</h1>
         <div className="pull-refresh" role="status" style={{ height: indicatorHeight }}>
           {indicatorHeight >= 22 ? label : ""}
@@ -77,7 +75,8 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
         {data?.kind === "articles" && data.items.length > 0 && (
           <ul>
             {data.items.map(item => (
-              <li key={item.code} id={item.code} lang={item.titleLang} tabIndex={-1}>
+              <li key={item.code} id={item.code} lang={item.titleLang} tabIndex={-1}
+                ref={hash === item.code ? anchorRef : undefined}>
                 <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search}
                   onClick={event => rememberArticle(event, item.code)}>{item.title}</Link>
                 {(item.source || item.author) && <p className="meta" lang="zh-CN">
@@ -94,7 +93,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
               const article = item.article;
               const first = article && !articleAnchors.has(article.code);
               if (article) articleAnchors.add(article.code);
-              return <li key={item.id} id={anchor}>
+              return <li key={item.id} id={anchor} ref={hash === anchor ? anchorRef : undefined}>
                 {first && <span id={article.code} />}
                 {article && item.located
                   ? <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={search}

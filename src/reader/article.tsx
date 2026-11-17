@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated, useLocation } from "@tanstack/react-router";
-import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
+import { createElement, useCallback, useRef, useState, type ReactNode, type RefCallback } from "react";
 import type { MarkdownNode } from "../explanation-markdown.ts";
 import type { ReadCategory, ReaderArticle } from "../reader-data.ts";
 import { ReadingBody, type ParagraphSelection } from "./body.tsx";
@@ -48,8 +48,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const { item, actions } = data;
   const queryClient = useQueryClient();
   const hash = useLocation({ select: location => location.hash });
-  const main = useRef<HTMLElement>(null);
-  const { progress, gutter } = useReaderScroll(main, actions ? item.code : undefined, true, Boolean(hash));
+  const { progress, gutter, mainRef } = useReaderScroll(actions ? item.code : undefined, true, Boolean(hash));
   const highlights = actions?.highlights ?? [];
   const anchoredMark = highlights.find(mark => hash === `hl-${mark.id}`);
   const hasOriginal = data.original.length > 0;
@@ -59,19 +58,27 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const [resultPanel, setResultPanel] = useState<ReaderAction | null>(null);
   const [failure, setFailure] = useState<{ message: string; retry?: ReaderAction } | null>(null);
   const [addedLater, setAddedLater] = useState(false);
+  const syncedAnchor = useRef<string | null>(null);
+  const scrolledAnchor = useRef<string | null>(null);
 
-  useEffect(() => {
-    const previous = document.title;
-    document.title = item.title;
-    return () => { document.title = previous; };
-  }, [item.title]);
+  if (anchoredMark && syncedAnchor.current !== anchoredMark.id) {
+    syncedAnchor.current = anchoredMark.id;
+    if (anchoredMark.field !== "terms") {
+      const next = anchoredMark.field === "original" && hasOriginal;
+      if (showOriginal !== next) setShowOriginal(next);
+    }
+  }
 
-  useEffect(() => {
-    if (!anchoredMark) return;
-    if (anchoredMark.field !== "terms") setShowOriginal(anchoredMark.field === "original" && hasOriginal);
+  const setMain = useCallback<RefCallback<HTMLElement>>(element => {
+    const cleanup = mainRef(element);
+    if (!element || !anchoredMark || scrolledAnchor.current === hash) return cleanup;
+    scrolledAnchor.current = hash;
     const frame = requestAnimationFrame(() => document.getElementById(hash)?.scrollIntoView({ block: "center" }));
-    return () => cancelAnimationFrame(frame);
-  }, [anchoredMark?.id, anchoredMark?.field, hasOriginal, hash]);
+    return () => {
+      cancelAnimationFrame(frame);
+      cleanup?.();
+    };
+  }, [anchoredMark, hash, mainRef]);
 
   const mutation = useMutation({
     mutationFn: ({ action, pin }: { action: ReaderAction; pin?: string }) => performAction(item.code, action, pin),
@@ -149,7 +156,8 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const returnAnchor = hydrated && category === "highlights" && anchoredMark ? hash : item.code;
   return (
     <div className="reader-surface" {...gutter}>
-      <main ref={main}>
+      <title>{item.title}</title>
+      <main ref={setMain}>
         <article>
           <h1 lang={item.titleLang}>{item.title}</h1>
           {(hasOriginal || item.author) && <p>
@@ -249,14 +257,14 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
 function PinForm({ pending, error, submit, cancel }: {
   pending: boolean; error?: string; submit: (pin: string) => void; cancel: () => void;
 }) {
-  const input = useRef<HTMLInputElement>(null);
+  // Remount when the error text changes so the field clears and autoFocus runs again.
+  return <PinFields key={error ?? "ready"} pending={pending} error={error} submit={submit} cancel={cancel} />;
+}
+
+function PinFields({ pending, error, submit, cancel }: {
+  pending: boolean; error?: string; submit: (pin: string) => void; cancel: () => void;
+}) {
   const [pin, setPin] = useState("");
-  useEffect(() => {
-    if (error) {
-      setPin("");
-      input.current?.focus();
-    }
-  }, [error]);
   return <>
     <form onSubmit={event => {
       event.preventDefault();
@@ -264,7 +272,7 @@ function PinForm({ pending, error, submit, cancel }: {
     }}>
       <p><label htmlFor="pin">请输入 6 位密码</label></p>
       <div className="pin-wrap pin-enhanced">
-        <input ref={input} id="pin" name="pin" type="password" autoFocus inputMode="numeric" autoComplete="current-password"
+        <input id="pin" name="pin" type="password" autoFocus inputMode="numeric" autoComplete="current-password"
           maxLength={6} value={pin} disabled={pending} onChange={event => {
             const value = event.currentTarget.value.replace(/\D/g, "");
             setPin(value);

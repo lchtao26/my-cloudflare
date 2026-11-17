@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
-export function useReaderScroll(
-  main: RefObject<HTMLElement | null>, code?: string, enabled = true, hasAnchor = false,
-) {
+export function useReaderScroll(code?: string, enabled = true, hasAnchor = false) {
+  const main = useRef<HTMLElement | null>(null);
   const [progress, setProgress] = useState(0);
   const [canReturnToTop, setCanReturnToTop] = useState(false);
-  useEffect(() => {
-    if (!enabled || !main.current) return;
-    const column = main.current;
+
+  const mainRef = useCallback((element: HTMLElement | null) => {
+    main.current = element;
+    if (!element || !enabled) return;
+
+    const column = element;
     const key = code ? `eink-progress:${code}` : null;
     const maxScroll = () => Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     const ratio = () => maxScroll() > 0 ? Math.min(1, Math.max(0, window.scrollY / maxScroll())) : 1;
@@ -42,13 +44,14 @@ export function useReaderScroll(
     window.addEventListener("pagehide", save);
     update();
     return () => {
+      if (main.current === column) main.current = null;
       resize.disconnect();
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", update);
       window.removeEventListener("pagehide", save);
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [main, code, enabled, hasAnchor]);
+  }, [code, enabled, hasAnchor]);
 
   const tap = useRef<{ x: number; y: number; time: number; scroll: number } | null>(null);
   function gutterDirection(event: ReactPointerEvent) {
@@ -58,7 +61,7 @@ export function useReaderScroll(
     return event.clientX < bounds.left ? -1 : event.clientX > bounds.right ? 1 : 0;
   }
   return {
-    progress, canReturnToTop,
+    progress, canReturnToTop, mainRef,
     gutter: {
       onPointerDown(event: ReactPointerEvent) {
         tap.current = event.isPrimary && gutterDirection(event)

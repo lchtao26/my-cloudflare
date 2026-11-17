@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useRef, useState } from "react";
 
 const REFRESH_DISTANCE = 80;
 
-export function usePullToRefresh(surface: RefObject<HTMLElement | null>, reload: () => Promise<void>) {
+export function usePullToRefresh(reload: () => Promise<void>) {
   const [position, setPosition] = useState<number | "refreshing">(0);
   const inFlight = useRef(false);
   const refresh = useCallback(async () => {
@@ -17,8 +17,7 @@ export function usePullToRefresh(surface: RefObject<HTMLElement | null>, reload:
     }
   }, [reload]);
 
-  useEffect(() => {
-    const element = surface.current;
+  const surfaceRef = useCallback((element: HTMLElement | null) => {
     if (!element) return;
     let pull: { id: number; x: number; y: number; distance: number; dragging: boolean } | null = null;
 
@@ -77,10 +76,11 @@ export function usePullToRefresh(surface: RefObject<HTMLElement | null>, reload:
       element.removeEventListener("touchend", end);
       element.removeEventListener("touchcancel", cancel);
     };
-  }, [surface, refresh]);
+  }, [refresh]);
 
   const refreshing = position === "refreshing";
   return {
+    surfaceRef,
     indicatorHeight: refreshing ? 44 : Math.min(64, position * 0.55),
     label: refreshing ? "正在刷新…" : position >= REFRESH_DISTANCE ? "松手刷新" : position > 0 ? "下拉刷新" : "",
     refreshing,
