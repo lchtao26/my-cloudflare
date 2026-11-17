@@ -2,7 +2,7 @@ export const READ_CATEGORIES = [
   { id: "all", label: "全部" },
   { id: "weekly", label: "周刊" },
   { id: "bunshun", label: "文春" },
-  { id: "novel", label: "连载" },
+  { id: "novel", label: "小说" },
   { id: "news", label: "IT" },
   { id: "favorites", label: "收藏" },
   { id: "highlights", label: "划线" },

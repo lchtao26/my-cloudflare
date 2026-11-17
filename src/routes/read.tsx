@@ -32,7 +32,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
     } catch { /* React Query exposes the error alongside the existing list. */ }
   }, [category, page, queryClient]);
   const { surfaceRef, indicatorHeight, label, refreshing, refresh } = usePullToRefresh(reload);
-  const { gutter, canReturnToTop, mainRef } = useReaderScroll(undefined, Boolean(data));
+  const { gutter, mainRef } = useReaderScroll(undefined, Boolean(data));
   const search = readerSearch(category, page);
 
   return (
@@ -86,13 +86,9 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
         )}
         {data && (
           <div className="list-actions" id="list-actions" aria-busy={query.isPlaceholderData}>
-            {canReturnToTop && <button className="btn" type="button" onClick={() => window.scrollTo(0, 0)}>返回顶部</button>}
-            <button className="btn" type="button" disabled={refreshing || query.isPlaceholderData} onClick={() => void refresh()}>
-              {refreshing ? "正在刷新…" : "刷新列表"}
-            </button>
             {category === "highlights" && page > 1 && <Link className="btn" to="/read" search={readerSearch(category, page - 1)}>上一页</Link>}
             {data.hasMore && (query.isPlaceholderData
-              ? <button className="btn" type="button" disabled>加载中…</button>
+              ? <button className="btn" type="button" disabled>加载中</button>
               : <Link className="btn" id="load-more" to="/read" search={readerSearch(category, page + 1)}
                   resetScroll={category === "highlights"}>{category === "highlights" ? "下一页" : "加载更多"}</Link>)}
           </div>

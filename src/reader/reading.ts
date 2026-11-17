@@ -3,7 +3,6 @@ import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent }
 export function useReaderScroll(code?: string, enabled = true, hasAnchor = false) {
   const main = useRef<HTMLElement | null>(null);
   const [progress, setProgress] = useState(0);
-  const [canReturnToTop, setCanReturnToTop] = useState(false);
 
   const mainRef = useCallback((element: HTMLElement | null) => {
     main.current = element;
@@ -29,7 +28,6 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
     }
     function update() {
       setProgress(ratio());
-      setCanReturnToTop(window.scrollY > 0 && maxScroll() > window.innerHeight * 0.5);
     }
     function onScroll() {
       update();
@@ -61,7 +59,7 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
     return event.clientX < bounds.left ? -1 : event.clientX > bounds.right ? 1 : 0;
   }
   return {
-    progress, canReturnToTop, mainRef,
+    progress, mainRef,
     gutter: {
       onPointerDown(event: ReactPointerEvent) {
         tap.current = event.isPrimary && gutterDirection(event)

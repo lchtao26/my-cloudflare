@@ -453,10 +453,8 @@ function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: 
   const body = excerpt.body ? einkParagraphs(excerpt.body, excerpt.id, imageBaseUrl) : "";
   const originalBody = showActions && !excerpt.chinese && excerpt.body && excerpt.originalBody
     ? einkParagraphs(excerpt.originalBody, excerpt.id, imageBaseUrl) : "";
-  const subtitle = `${originalBody ? `<span id="body-view-toggle-prefix" hidden><button type="button" class="other-link" id="body-view-toggle" aria-controls="original-body" aria-expanded="false" hidden>显示原文</button>${excerpt.author ? " · " : ""}</span>` : ""}${excerpt.author ? einkText(excerpt.author) : ""}`;
   const terms = showActions && excerpt.terms ? einkParagraphs(excerpt.terms, excerpt.id, imageBaseUrl) : "";
   return [
-    ...(subtitle ? [`<p>${subtitle}</p>`] : []),
     ...(body ? [`<div class="excerpt-body"${originalBody ? ' id="translated-body"' : ""}${highlightsEnabled ? ` data-field="${excerpt.chinese ? "original" : "translation"}"` : ""} lang="${htmlText(excerpt.lang)}">\n${body}\n</div>`] : []),
     ...(originalBody ? [`<div class="excerpt-body" id="original-body"${highlightsEnabled ? ' data-field="original"' : ""} lang="${htmlText(excerpt.originalLang)}" hidden>\n${originalBody}\n</div>`] : []),
     ...(showActions && (originalBody || highlightsEnabled) ? [`<dialog id="body-actions" aria-label="正文操作" closedby="any" hidden><div id="body-preview-scroll"><p id="body-preview"></p></div><div id="body-actions-buttons"><button type="button" id="body-toggle"${originalBody && highlightsEnabled ? "" : " hidden"}>显示原文</button>${highlightsEnabled ? ' <button type="button" id="body-explain" aria-live="polite" hidden>解释</button>' : ""} <button type="button" id="body-highlight" hidden>划线</button>${highlightsEnabled ? ' <button type="button" id="body-unhighlight">取消划线</button>' : ""}</div></dialog>`] : []),
@@ -544,32 +542,6 @@ const EINK_LIST_PAGING = [
   "</script>",
 ].join("\n");
 
-// Exclude the return button's own row when deciding whether content overflows.
-const EINK_LIST_BACK_TO_TOP = [
-  "<script>",
-  "(function(){",
-  "var top=document.getElementById('back-to-top');",
-  "var actions=document.getElementById('list-actions');",
-  "var more=document.getElementById('load-more');",
-  "var main=document.querySelector('main');",
-  "if(!top||!actions||!main)return;",
-  "function update(){",
-  "var extra=0;",
-  "if(!top.hidden){",
-  "var moreHeight=0;",
-  "if(more){var style=window.getComputedStyle(more);moreHeight=more.offsetHeight+(parseFloat(style.marginTop)||0)+(parseFloat(style.marginBottom)||0);}",
-  "extra=Math.max(0,actions.offsetHeight-moreHeight);",
-  "}",
-  "top.hidden=document.documentElement.scrollHeight-extra<=document.documentElement.clientHeight;",
-  "}",
-  "update();",
-  "window.addEventListener('load',update,false);",
-  "window.addEventListener('resize',update,false);",
-  "if(typeof ResizeObserver==='function')new ResizeObserver(update).observe(main);",
-  "})();",
-  "</script>",
-].join("\n");
-
 export function renderEinkList(excerpts: Excerpt[], listPath: string, category: ReadCategory = "all", page = 1, hasMore = false): string {
   const items = excerpts.map((excerpt) => {
     const href = htmlText(`${READ_DETAIL_PREFIX}/${excerpt.code}${categorySearch(category, page)}`);
@@ -590,10 +562,10 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
       `<a${item.id === "later" ? ' class="category-later"' : ""} href="${htmlText(`${listPath}${categorySearch(item.id)}`)}"${item.id === category ? ' aria-current="page"' : ""}>${item.label}</a>`
     ).join("")}</nav>`,
     items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
-    ...((items || hasMore) ? [
-      `<div class="list-actions" id="list-actions"><a class="btn" id="back-to-top" href="#" hidden>返回顶部</a>${hasMore ? `<a class="btn" id="load-more" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}`)}">加载更多</a>` : ""}</div>`,
+    ...(hasMore ? [
+      `<div class="list-actions" id="list-actions"><a class="btn" id="load-more" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}`)}">加载更多</a></div>`,
     ] : []),
-  ].join("\n"), false, EINK_LIST_PAGING + "\n" + EINK_LIST_BACK_TO_TOP, "read-list");
+  ].join("\n"), false, EINK_LIST_PAGING, "read-list");
 }
 
 export type EinkNeighbors = {
@@ -617,14 +589,14 @@ function einkNav(listPath: string, neighbors: EinkNeighbors, category: ReadCateg
   const next = neighbors.nextCode
     ? `<a href="${htmlText(`${READ_DETAIL_PREFIX}/${neighbors.nextCode}${categorySearch(category, page)}`)}">${einkText("下一篇")}</a>`
     : `<span class="is-disabled">${einkText("下一篇")}</span>`;
-  const back = `<a href="${htmlText(`${listPath}${categorySearch(category, page)}`)}" id="back-to-list">${einkText("返回列表")}</a>`;
+  const back = `<a href="${htmlText(listPath)}" id="back-to-list" data-back>${einkText("返回")}</a>`;
   return `<nav class="nav-row"${hidden ? " hidden" : ""}>\n${prev}\n${back}\n${next}\n</nav>`;
 }
 
 const EINK_DETAIL_BACK = `<script>(function(){
-  var link=document.getElementById('back-to-list');
-  if(!link)return;
-  link.addEventListener('click',function(event){
+  var links=document.querySelectorAll('[data-back]');
+  for(var i=0;i<links.length;i++)links[i].addEventListener('click',function(event){
+    var link=event.currentTarget;
     if(event.defaultPrevented||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||(typeof event.button==='number'&&event.button!==0))return;
     if((link.target&&link.target!=='_self')||link.hasAttribute('download'))return;
     if(!window.history||typeof window.history.back!=='function'||window.history.length<=1)return;
@@ -850,6 +822,7 @@ export function renderEinkDetail(
   return einkDocument(excerpt.title, [
     "<article>",
     `<h1 lang="${htmlText(excerpt.titleLang)}">${einkText(excerpt.title)}</h1>`,
+    `<p class="article-byline"><span class="author-row"><span>${einkText(excerpt.publishedDate || "—")}</span>${excerpt.author ? `<span>${einkText(excerpt.author)}</span>` : ""}</span>${showNavigation && !excerpt.chinese && excerpt.body && excerpt.originalBody ? '<span class="body-view-action" id="body-view-toggle-prefix" hidden><button type="button" class="other-link" id="body-view-toggle" aria-controls="original-body" aria-expanded="false" hidden>显示原文</button></span>' : ""}${showNavigation ? `<a class="other-link" href="${htmlText(listPath)}" data-back>返回</a>` : ""}</p>`,
     excerptDetailBody(excerpt, imageBaseUrl, showNavigation, category, page, highlightsEnabled && showNavigation),
     "</article>",
     nav,
@@ -993,7 +966,7 @@ async function renderHighlightList(db: D1Database | undefined, env: ConfiguredBi
   const pageHtml = renderEinkList([], READ_LIST_PATH, "highlights");
   const more = hasMore ? `<a class="btn" id="load-more" href="${htmlText(`${READ_LIST_PATH}${categorySearch("highlights", page + 1)}`)}">下一页</a>` : "";
   const previous = page > 1 ? `<a class="btn" href="${htmlText(`${READ_LIST_PATH}${categorySearch("highlights", page - 1)}`)}">上一页</a>` : "";
-  return pageHtml.replace(`<p>${displayText("暂无条目")}</p>`, items ? `<ul>${items}</ul><div class="list-actions" id="list-actions"><a class="btn" id="back-to-top" href="#" hidden>返回顶部</a>${previous}${more}</div>` : `<p>${displayText("暂无条目")}</p>${previous}`);
+  return pageHtml.replace(`<p>${displayText("暂无条目")}</p>`, items ? `<ul>${items}</ul><div class="list-actions" id="list-actions">${previous}${more}</div>` : `<p>${displayText("暂无条目")}</p>${previous}`);
 }
 
 async function fetchExcerptByShortId(env: ConfiguredBindings, shortId: number): Promise<Excerpt | null> {

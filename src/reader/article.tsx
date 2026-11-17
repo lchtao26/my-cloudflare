@@ -40,7 +40,7 @@ export function ArticleRoute({ code, category, page, shared, initial }: {
     return <main>
       <p role={missing ? undefined : "alert"}>{error?.message ?? "未找到文章。"}</p>
       {!missing && <button type="button" className="other-link" onClick={() => void query.refetch()}>重试</button>}
-      <p><Link to="/read" search={readerSearch(category, page)} onClick={backToPreviousPage}>返回列表</Link></p>
+      <p><Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>返回</Link></p>
     </main>;
   }
   return <Article data={query.data} category={category} page={page} hydrated={hydrated} />;
@@ -170,11 +170,13 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
       <main ref={setMain}>
         <article>
           <h1 lang={item.titleLang}>{item.title}</h1>
-          {(hasOriginal || item.author) && <p>
-            {hasOriginal && <button className="other-link" type="button" aria-controls="original-body"
-              aria-expanded={showOriginal} onClick={() => setShowOriginal(value => !value)}>{showOriginal ? "显示翻译" : "显示原文"}</button>}
-            {hasOriginal && item.author && " · "}{item.author}
-          </p>}
+          <p className="article-byline">
+            <span className="author-row"><span>{data.date || "—"}</span>{item.author && <span>{item.author}</span>}</span>
+            {hasOriginal && <span className="body-view-action"><button className="other-link" type="button" aria-controls="original-body"
+              aria-expanded={showOriginal} onClick={() => setShowOriginal(value => !value)}>{showOriginal ? "显示翻译" : "显示原文"}</button>
+            </span>}
+            {actions && <Link className="other-link" to="/read" search={readerSearch()} onClick={backToPreviousPage}>返回</Link>}
+          </p>
           <ReadingBody id={hasOriginal ? "translated-body" : undefined} field={data.field} lang={data.lang}
             paragraphs={data.body} highlights={highlights} hidden={showOriginal}
             select={actions?.highlightsEnabled ? setSelected : undefined} />
@@ -213,7 +215,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
           {actions.prevCode
             ? <Link to="/r/$code" params={{ code: actions.prevCode }} search={search}>上一篇</Link>
             : <span className="is-disabled">上一篇</span>}
-          <Link to="/read" search={search} onClick={backToPreviousPage}>返回列表</Link>
+          <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>返回</Link>
           {actions.nextCode
             ? <Link to="/r/$code" params={{ code: actions.nextCode }} search={search}>下一篇</Link>
             : <span className="is-disabled">下一篇</span>}

@@ -82,7 +82,7 @@ export function usePullToRefresh(reload: () => Promise<void>) {
   return {
     surfaceRef,
     indicatorHeight: refreshing ? 44 : Math.min(64, position * 0.55),
-    label: refreshing ? "正在刷新…" : position >= REFRESH_DISTANCE ? "松手刷新" : position > 0 ? "下拉刷新" : "",
+    label: refreshing ? "正在刷新" : position >= REFRESH_DISTANCE ? "松手刷新" : position > 0 ? "下拉刷新" : "",
     refreshing,
     refresh,
   };
