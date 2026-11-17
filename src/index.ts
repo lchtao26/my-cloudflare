@@ -547,7 +547,7 @@ export function renderEinkList(excerpts: Excerpt[], listPath: string, category: 
     const href = htmlText(`${READ_DETAIL_PREFIX}/${excerpt.code}${categorySearch(category, page)}`);
     const meta = [
       excerpt.sourceTitle ? einkText(excerpt.sourceTitle) : "",
-      excerpt.author ? einkText(`作者：${excerpt.author}`) : "",
+      excerpt.author ? einkText(excerpt.author) : "",
     ].filter(Boolean).join(" · ");
     return [
       `<li lang="${htmlText(excerpt.titleLang)}">`,
@@ -822,7 +822,7 @@ export function renderEinkDetail(
   return einkDocument(excerpt.title, [
     "<article>",
     `<h1 lang="${htmlText(excerpt.titleLang)}">${einkText(excerpt.title)}</h1>`,
-    `<p class="article-byline"><span class="author-row"><span>${einkText(excerpt.publishedDate || "—")}</span>${excerpt.author ? `<span>${einkText(excerpt.author)}</span>` : ""}</span>${showNavigation ? `<a class="other-link" href="${htmlText(listPath)}" data-back>返回</a>` : ""}${showNavigation && !excerpt.chinese && excerpt.body && excerpt.originalBody ? '<span class="body-view-action" id="body-view-toggle-prefix" hidden><button type="button" class="other-link" id="body-view-toggle" aria-controls="original-body" aria-expanded="false" hidden>显示原文</button></span>' : ""}</p>`,
+    `<p class="article-byline"><span class="author-row"><span>${einkText(excerpt.publishedDate || "—")}</span>${excerpt.author ? `<span>${einkText(excerpt.author)}</span>` : ""}</span>${showNavigation ? `<span class="byline-actions"><a class="other-link" href="${htmlText(listPath)}" data-back>返回</a>${!excerpt.chinese && excerpt.body && excerpt.originalBody ? '<span id="body-view-toggle-prefix" hidden><button type="button" class="other-link" id="body-view-toggle" aria-controls="original-body" aria-expanded="false" hidden>显示原文</button></span>' : ""}</span>` : ""}</p>`,
     excerptDetailBody(excerpt, imageBaseUrl, showNavigation, category, page, highlightsEnabled && showNavigation),
     "</article>",
     nav,

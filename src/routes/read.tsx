@@ -62,7 +62,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
               <li key={item.code} lang={item.titleLang}>
                 <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search}>{item.title}</Link>
                 {(item.source || item.author) && <p className="meta" lang="zh-CN">
-                  {[item.source, item.author ? `作者：${item.author}` : ""].filter(Boolean).join(" · ")}
+                  {[item.source, item.author].filter(Boolean).join(" · ")}
                 </p>}
               </li>
             ))}

@@ -50,7 +50,7 @@ export const EINK_STYLE = [
   ".btn{display:block;border:2px solid #000;padding:0.85rem 1rem;margin:0.75rem 0;text-align:center;text-decoration:none;font-weight:700;min-height:3rem;color:#000;background:#fff;}",
   ".btn:focus-visible{outline:3px solid #000;outline-offset:3px;}",
   ".detail-metadata{margin-bottom:0;}",
-  ".article-byline{display:flex;flex-wrap:wrap;align-items:baseline;gap:1rem;}.article-byline .author-row{display:flex;flex-wrap:wrap;gap:1rem;min-width:0;}.article-byline .author-row span{min-width:0;}.article-byline .body-view-action[hidden]{display:none;}",
+  ".article-byline{display:flex;flex-wrap:wrap;align-items:baseline;gap:1rem;}.article-byline .author-row{display:flex;flex-wrap:wrap;gap:1rem;min-width:0;}.article-byline .author-row span{min-width:0;}.article-byline .byline-actions{display:flex;flex-wrap:nowrap;gap:1rem;white-space:nowrap;}",
   ".other{margin:0;}",
   ".other-link{color:inherit;font:inherit;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:0.28em;}",
   ".other-link + .other-link{margin-left:0.35em;}",
