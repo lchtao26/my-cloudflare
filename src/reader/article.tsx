@@ -59,7 +59,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const { item, actions } = data;
   const queryClient = useQueryClient();
   const hash = useLocation({ select: location => location.hash });
-  const { progress, syncError, gutter, mainRef } = useReaderScroll(actions ? item.code : undefined, true, Boolean(hash));
+  const { progress, syncError, remoteProgress, syncToRemote, dismissRemote, gutter, mainRef } = useReaderScroll(actions ? item.code : undefined, true, Boolean(hash));
   const highlights = actions?.highlights ?? [];
   const anchoredMark = highlights.find(mark => hash === `hl-${mark.id}`);
   const hasOriginal = data.original.length > 0;
@@ -223,6 +223,15 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
             : <span className="is-disabled">下一篇</span>}
         </nav>}
       </main>
+      {remoteProgress !== null && (
+        <div className="progress-sync" role="region" aria-label="阅读进度同步">
+          <span>远端已读至 {Math.round(remoteProgress * 100)}%</span>
+          <div className="progress-sync-actions">
+            <button type="button" onClick={syncToRemote}>同步</button>
+            <button type="button" onClick={dismissRemote}>忽略</button>
+          </div>
+        </div>
+      )}
       <div className="progress" aria-hidden="true"><span className="progress-bar" style={{ width: `${progress * 100}%` }} /></div>
       {selected && <ReaderDialog id="body-actions" label="正文操作" mode={selected.highlightId ? "mark" : "body"} dismiss={() => setSelected(null)}>
         <div id="body-preview-scroll"><p id="body-preview">{selected.paragraph.quote}</p></div>

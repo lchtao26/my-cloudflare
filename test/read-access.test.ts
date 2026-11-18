@@ -7,6 +7,7 @@ import { favoriteRequest } from "../src/favorite.ts";
 import { shareCode } from "../src/index.ts";
 import { protectRead, readLogin } from "../src/read-auth.ts";
 import { readProgress } from "../src/read-progress.ts";
+import { shouldOfferRemoteSync } from "../src/reader/reading.ts";
 
 const origin = "https://example.com";
 const code = shareCode(42);
@@ -120,7 +121,7 @@ test("login page reuses the PIN input and submits once when six digits are enter
   assert.equal(submissions, 1);
 });
 
-test("progress is shared by article and rejects invalid or cross-origin writes", async t => {
+test("progress keeps the furthest position and rejects invalid or cross-origin writes", async t => {
   const sql = new DatabaseSync(":memory:");
   t.after(() => sql.close());
   sql.exec(readFileSync("migrations/0004_reading_progress.sql", "utf8"));
@@ -138,6 +139,19 @@ test("progress is shared by article and rejects invalid or cross-origin writes",
   assert.equal((await post('{"progress":0.4}')).status, 204);
   assert.deepEqual(await (await get()).json(), { progress: 0.4 });
   assert.equal((await post('{"progress":0.2}')).status, 204);
-  assert.deepEqual(await (await get()).json(), { progress: 0.2 });
+  assert.deepEqual(await (await get()).json(), { progress: 0.4 });
+  assert.equal((await post('{"progress":0.75}')).status, 204);
+  assert.deepEqual(await (await get()).json(), { progress: 0.75 });
   assert.deepEqual(await (await readProgress(new Request(url), db, shareCode(43))).json(), { progress: null });
+});
+
+test("remote sync is offered only for a lead of at least 2% and 40px", () => {
+  assert.equal(shouldOfferRemoteSync(0.2, null, 4000), false);
+  assert.equal(shouldOfferRemoteSync(0.5, 0.51, 10000), false);
+  assert.equal(shouldOfferRemoteSync(0.25, 0.5, 159), false);
+  assert.equal(shouldOfferRemoteSync(0, 1, 0), false);
+  assert.equal(shouldOfferRemoteSync(0.5, 0.5, 4000), false);
+  assert.equal(shouldOfferRemoteSync(0.8, 0.5, 4000), false);
+  assert.equal(shouldOfferRemoteSync(0.25, 0.5, 160), true);
+  assert.equal(shouldOfferRemoteSync(0.1, 0.8, 4000), true);
 });

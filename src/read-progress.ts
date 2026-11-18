@@ -31,6 +31,10 @@ export async function readProgress(request: Request, db: D1Database | undefined,
   if (request.headers.get("Origin") !== new URL(request.url).origin || request.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") return new Response("Forbidden", { status: 403, headers });
   const body = await readProgressBody(request) as { progress?: unknown } | null;
   if (!body || typeof body.progress !== "number" || !Number.isFinite(body.progress) || body.progress < 0 || body.progress > 1) return new Response("Invalid progress", { status: 400, headers });
-  await db.prepare("INSERT INTO reading_progress (excerpt_number, progress, updated_at) VALUES (?, ?, ?) ON CONFLICT(excerpt_number) DO UPDATE SET progress = excluded.progress, updated_at = excluded.updated_at").bind(id, body.progress, Date.now()).run();
+  await db.prepare(
+    "INSERT INTO reading_progress (excerpt_number, progress, updated_at) VALUES (?, ?, ?) " +
+    "ON CONFLICT(excerpt_number) DO UPDATE SET progress = excluded.progress, updated_at = excluded.updated_at " +
+    "WHERE excluded.progress > reading_progress.progress",
+  ).bind(id, body.progress, Date.now()).run();
   return new Response(null, { status: 204, headers });
 }

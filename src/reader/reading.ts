@@ -1,9 +1,16 @@
 import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
+export function shouldOfferRemoteSync(current: number, remote: number | null, maxScrollPx: number): boolean {
+  return remote !== null && remote - current >= 0.02 && (remote - current) * maxScrollPx >= 40;
+}
+
 export function useReaderScroll(code?: string, enabled = true, hasAnchor = false) {
   const main = useRef<HTMLElement | null>(null);
   const [progress, setProgress] = useState(0);
   const [syncError, setSyncError] = useState(false);
+  const [remoteProgress, setRemoteProgress] = useState<number | null>(null);
+  const syncToRemoteRef = useRef<() => void>(() => {});
+  const dismissRemoteRef = useRef<() => void>(() => {});
 
   const mainRef = useCallback((element: HTMLElement | null) => {
     main.current = element;
@@ -13,23 +20,64 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
     const key = code ? `eink-progress:${code}` : null;
     const maxScroll = () => Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     const ratio = () => maxScroll() > 0 ? Math.min(1, Math.max(0, window.scrollY / maxScroll())) : 1;
-    let ready = false, disposed = false, moved = false, loading = false, dirty = false;
+    let disposed = false, ready = false, loading = false, moved = false;
     let restoredY: number | null = null;
+    let furthestRemote: number | null = null;
+    let fetchedRemote: number | null = null;
+    let dismissedRemote: number | null = null;
+    let offered: number | null = null;
     let pending = Promise.resolve();
     const progressUrl = code ? `/api/progress/${encodeURIComponent(code)}` : "";
     let timer: ReturnType<typeof setTimeout> | undefined;
-    function save(force = false) {
-      if (key && (dirty || force)) {
-        try { localStorage.setItem(key, String(ratio())); } catch { /* Storage can be disabled. */ }
-        if (!ready) { load(); return; }
-        const value = ratio();
-        dirty = false;
-        pending = pending.catch(() => {}).then(async () => {
-          const response = await fetch(progressUrl, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ progress: value }), keepalive: true });
-          if (!response.ok) throw new Error("无法保存阅读进度");
-          if (!disposed) setSyncError(false);
-        }).catch(() => { dirty = true; if (!disposed) setSyncError(true); });
+
+    function readLocal(): number | null {
+      if (!key) return null;
+      try {
+        const local = localStorage.getItem(key);
+        if (local !== null && /^\d/.test(local)) {
+          const value = Number(local);
+          if (Number.isFinite(value) && value >= 0 && value <= 1) return value;
+        }
+      } catch { /* Storage can be disabled. */ }
+      return null;
+    }
+    function writeLocal(value?: number) {
+      if (!key || maxScroll() <= 0) return;
+      try { localStorage.setItem(key, String(value ?? ratio())); } catch { /* Storage can be disabled. */ }
+    }
+    function position(): number | null {
+      return maxScroll() > 0 ? ratio() : readLocal();
+    }
+    function showOffer(current: number) {
+      if (!key || hasAnchor || fetchedRemote === null || (dismissedRemote !== null && fetchedRemote <= dismissedRemote)) {
+        offered = null;
+        setRemoteProgress(null);
+        return;
       }
+      offered = shouldOfferRemoteSync(current, fetchedRemote, maxScroll()) ? fetchedRemote : null;
+      setRemoteProgress(offered);
+    }
+    function post(value: number) {
+      if (!key || !ready || !(furthestRemote === null ? value > 0 : value > furthestRemote)) return;
+      pending = pending.catch(() => {}).then(async () => {
+        if (!(furthestRemote === null ? value > 0 : value > furthestRemote)) return;
+        const response = await fetch(progressUrl, {
+          method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ progress: value }), keepalive: true,
+        });
+        if (!response.ok) throw new Error("无法保存阅读进度");
+        if (furthestRemote === null || value > furthestRemote) furthestRemote = value;
+        if (!disposed) setSyncError(false);
+      }).catch(() => { if (!disposed) setSyncError(true); });
+    }
+    function postIfAhead() {
+      const value = position();
+      if (value !== null) post(value);
+    }
+    function flush() {
+      if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
+      writeLocal();
+      if (ready) postIfAhead();
     }
     function load() {
       if (!key || loading || disposed) return;
@@ -38,48 +86,87 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
         if (!response.ok) throw new Error("无法读取阅读进度");
         const result = await response.json() as { progress: number | null };
         if (disposed) return;
-        let value = result.progress;
-        if (value === null) {
-          try { const local = localStorage.getItem(key); if (local !== null && /^\d/.test(local)) value = Number(local); } catch { /* Storage can be disabled. */ }
+        const remote = typeof result.progress === "number" && Number.isFinite(result.progress) && result.progress >= 0 && result.progress <= 1 ? result.progress : null;
+        if (remote !== null && (fetchedRemote === null || remote > fetchedRemote)) {
+          if (fetchedRemote !== null) dismissedRemote = null;
+          fetchedRemote = remote;
         }
-        if (!moved && !hasAnchor && value !== null && value >= 0 && value <= 1) {
-          restoredY = value * maxScroll();
-          window.scrollTo(0, restoredY);
-        }
+        if (remote !== null && (furthestRemote === null || remote > furthestRemote)) furthestRemote = remote;
         ready = true;
-        setSyncError(false);
-        if (moved || (result.progress === null && value !== null)) save(true);
+        if (!disposed) setSyncError(false);
+        const current = position() ?? 0;
+        showOffer(maxScroll() > 0 ? ratio() : current);
+        if (remote === null ? current > 0 : current > remote) post(current);
       }).catch(() => { if (!disposed) setSyncError(true); }).finally(() => { loading = false; });
     }
-    if (key) load();
-    function update() {
-      setProgress(ratio());
+    function restore() {
+      if (!key || hasAnchor || moved) return;
+      const local = readLocal();
+      if (local === null || maxScroll() <= 0) return;
+      const y = local * maxScroll();
+      if (Math.abs(window.scrollY - y) < 2) { restoredY = null; return; }
+      restoredY = y;
+      window.scrollTo(0, y);
     }
+
+    function update() { setProgress(ratio()); }
     function onScroll() {
       if (restoredY !== null && Math.abs(window.scrollY - restoredY) < 2) { restoredY = null; update(); return; }
       restoredY = null;
-      dirty = true;
-      if (!ready && key) moved = true;
+      moved = true;
+      writeLocal();
       update();
-      if (key && timer === undefined) {
-        timer = setTimeout(() => { timer = undefined; save(); }, 1500);
+      if (offered !== null && !shouldOfferRemoteSync(ratio(), offered, maxScroll())) {
+        offered = null;
+        setRemoteProgress(null);
       }
+      if (!ready || timer !== undefined || maxScroll() <= 0) return;
+      const value = ratio();
+      if (!(furthestRemote === null ? value > 0 : value > furthestRemote)) return;
+      timer = setTimeout(() => { timer = undefined; postIfAhead(); }, 1500);
     }
-    const resize = new ResizeObserver(update);
-    resize.observe(column);
+    function onResize() { restore(); update(); }
+    function onVisibility() {
+      if (document.visibilityState === "hidden") flush();
+      else if (document.visibilityState === "visible") load();
+    }
+    syncToRemoteRef.current = () => {
+      if (offered === null) return;
+      const y = offered * maxScroll();
+      restoredY = y;
+      moved = true;
+      window.scrollTo(0, y);
+      writeLocal(ratio());
+      setProgress(ratio());
+      offered = null;
+      setRemoteProgress(null);
+    };
+    dismissRemoteRef.current = () => {
+      dismissedRemote = fetchedRemote;
+      offered = null;
+      setRemoteProgress(null);
+    };
+    const resize = new ResizeObserver(onResize);
     window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", update);
-    const onPageHide = () => save();
+    window.addEventListener("resize", onResize);
+    const onPageHide = () => flush();
     window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibility);
+    resize.observe(column);
+    restore();
     update();
+    if (key) load();
     return () => {
-      if (key && ready) save();
+      flush();
       disposed = true;
+      syncToRemoteRef.current = () => {};
+      dismissRemoteRef.current = () => {};
       if (main.current === column) main.current = null;
       resize.disconnect();
       window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", update);
+      window.removeEventListener("resize", onResize);
       window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibility);
       if (timer !== undefined) clearTimeout(timer);
     };
   }, [code, enabled, hasAnchor]);
@@ -92,7 +179,9 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
     return event.clientX < bounds.left ? -1 : event.clientX > bounds.right ? 1 : 0;
   }
   return {
-    progress, syncError, mainRef,
+    progress, syncError, remoteProgress, mainRef,
+    syncToRemote: () => syncToRemoteRef.current(),
+    dismissRemote: () => dismissRemoteRef.current(),
     gutter: {
       onPointerDown(event: ReactPointerEvent) {
         tap.current = event.isPrimary && gutterDirection(event)
