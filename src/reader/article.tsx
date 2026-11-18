@@ -242,7 +242,6 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
               <button id="body-explain" type="button" disabled={mutation.isPending} onClick={() => paragraphAction("explain")}>解释</button>
               <button id="body-highlight" type="button" disabled={mutation.isPending} onClick={() => paragraphAction("highlight")}>划线</button>
             </>}
-          <button className="dialog-dismiss" aria-label="关闭正文操作" type="button" onClick={() => setSelected(null)}>关闭</button>
         </div>
       </ReaderDialog>}
       {pinPrompt && <ReaderDialog id="favorite-dialog" label="收藏验证" dismiss={() => setPinPrompt(null)}>
@@ -264,13 +263,11 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
               {mutation.isPending ? "正在匹配原文…" : mutation.error?.message ?? mutation.data?.paragraph ?? "未找到匹配段落。"}
             </p></section>
           </div>
-          <button className="dialog-dismiss" type="button" onClick={() => setResultPanel(null)}>关闭</button>
         </ReaderDialog>
       ) : (
         <ReaderDialog id="explanation-dialog" label="段落解释" dismiss={() => setResultPanel(null)}>
           <div id="explanation-text" aria-live="polite">{mutation.isPending ? "正在解释…"
             : mutation.error?.message ?? (mutation.data?.markdown ? markdown(mutation.data.markdown) : mutation.data?.explanation)}</div>
-          <button className="dialog-dismiss" type="button" onClick={() => setResultPanel(null)}>关闭</button>
         </ReaderDialog>
       ))}
     </div>

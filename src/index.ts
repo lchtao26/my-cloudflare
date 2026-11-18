@@ -3,10 +3,10 @@ import { generateRssFeed, type RssFeed } from "feedsmith";
 import { canonicalText, hashText, resolveAnchor } from "./highlight-anchor.ts";
 import { formatText } from "./format-text.ts";
 import { addReadLater, readLaterFeed } from "./read-later.ts";
-import { favoriteRequest, PIN_FIELD, type FavoriteBindings } from "./favorite.ts";
+import { favoriteRequest, type FavoriteBindings } from "./favorite.ts";
 import { explanationMarkdown } from "./explanation-markdown.ts";
 import { EINK_STYLE } from "./reader-style.ts";
-import { readCategory, readPage, type ReadCategory, type ReaderArticle, type ReaderItem, type ReaderList, type ReaderParagraph, type ResolvedHighlight, READ_CATEGORIES } from "./reader-data.ts";
+import { readCategory, readPage, type ReadCategory, type ReaderArticle, type ReaderItem, type ReaderList, type ReaderParagraph, type ResolvedHighlight } from "./reader-data.ts";
 
 const NOTION_VERSION = "2026-03-11";
 const FEED_TITLE = "书籍推荐";
@@ -71,16 +71,8 @@ function pathCodeId(path: string, prefix: string): number | null {
   return shareCodeId(path.slice(prefix.length + 1));
 }
 
-function categorySearch(category: ReadCategory, page = 1): string {
-  const params = new URLSearchParams();
-  if (category !== "all") params.set("tab", category === "favorites" ? "likes" : category);
-  if (page > 1) params.set("page", String(page));
-  const query = params.toString();
-  return query ? `?${query}` : "";
-}
-
 function categoryFilter(category: ReadCategory): object | undefined {
-  if (category === "later") return { property: "提取来源", select: { equals: "Instapaper" } };
+  if (category === "later") return { property: "提取来源", select: { equals: "稍后阅读" } };
   if (category === "novel") return { property: "提取来源", select: { equals: "epub" } };
   if (category === "weekly" || category === "bunshun") {
     const path = category === "weekly" ? "bunshun.jp/denshiban/articles/" : "bunshun.jp/articles/";
@@ -430,41 +422,6 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
   });
 }
 
-function einkOriginalTitle(excerpt: Excerpt): string {
-  if (!excerpt.originalUrl && (!excerpt.originalTitle || excerpt.originalTitle === excerpt.title)) return "";
-
-  const label = einkText("原文：");
-  const lang = htmlText(excerpt.originalTitle ? excerpt.originalLang : excerpt.titleLang);
-  const title = einkText(excerpt.originalTitle || excerpt.title);
-  return excerpt.originalUrl
-    ? `${label}<a class="metadata-link" lang="${lang}" href="${htmlText(excerpt.originalUrl)}">${title}</a>`
-    : `${label}<span lang="${lang}">${title}</span>`;
-}
-
-function excerptDetailBody(excerpt: Excerpt, imageBaseUrl: string, showActions: boolean, category: ReadCategory, page: number, highlightsEnabled: boolean): string {
-  const query = categorySearch(category, page);
-  const favoriteUrl = `/read/favorite/${excerpt.code}${query}${query ? "&" : "?"}favorite=${excerpt.favorite ? "0" : "1"}`;
-  const details = [
-    einkOriginalTitle(excerpt),
-    excerpt.publisher ? einkText(`来源：${excerpt.publisher}`) : "",
-    excerpt.chapter ? einkText(`章节：${excerpt.chapter}`) : "",
-    einkText(`日期：${excerpt.publishedDate || "—"}`),
-  ].filter(Boolean);
-  const body = excerpt.body ? einkParagraphs(excerpt.body, excerpt.id, imageBaseUrl) : "";
-  const originalBody = showActions && !excerpt.chinese && excerpt.body && excerpt.originalBody
-    ? einkParagraphs(excerpt.originalBody, excerpt.id, imageBaseUrl) : "";
-  const terms = showActions && excerpt.terms ? einkParagraphs(excerpt.terms, excerpt.id, imageBaseUrl) : "";
-  return [
-    ...(body ? [`<div class="excerpt-body"${originalBody ? ' id="translated-body"' : ""}${highlightsEnabled ? ` data-field="${excerpt.chinese ? "original" : "translation"}"` : ""} lang="${htmlText(excerpt.lang)}">\n${body}\n</div>`] : []),
-    ...(originalBody ? [`<div class="excerpt-body" id="original-body"${highlightsEnabled ? ' data-field="original"' : ""} lang="${htmlText(excerpt.originalLang)}" hidden>\n${originalBody}\n</div>`] : []),
-    ...(showActions && (originalBody || highlightsEnabled) ? [`<dialog id="body-actions" aria-label="正文操作" closedby="any" hidden><div id="body-preview-scroll"><p id="body-preview"></p></div><div id="body-actions-buttons"><button type="button" id="body-toggle"${originalBody && highlightsEnabled ? "" : " hidden"}>显示原文</button>${highlightsEnabled ? ' <button type="button" id="body-explain" aria-live="polite" hidden>解释</button>' : ""} <button type="button" id="body-highlight" hidden>划线</button>${highlightsEnabled ? ' <button type="button" id="body-unhighlight">取消划线</button>' : ""}</div></dialog>`] : []),
-    ...(showActions ? [`<p class="other"><button type="button" class="other-link" id="read-later" data-url="/read/add-later/${excerpt.code}"><span role="status">待读</span></button> <a class="other-link" id="favorite-link" data-favorite="${excerpt.favorite ? "true" : "false"}" href="${htmlText(favoriteUrl)}"><span id="favorite-status" role="status">${excerpt.favorite ? "取消收藏" : "收藏"}</span></a> <a class="other-link" href="${htmlText(excerpt.link)}">管理</a> <button type="button" class="other-link" id="share-copy" data-path="${htmlText(`${SHORT_SHARE_PREFIX}/${excerpt.code}`)}"><span id="share-status" role="status">分享</span></button></p><p id="favorite-message" role="status"></p><dialog id="favorite-dialog" aria-label="收藏验证"><form id="favorite-form" method="post" action="${htmlText(favoriteUrl)}">${PIN_FIELD}<p id="favorite-error" role="alert"></p></form><form method="dialog"><button type="submit" class="favorite-close">取消</button></form></dialog>`] : []),
-    "<hr />",
-    `<p class="detail-metadata">${details.join("<br />\n")}</p>`,
-    ...(terms ? ["<hr />", `<p>${einkText("名词解释")}</p>`, highlightsEnabled ? `<div class="excerpt-body" data-field="terms">\n${terms}\n</div>` : terms] : []),
-  ].join("\n");
-}
-
 function einkDocument(
   title: string,
   body: string,
@@ -491,85 +448,6 @@ function einkDocument(
   ].join("\n");
 }
 
-const EINK_LIST_PAGING = [
-  "<script>",
-  "(function(){",
-  "var main=document.querySelector('main');",
-  "if(!main)return;",
-  "function direction(x,target){",
-  "if(target!==document.body&&target!==document.documentElement)return 0;",
-  "var bounds=main.getBoundingClientRect();",
-  "return x<bounds.left?-1:x>bounds.right?1:0;",
-  "}",
-  "function hasSelection(){",
-  "var selection=typeof window.getSelection==='function'&&window.getSelection();",
-  "return !!(selection&&selection.rangeCount&&!selection.isCollapsed);",
-  "}",
-  "function go(dir){window.scrollBy(0,dir*Math.max(80,window.innerHeight));}",
-  "var start=null,ignoreClickUntil=0,selectionAtStart=false;",
-  "document.addEventListener('pointerdown',function(){selectionAtStart=hasSelection();},true);",
-  "document.addEventListener('touchstart',function(e){",
-  "selectionAtStart=hasSelection();",
-  "if(e.touches.length!==1){start=null;return;}",
-  "var touch=e.touches[0];",
-  "start={x:touch.clientX,y:touch.clientY,time:Date.now(),selected:selectionAtStart,dir:direction(touch.clientX,e.target)};",
-  "},true);",
-  "document.addEventListener('touchmove',function(e){",
-  "if(!start||e.touches.length!==1){start=null;return;}",
-  "var touch=e.touches[0];",
-  "if(Math.abs(touch.clientX-start.x)>15||Math.abs(touch.clientY-start.y)>15)start=null;",
-  "},true);",
-  "document.addEventListener('touchcancel',function(){start=null;ignoreClickUntil=Date.now()+800;},true);",
-  "document.addEventListener('touchend',function(e){",
-  "ignoreClickUntil=Date.now()+800;",
-  "var tap=start;start=null;",
-  "if(!tap||!tap.dir||e.touches.length||e.changedTouches.length!==1||Date.now()-tap.time>700)return;",
-  "var touch=e.changedTouches[0];",
-  "if(Math.abs(touch.clientX-tap.x)>15||Math.abs(touch.clientY-tap.y)>15)return;",
-  "if(e.defaultPrevented||tap.selected||hasSelection()||direction(touch.clientX,e.target)!==tap.dir)return;",
-  "if(e.cancelable)e.preventDefault();",
-  "go(tap.dir);",
-  "},true);",
-  "document.addEventListener('click',function(e){",
-  "var selected=selectionAtStart;selectionAtStart=false;",
-  "if(Date.now()<ignoreClickUntil||e.defaultPrevented||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||(typeof e.button==='number'&&e.button!==0)||selected||hasSelection())return;",
-  "if(e.pointerType==='mouse'||(window.matchMedia&&window.matchMedia('(hover: hover) and (pointer: fine)').matches))return;",
-  "var dir=direction(e.clientX,e.target);",
-  "if(dir)go(dir);",
-  "},false);",
-  "var more=document.getElementById('load-more');",
-  "if(more)more.addEventListener('click',function(e){if(more.getAttribute('aria-disabled')==='true'){e.preventDefault();return;}more.setAttribute('aria-disabled','true');more.textContent='正在加载';},false);",
-  "})();",
-  "</script>",
-].join("\n");
-
-export function renderEinkList(excerpts: Excerpt[], listPath: string, category: ReadCategory = "all", page = 1, hasMore = false): string {
-  const items = excerpts.map((excerpt) => {
-    const href = htmlText(`${READ_DETAIL_PREFIX}/${excerpt.code}${categorySearch(category, page)}`);
-    const meta = [
-      excerpt.sourceTitle ? `<span class="source">${einkText(excerpt.sourceTitle)}</span>` : "",
-      excerpt.author ? einkText(excerpt.author) : "",
-    ].filter(Boolean).join(" · ");
-    return [
-      `<li lang="${htmlText(excerpt.titleLang)}">`,
-      `<a class="item-link" href="${href}">${einkText(excerpt.title)}`,
-      ...(meta ? [`<p class="meta" lang="zh-CN">${meta}</p>`] : []),
-      "</a>",
-      "</li>",
-    ].join("");
-  }).join("\n");
-  return einkDocument("阅读节选", [
-    `<h1 class="visually-hidden">${displayText("阅读节选")}</h1>`,
-    `<nav class="categories" aria-label="阅读分类">${READ_CATEGORIES.map((item) =>
-      `<a${item.id === "later" ? ' class="category-later"' : ""} href="${htmlText(`${listPath}${categorySearch(item.id)}`)}"${item.id === category ? ' aria-current="page"' : ""}>${item.label}</a>`
-    ).join("")}</nav>`,
-    items ? `<ul>\n${items}\n</ul>` : `<p>${displayText("暂无条目")}</p>`,
-    ...(hasMore ? [
-      `<div class="list-actions" id="list-actions"><a class="btn" id="load-more" href="${htmlText(`${listPath}${categorySearch(category, page + 1)}`)}">加载更多</a></div>`,
-    ] : []),
-  ].join("\n"), false, EINK_LIST_PAGING, "read-list");
-}
-
 export type EinkNeighbors = {
   prevCode: string | null;
   nextCode: string | null;
@@ -582,253 +460,6 @@ export function neighborsFor(excerpts: Excerpt[], code: string): EinkNeighbors |
     prevCode: index > 0 ? excerpts[index - 1]!.code : null,
     nextCode: index < excerpts.length - 1 ? excerpts[index + 1]!.code : null,
   };
-}
-
-function einkNav(listPath: string, neighbors: EinkNeighbors, category: ReadCategory, page: number, hidden = false): string {
-  const prev = neighbors.prevCode
-    ? `<a href="${htmlText(`${READ_DETAIL_PREFIX}/${neighbors.prevCode}${categorySearch(category, page)}`)}">${einkText("上一篇")}</a>`
-    : `<span class="is-disabled">${einkText("上一篇")}</span>`;
-  const next = neighbors.nextCode
-    ? `<a href="${htmlText(`${READ_DETAIL_PREFIX}/${neighbors.nextCode}${categorySearch(category, page)}`)}">${einkText("下一篇")}</a>`
-    : `<span class="is-disabled">${einkText("下一篇")}</span>`;
-  const back = `<a href="${htmlText(listPath)}" id="back-to-list" data-back>${einkText("返回")}</a>`;
-  return `<nav class="nav-row"${hidden ? " hidden" : ""}>\n${prev}\n${back}\n${next}\n</nav>`;
-}
-
-const EINK_DETAIL_BACK = `<script>(function(){
-  var links=document.querySelectorAll('[data-back]');
-  for(var i=0;i<links.length;i++)links[i].addEventListener('click',function(event){
-    var link=event.currentTarget;
-    if(event.defaultPrevented||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||(typeof event.button==='number'&&event.button!==0))return;
-    if((link.target&&link.target!=='_self')||link.hasAttribute('download'))return;
-    if(!window.history||typeof window.history.back!=='function'||window.history.length<=1)return;
-    try{window.history.back();event.preventDefault();}catch(err){}
-  },false);
-})();</script>`;
-
-// Detail pages: blank-margin tap paging, bottom progress bar, and localStorage resume.
-// Links and buttons keep their default click behavior.
-const EINK_DETAIL_CHROME = [
-  `<div class="progress" aria-hidden="true"><span class="progress-bar" id="progress-bar"></span></div>`,
-  "<script>",
-  "(function(){",
-  "function step(){return Math.max(80,window.innerHeight);}",
-  "var main=document.querySelector('main');",
-  "function resultDialogVisible(){var a=document.getElementById('explanation-dialog'),b=document.getElementById('original-match-dialog');return !!((a&&!a.hidden)||(b&&!b.hidden));}",
-  "function direction(x,target){",
-  "if(resultDialogVisible()||!main||(target!==document.body&&target!==document.documentElement))return 0;",
-  "var bounds=main.getBoundingClientRect();",
-  "return x<bounds.left?-1:x>bounds.right?1:0;",
-  "}",
-  "function pageKey(){var m=location.pathname.match(/^\\/r\\/([0-9A-Za-z]{6})$/);return m?'eink-progress:'+m[1]:null;}",
-  "function scrollMax(){return document.documentElement.scrollHeight-window.innerHeight;}",
-  "function scrollRatio(){var max=scrollMax();return max>0?Math.min(1,Math.max(0,(window.scrollY||window.pageYOffset||0)/max)):1;}",
-  "function progress(){",
-  "var bar=document.getElementById('progress-bar');",
-  "if(bar)bar.style.width=(scrollRatio()*100)+'%';",
-  "}",
-  "var saveTimer=0;",
-  "function saveNow(){",
-  "var key=pageKey();",
-  "if(!key)return;",
-  "try{localStorage.setItem(key,String(scrollRatio()));}catch(err){}",
-  "}",
-  // Manual scroll can fire dozens of events; throttle localStorage writes.
-  "function saveSoon(){if(saveTimer)return;saveTimer=setTimeout(function(){saveTimer=0;saveNow();},400);}",
-  "function restore(){",
-  "if((location.hash||'').indexOf('#hl-')===0)return;",
-  "var key=pageKey();",
-  "if(!key)return;",
-  "var raw;",
-  "try{raw=localStorage.getItem(key);}catch(err){return;}",
-  "if(raw==null)return;",
-  "var p=parseFloat(raw);",
-  "if(!(p>=0&&p<=1))return;",
-  "var max=scrollMax();",
-  "if(max>0)window.scrollTo(0,p*max);",
-  "}",
-  "var shareCopy=document.getElementById('share-copy');",
-  "var translatedBody=document.getElementById('translated-body');",
-  "var originalBody=document.getElementById('original-body');",
-  "var bodyViewToggle=document.getElementById('body-view-toggle'),bodyViewTogglePrefix=document.getElementById('body-view-toggle-prefix');",
-  "function syncBodyViewToggle(){if(!bodyViewToggle||!originalBody)return;bodyViewToggle.hidden=false;bodyViewToggle.textContent=originalBody.hidden?'显示原文':'显示翻译';bodyViewToggle.setAttribute('aria-expanded',originalBody.hidden?'false':'true');}",
-  "if(bodyViewToggle&&translatedBody&&originalBody){bodyViewToggle.addEventListener('click',function(){var showOriginal=originalBody.hidden;originalBody.hidden=!showOriginal;translatedBody.hidden=showOriginal;syncBodyViewToggle();progress();saveSoon();});window.syncBodyViewToggle=syncBodyViewToggle;syncBodyViewToggle();if(bodyViewTogglePrefix)bodyViewTogglePrefix.hidden=false;}",
-  "var actionPreview=document.getElementById('body-preview'),actions=document.getElementById('body-actions'),toggle=document.getElementById('body-toggle'),highlightAction=document.getElementById('body-highlight'),explainAction=document.getElementById('body-explain'),unhighlightAction=document.getElementById('body-unhighlight');",
-  "if(actions&&document.querySelectorAll){",
-  "var tapCount=0,lastTap=0,lastParagraph=null,touchTap=null,mouseTap=null,ignoreBodyClickUntil=0,actionParagraph=null,actionBody=null,actionHighlight=null,actionFocus=null,openingEvent=null,ignoreActionUntil=0,oldPaddingBottom=null,dismissTouch=false,suppressClickUntil=0;",
-  "function resetTaps(){tapCount=0;lastTap=0;lastParagraph=null;}",
-  "function paragraph(target,body){while(target&&target!==body){if(/^(A|BUTTON|INPUT|SELECT|TEXTAREA|IMG)$/.test(target.tagName||''))return null;if(target.tagName==='P')return target;target=target.parentNode;}return null;}",
-  "function scrollY(){return window.scrollY||window.pageYOffset||0;}",
-  "function highlightMark(target,body){while(target&&target!==body){if(target.tagName==='MARK'&&target.className==='hl'&&target.getAttribute&&target.getAttribute('data-hl'))return target;target=target.parentNode;}return null;}",
-  "function startTap(point,target,body){return {x:point.clientX,y:point.clientY,scroll:scrollY(),time:Date.now(),paragraph:paragraph(target,body),mark:highlightMark(target,body),selected:hasSelection()};}",
-  "function validTap(start,point){return start&&(start.paragraph||start.mark)&&Date.now()-start.time<=500&&Math.abs(point.clientX-start.x)<=10&&Math.abs(point.clientY-start.y)<=10&&Math.abs(scrollY()-start.scroll)<=5;}",
-  "function closeActions(){if(actions.open&&actions.close)actions.close();actions.hidden=true;actionHighlight=null;if(actions.removeAttribute)actions.removeAttribute('data-mode');if(document.body&&oldPaddingBottom!==null){document.body.style.paddingBottom=oldPaddingBottom;oldPaddingBottom=null;}if(actionFocus&&actionFocus.focus)actionFocus.focus();}",
-  "function openActions(mode,event){if(actionPreview){actionPreview.textContent=actionParagraph&&actionParagraph.textContent||'';if(actionPreview.parentNode)actionPreview.parentNode.scrollTop=0;}if(actions.setAttribute)actions.setAttribute('data-mode',mode);openingEvent=event;actions.hidden=false;if(typeof actions.showModal==='function'&&!actions.open)actions.showModal();else if(!actions.open&&actions.setAttribute)actions.setAttribute('open','');if(document.body&&document.body.style){oldPaddingBottom=document.body.style.paddingBottom;document.body.style.paddingBottom=(actions.offsetHeight+40)+'px';}if(window.getSelection){var selection=window.getSelection();if(selection&&selection.removeAllRanges)selection.removeAllRanges();}if(mode==='mark'){if(unhighlightAction)unhighlightAction.focus();}else if(toggle&&!toggle.hidden)toggle.focus();else if(highlightAction&&!highlightAction.hidden)highlightAction.focus();}",
-  "function countTap(start,body,event){var now=Date.now();tapCount=lastTap&&now-lastTap<=500&&lastParagraph===start.paragraph?tapCount+1:1;lastTap=now;lastParagraph=start.paragraph;if(tapCount===2){resetTaps();actionParagraph=start.paragraph;actionBody=body;actionFocus=document.activeElement;if(toggle)toggle.hidden=!translatedBody||body!==translatedBody||!window.performParagraphAction;openActions('body',event);}}",
-  "function markTap(start){return !!(start.mark&&!start.selected&&!hasSelection()&&window.removeHighlight);}",
-  "function openMark(start,body,event){resetTaps();actionParagraph=start.paragraph;actionBody=body;actionHighlight=start.mark.getAttribute('data-hl');actionFocus=document.activeElement;openActions('mark',event);}",
-  "if(toggle)toggle.addEventListener('click',function(){if(Date.now()<ignoreActionUntil||toggle.disabled||!window.performParagraphAction)return;toggle.disabled=true;window.performParagraphAction(actionParagraph,actionBody,'original',function(){toggle.disabled=false;if(!actions.hidden)closeActions();});});",
-  "if(highlightAction)highlightAction.addEventListener('click',function(){if(Date.now()<ignoreActionUntil)return;closeActions();if(window.performParagraphAction)window.performParagraphAction(actionParagraph,actionBody,'highlight');});",
-  "if(explainAction)explainAction.addEventListener('click',function(){if(Date.now()<ignoreActionUntil||explainAction.disabled||!window.performParagraphAction)return;explainAction.disabled=true;explainAction.textContent='请求中';window.performParagraphAction(actionParagraph,actionBody,'explain',function(close){explainAction.disabled=false;explainAction.textContent='解释';if(close!==false&&!actions.hidden)closeActions();});});",
-  "if(unhighlightAction)unhighlightAction.addEventListener('click',function(){if(Date.now()<ignoreActionUntil)return;var id=actionHighlight;closeActions();if(window.removeHighlight)window.removeHighlight(id);});",
-  "function outside(e){var pinDialog=document.getElementById('favorite-dialog');if(pinDialog&&pinDialog.open)return false;if(!actions.contains(e.target))return true;if(e.target!==actions)return false;var r=actions.getBoundingClientRect(),p=e.touches&&e.touches.length?e.touches[0]:e;return p.clientX<r.left||p.clientX>r.right||p.clientY<r.top||p.clientY>r.bottom;}",
-  "function stop(e){if(e.cancelable)e.preventDefault();if(e.stopImmediatePropagation)e.stopImmediatePropagation();else if(e.stopPropagation)e.stopPropagation();}",
-  "document.addEventListener('touchstart',function(e){if(!actions.hidden&&outside(e)){dismissTouch=true;closeActions();stop(e);}},true);",
-  "document.addEventListener('touchend',function(e){if(dismissTouch){dismissTouch=false;suppressClickUntil=Date.now()+800;stop(e);}},true);",
-  "document.addEventListener('mousedown',function(e){if(!actions.hidden&&outside(e)){suppressClickUntil=Date.now()+800;closeActions();stop(e);}},true);",
-  "document.addEventListener('click',function(e){if(Date.now()<suppressClickUntil){suppressClickUntil=0;stop(e);return;}if(!actions.hidden&&e!==openingEvent&&outside(e)){closeActions();stop(e);}},true);",
-  "actions.addEventListener('close',function(){if(!actions.hidden)closeActions();});actions.addEventListener('cancel',function(e){e.preventDefault();closeActions();});actions.addEventListener('keydown',function(e){if(e.key==='Escape'||e.keyCode===27){e.preventDefault();closeActions();}});",
-  "function bindBody(body){",
-  "body.addEventListener('touchstart',function(e){if(resultDialogVisible()||e.touches.length!==1){touchTap=null;resetTaps();return;}touchTap=startTap(e.touches[0],e.target,body);},false);",
-  "body.addEventListener('touchmove',function(e){if(!touchTap||e.touches.length!==1||!validTap(touchTap,e.touches[0])){touchTap=null;resetTaps();}},false);",
-  "body.addEventListener('touchcancel',function(){touchTap=null;resetTaps();ignoreBodyClickUntil=Date.now()+800;},false);",
-  "body.addEventListener('touchend',function(e){ignoreBodyClickUntil=Date.now()+800;var start=touchTap;touchTap=null;if(e.touches.length||e.changedTouches.length!==1||!validTap(start,e.changedTouches[0])){resetTaps();return;}if(markTap(start)){ignoreActionUntil=Date.now()+600;if(e.cancelable)e.preventDefault();openMark(start,body,e);return;}if(tapCount===1&&lastParagraph===start.paragraph&&Date.now()-lastTap<=500){ignoreActionUntil=Date.now()+600;if(e.cancelable)e.preventDefault();}countTap(start,body,e);},false);",
-  "body.addEventListener('mousedown',function(e){if(resultDialogVisible()||Date.now()<ignoreBodyClickUntil||e.button!==0||e.ctrlKey||e.metaKey||e.altKey||e.shiftKey){mouseTap=null;return;}mouseTap=startTap(e,e.target,body);},false);",
-  "body.addEventListener('click',function(e){if(Date.now()<ignoreBodyClickUntil)return;var start=mouseTap;mouseTap=null;if(e.defaultPrevented||!validTap(start,e)){resetTaps();return;}if(markTap(start)){openMark(start,body,e);return;}countTap(start,body,e);},false);",
-  "}",
-  "var bodies=document.querySelectorAll('.excerpt-body');for(var i=0;i<bodies.length;i++)bindBody(bodies[i]);",
-  "window.addEventListener('scroll',resetTaps,false);",
-  "}",
-  "var shareStatus=document.getElementById('share-status');",
-  "if(shareCopy)shareCopy.addEventListener('click',function(){",
-  "var link=location.origin+shareCopy.getAttribute('data-path');",
-  "function fallback(){",
-  "var input=document.createElement('textarea');input.value=link;input.style.position='fixed';input.style.left='-9999px';document.body.appendChild(input);input.select();",
-  "var copied=false;try{copied=document.execCommand('copy');}catch(err){}document.body.removeChild(input);",
-  "if(shareStatus)shareStatus.textContent=copied?'已复制':'复制失败';",
-  "}",
-  "if(window.navigator&&window.navigator.clipboard&&window.navigator.clipboard.writeText){",
-  "window.navigator.clipboard.writeText(link).then(function(){if(shareStatus)shareStatus.textContent='已复制';},fallback);",
-  "}else fallback();",
-  "},false);",
-  "function go(dir){window.scrollBy(0,dir*step());progress();saveNow();}",
-  "function hasSelection(){",
-  "var selection=typeof window.getSelection==='function'&&window.getSelection();",
-  "return !!(selection&&selection.rangeCount&&!selection.isCollapsed);",
-  "}",
-  // The browser can clear the selection between the start of a tap and its click.
-  "var selectionAtTapStart=false;",
-  "document.addEventListener('pointerdown',function(){",
-  "selectionAtTapStart=hasSelection();",
-  "},true);",
-  "var touchStart=null,ignoreClickUntil=0;",
-  "document.addEventListener('touchstart',function(e){",
-  "selectionAtTapStart=hasSelection();",
-  "if(e.touches.length!==1){touchStart=null;return;}",
-  "var touch=e.touches[0];",
-  "touchStart={x:touch.clientX,y:touch.clientY,time:Date.now(),selected:selectionAtTapStart,dir:direction(touch.clientX,e.target)};",
-  "},true);",
-  "document.addEventListener('touchmove',function(e){",
-  "if(!touchStart||e.touches.length!==1){touchStart=null;return;}",
-  "var touch=e.touches[0];",
-  "if(Math.abs(touch.clientX-touchStart.x)>15||Math.abs(touch.clientY-touchStart.y)>15)touchStart=null;",
-  "},true);",
-  "document.addEventListener('touchcancel',function(){touchStart=null;ignoreClickUntil=Date.now()+800;},true);",
-  "document.addEventListener('touchend',function(e){",
-  "ignoreClickUntil=Date.now()+800;",
-  "var start=touchStart;touchStart=null;",
-  "if(!start||!start.dir||e.touches.length||e.changedTouches.length!==1||Date.now()-start.time>700)return;",
-  "var touch=e.changedTouches[0];",
-  "if(Math.abs(touch.clientX-start.x)>15||Math.abs(touch.clientY-start.y)>15)return;",
-  "if(e.defaultPrevented||start.selected||hasSelection()||direction(touch.clientX,e.target)!==start.dir)return;",
-  "if(e.cancelable)e.preventDefault();",
-  "go(start.dir);",
-  "},true);",
-  "document.addEventListener('click',function(e){",
-  "var hadSelection=selectionAtTapStart;",
-  "selectionAtTapStart=false;",
-  "if(Date.now()<ignoreClickUntil||e.defaultPrevented||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||(typeof e.button==='number'&&e.button!==0))return;",
-  "if(e.pointerType==='mouse'||(window.matchMedia&&window.matchMedia('(hover: hover) and (pointer: fine)').matches))return;",
-  "if(hadSelection||hasSelection())return;",
-  "var dir=direction(e.clientX,e.target);",
-  "if(dir)go(dir);",
-  "},false);",
-  "window.addEventListener('scroll',function(){progress();saveSoon();},false);",
-  "window.addEventListener('pagehide',saveNow,false);",
-  "window.addEventListener('load',function(){restore();progress();},false);",
-  "restore();",
-  "progress();",
-  "})();",
-  "</script>",
-].join("\n");
-
-const EINK_FAVORITE_CHROME = `<script>
-(function(){
-  var link=document.getElementById('favorite-link');
-  var dialog=document.getElementById('favorite-dialog');
-  var form=document.getElementById('favorite-form');
-  var pin=document.getElementById('pin');
-  var error=document.getElementById('favorite-error');
-  var message=document.getElementById('favorite-message');
-  var status=document.getElementById('favorite-status');
-  if(!link||!dialog||typeof dialog.showModal!=='function'||typeof window.fetch!=='function'||typeof URLSearchParams==='undefined')return;
-  var csrf='',busy=false,slots=pin.nextElementSibling.children,pinContinuation=null,pinCancel=null;
-  function mark(){var active=Math.min(pin.selectionStart||0,5);for(var i=0;i<slots.length;i++){slots[i].classList.toggle('active',i===active);slots[i].classList.toggle('filled',i<pin.value.length)}}
-  function showPin(message){error.textContent=message||'';pin.value='';mark();if(!dialog.open)dialog.showModal();pin.focus()}
-  function label(){status.textContent=link.dataset.favorite==='true'?'取消收藏':'收藏'}
-  function setBusy(value){busy=value;if(value)link.setAttribute('aria-disabled','true');else link.removeAttribute('aria-disabled')}
-  function fail(text){if(dialog.open){error.textContent=text;pin.value='';mark();pin.focus()}else{label();message.textContent=text}}
-  function post(value){
-    var data=new URLSearchParams();data.set('csrf',csrf);data.set('favorite',link.dataset.favorite==='true'?'0':'1');if(value)data.set('pin',value);
-    return fetch(link.href,{method:'POST',headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded'},body:data.toString(),credentials:'same-origin'})
-      .then(function(response){return response.json().then(function(result){return {status:response.status,data:result}})})
-      .then(function(result){
-        if(result.status===200&&result.data.ok){if(dialog.open)dialog.close();pin.value='';link.dataset.favorite=result.data.favorite?'true':'false';var next=new URL(link.href);next.searchParams.set('favorite',result.data.favorite?'0':'1');link.href=next.toString();form.action=link.href;label();return}
-        if(result.data.requiresPin){if(value&&!dialog.open){label();return}showPin(result.data.error);return}
-        fail(result.status===403&&dialog.open?'验证已过期，请关闭后重试。':result.data.error||'收藏失败，请重试。');
-      });
-  }
-  function finish(){setBusy(false);pin.disabled=false;if(dialog.open)pin.focus()}
-  link.addEventListener('click',function(event){
-    if(busy){event.preventDefault();return}
-    if(event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
-    event.preventDefault();setBusy(true);message.textContent='';
-    fetch(link.href,{headers:{'Accept':'application/json'},credentials:'same-origin',cache:'no-store'})
-      .then(function(response){return response.json().then(function(result){if(!response.ok)throw new Error(result.error||'收藏失败，请重试。');return result})})
-      .then(function(result){csrf=result.csrf;if(result.authenticated)return post();showPin();label()})
-      .catch(function(err){fail(err.message||'收藏失败，请重试。')}).then(finish);
-  });
-  function submit(){if(busy||!dialog.open||!(/^[0-9]{6}$/).test(pin.value))return;setBusy(true);error.textContent='';var value=pin.value;pin.disabled=true;if(pinContinuation){var resume=pinContinuation;pinContinuation=null;Promise.resolve().then(function(){return resume(value)}).then(function(){if(dialog.open)dialog.close()}).catch(function(err){if(dialog.open)pinContinuation=resume;error.textContent=err.message||'保存失败，请重试。';pin.value='';mark()}).then(finish);return}post(value).catch(function(){fail('收藏失败，请重试。')}).then(finish)}
-  window.promptForReadPin=function(resume,cancel){pinContinuation=resume;pinCancel=cancel||null;showPin('')};
-  window.confirmReadPin=function(){pinCancel=null};
-  form.addEventListener('submit',function(event){event.preventDefault();submit()});
-  pin.addEventListener('input',function(event){mark();if(!event.isComposing)submit()});
-  pin.addEventListener('compositionend',function(){mark();submit()});pin.addEventListener('change',function(){mark();submit()});
-  pin.addEventListener('focus',mark);pin.addEventListener('click',mark);pin.addEventListener('keyup',mark);pin.addEventListener('select',mark);
-  dialog.addEventListener('close',function(){var cancel=pinCancel;pinCancel=null;pinContinuation=null;pin.value='';mark();error.textContent='';label();if(cancel)cancel()});
-  var later=document.getElementById('read-later');
-  if(later)later.addEventListener('click',function(){
-    var label=later.firstElementChild;later.disabled=true;label.textContent='正在添加';message.textContent='';
-    function reset(text){later.disabled=false;label.textContent='待读';if(text)message.textContent=text}
-    var token='';
-    function send(value){var data=new URLSearchParams();data.set('csrf',token);if(value)data.set('pin',value);return fetch(later.dataset.url,{method:'POST',headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded'},body:data.toString(),credentials:'same-origin'}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'加入待读失败，请重试。');return d})}).then(function(){label.textContent='已加待读';window.confirmReadPin()})}
-    fetch(later.dataset.url,{headers:{'Accept':'application/json'},credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'加入待读失败，请重试。');return d})}).then(function(d){token=d.csrf;if(d.authenticated)return send();window.promptForReadPin(send,function(){reset('')})}).catch(function(e){reset(e.message||'加入待读失败，请重试。')});
-  });
-  mark();pin.parentElement.classList.add('pin-enhanced');
-})();
-</script>`;
-
-export function renderEinkDetail(
-  excerpt: Excerpt,
-  listPath: string,
-  imageBaseUrl: string,
-  neighbors?: EinkNeighbors,
-  category: ReadCategory = "all",
-  page = 1,
-  showNavigation = true,
-  highlights: ResolvedHighlight[] = [],
-  highlightsEnabled = false,
-): string {
-  const navNeighbors = neighbors ?? { prevCode: null, nextCode: null };
-  const nav = einkNav(listPath, navNeighbors, category, page, !showNavigation);
-  return einkDocument(excerpt.title, [
-    "<article>",
-    `<h1 lang="${htmlText(excerpt.titleLang)}">${einkText(excerpt.title)}</h1>`,
-    `<p class="article-byline"><span class="author-row"><span>${einkText(excerpt.publishedDate || "—")}</span>${excerpt.author ? `<span>${einkText(excerpt.author)}</span>` : ""}</span>${showNavigation ? `<span class="byline-actions"><a class="other-link" href="${htmlText(listPath)}" data-back>返回</a>${!excerpt.chinese && excerpt.body && excerpt.originalBody ? '<span id="body-view-toggle-prefix" hidden><button type="button" class="other-link" id="body-view-toggle" aria-controls="original-body" aria-expanded="false" hidden>显示原文</button></span>' : ""}</span>` : ""}</p>`,
-    excerptDetailBody(excerpt, imageBaseUrl, showNavigation, category, page, highlightsEnabled && showNavigation),
-    "</article>",
-    nav,
-  ].join("\n"), true, EINK_DETAIL_CHROME + (showNavigation ? EINK_DETAIL_BACK + EINK_FAVORITE_CHROME + (highlightsEnabled ? highlightChrome(excerpt.code, highlights) : "") : ""), "detail");
 }
 
 type HighlightRow = {
@@ -860,65 +491,6 @@ async function resolveHighlights(excerpt: Excerpt, rows: HighlightRow[]): Promis
 
 function highlightError(message: string, status: number): Response {
   return Response.json({ error: message }, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
-}
-
-function highlightChrome(code: string, highlights: ResolvedHighlight[]): string {
-  const json = JSON.stringify(highlights).replaceAll("<", "\\u003c");
-  return `<dialog id="highlight-error" aria-label="划线失败" closedby="any" hidden><p id="highlight-error-message" role="alert"></p><div><button type="button" id="highlight-error-close">取消</button><button type="button" id="highlight-error-retry">划线</button></div></dialog>
-<dialog id="explanation-dialog" aria-label="解释" closedby="any" hidden><div id="explanation-text" role="status"></div></dialog>
-<dialog id="original-match-dialog" aria-label="原文匹配结果" closedby="any" hidden><div id="original-match-content"><section><h2>正文</h2><p id="original-match-current"></p></section><section><h2>原文</h2><p id="original-match-text" role="status"></p></section></div></dialog>
-<script>(function(){
-var rows=${json}, dialog=document.getElementById('favorite-dialog');
-function canon(s){return s.replace(/\\s/g,'')}
-function nodes(body){var a=[];function walk(n){for(var child=n.firstChild;child;child=child.nextSibling){if(child.nodeType===3)a.push(child);else walk(child)}}walk(body);return a}
-function paint(row){if(document.getElementById('hl-'+row.id))return;var body=document.querySelector('.excerpt-body[data-field="'+row.field+'"]');if(!body)return;var list=nodes(body),pos=0,first=null;list.forEach(function(n){var value=n.nodeValue||'', begin=-1,end=-1;for(var i=0;i<value.length;i++){if(!/\\s/.test(value.charAt(i))){if(pos>=row.start&&pos<row.end){if(begin<0)begin=i;end=i+1}pos++}}if(begin>=0){var selected=n.splitText(begin);selected.splitText(end-begin);var mark=document.createElement('mark');mark.className='hl';mark.setAttribute('data-hl',row.id);selected.parentNode.insertBefore(mark,selected);mark.appendChild(selected);if(!first)first=mark}});if(first){var anchor=document.createElement('span');anchor.id='hl-'+row.id;first.parentNode.insertBefore(anchor,first)}}
-rows.forEach(paint);
-function jump(){if(!/^#hl-[0-9a-f-]+$/i.test(location.hash))return;var target=document.getElementById(location.hash.slice(1));if(!target)return;var body=target;while(body&&(' '+(body.className||'')+' ').indexOf(' excerpt-body ')<0)body=body.parentNode;if(body&&body.hidden){var other=document.querySelector('.excerpt-body:not([hidden])');if(other)other.hidden=true;body.hidden=false;if(window.syncBodyViewToggle)window.syncBodyViewToggle()}if(typeof target.scrollIntoView==='function'){try{target.scrollIntoView({block:'center'})}catch(e){target.scrollIntoView()}}}
-window.addEventListener('load',jump);jump();
-if(!window.fetch||!dialog||typeof URLSearchParams==='undefined')return;
-var csrf='',busy=false,errorDialog=document.getElementById('highlight-error'),errorMessage=document.getElementById('highlight-error-message'),errorRetry=document.getElementById('highlight-error-retry'),errorClose=document.getElementById('highlight-error-close'),retryAction=null;
-function closeError(){retryAction=null;if(!errorDialog)return;if(errorDialog.open&&errorDialog.close)errorDialog.close();else{if(errorDialog.removeAttribute)errorDialog.removeAttribute('open');errorDialog.open=false;}errorDialog.hidden=true;}
-function showError(text,label,again){busy=false;if(!errorDialog||!errorMessage||!errorRetry)return;errorMessage.textContent=text;errorRetry.textContent=label;retryAction=again;errorDialog.hidden=false;if(typeof errorDialog.showModal==='function'&&!errorDialog.open)errorDialog.showModal();else if(errorDialog.setAttribute)errorDialog.setAttribute('open','');if(errorRetry.focus)errorRetry.focus();}
-if(errorDialog&&errorRetry&&errorClose){errorRetry.addEventListener('click',function(){var again=retryAction;closeError();if(again)again();});errorClose.addEventListener('click',closeError);errorDialog.addEventListener('cancel',function(e){e.preventDefault();closeError();});errorDialog.addEventListener('close',function(){if(!errorDialog.hidden)closeError();});}
-function send(fields,value,fallback){var data=new URLSearchParams();data.set('csrf',csrf);for(var key in fields)if(Object.prototype.hasOwnProperty.call(fields,key))data.set(key,fields[key]);if(value)data.set('pin',value);return fetch('/read/highlight/${code}',{method:'POST',credentials:'same-origin',headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded'},body:data.toString(),cache:'no-store'}).then(function(r){return r.json().then(function(d){if(!r.ok){var e=new Error(d.error||fallback);e.status=r.status;throw e}return d})}).then(function(d){if(dialog.open||(dialog.hasAttribute&&dialog.hasAttribute('open'))){if(fields.action==='verify'&&window.confirmReadPin)window.confirmReadPin();if(dialog.close)dialog.close();else dialog.removeAttribute('open')}return d})}
-function authorized(run,fallback,failed,ready,onCancel){var cancelled=false;return fetch('/read/highlight/${code}',{credentials:'same-origin',headers:{'Accept':'application/json'},cache:'no-store'}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||fallback);return d})}).then(function(d){csrf=d.csrf;if(ready)ready();if(d.authenticated)return run();if(window.promptForReadPin){busy=false;window.promptForReadPin(function(value){busy=true;return send({action:'verify'},value,'验证失败').then(function(){if(!cancelled)return run()}).catch(function(e){if(cancelled)return;if(dialog.open){busy=false;throw e}if(failed){failed(e);return}throw e})},function(){cancelled=true;busy=false;if(onCancel)onCancel()});return}throw new Error('密码弹窗不可用')})}
-function settle(){busy=false;}
-function unpaint(id){if(!/^[0-9a-z-]+$/i.test(id))return;var nodes=document.querySelectorAll?document.querySelectorAll('mark.hl[data-hl="'+id+'"]'):[],marks=[],parents=[];for(var i=0;i<nodes.length;i++)marks.push(nodes[i]);for(var m=0;m<marks.length;m++){var mark=marks[m],parent=mark.parentNode;if(!parent)continue;while(mark.firstChild)parent.insertBefore(mark.firstChild,mark);parent.removeChild(mark);if(parents.indexOf(parent)<0)parents.push(parent)}var anchor=document.getElementById('hl-'+id);if(anchor&&anchor.parentNode){if(parents.indexOf(anchor.parentNode)<0)parents.push(anchor.parentNode);anchor.parentNode.removeChild(anchor)}for(var p=0;p<parents.length;p++)if(parents[p].normalize)parents[p].normalize();if(location.hash==='#hl-'+id&&window.history&&history.replaceState)history.replaceState(null,'',location.pathname+location.search)}
-function save(fields){if(!fields||busy)return;busy=true;function failed(e){showError(e.message||'保存失败','划线',function(){save(fields)})}return authorized(function(){return send(fields,null,'保存失败').then(function(d){closeError();paint(d.highlight);settle()})},'保存失败',failed).catch(failed)}
-function closeResult(panel){if(panel.open&&panel.close)panel.close();else if(panel.removeAttribute)panel.removeAttribute('open');panel.hidden=true}
-function resultOpen(panel){return !panel.hidden&&(panel.open||(panel.hasAttribute&&panel.hasAttribute('open')))}
-function bindResultDismiss(panel){
-if(!panel)return;panel.addEventListener('close',function(){panel.hidden=true});
-if(typeof HTMLDialogElement!=='undefined'&&'closedBy' in HTMLDialogElement.prototype&&typeof panel.showModal==='function')return;
-var touch=null,touchActive=false,ignoreClickUntil=0,suppressClickUntil=0,mouseStart=null;
-function selected(){var s=typeof window.getSelection==='function'&&window.getSelection();return !!(s&&s.rangeCount&&!s.isCollapsed)}
-function outside(point,target){if(panel.hidden||!panel.getBoundingClientRect||!point)return false;if(target!==panel&&panel.contains&&panel.contains(target))return false;var r=panel.getBoundingClientRect();return point.clientX<r.left||point.clientX>r.right||point.clientY<r.top||point.clientY>r.bottom}
-function stop(e){if(e.cancelable)e.preventDefault();if(e.stopImmediatePropagation)e.stopImmediatePropagation();else if(e.stopPropagation)e.stopPropagation()}
-document.addEventListener('touchstart',function(e){touch=null;touchActive=false;if(panel.hidden||e.touches.length!==1)return;touchActive=true;var p=e.touches[0];if(outside(p,e.target))touch={x:p.clientX,y:p.clientY,time:Date.now(),selected:selected()}},true);
-document.addEventListener('touchmove',function(e){if(!touch||e.touches.length!==1){touch=null;return}var p=e.touches[0];if(Math.abs(p.clientX-touch.x)>15||Math.abs(p.clientY-touch.y)>15)touch=null},true);
-document.addEventListener('touchcancel',function(){touch=null;if(touchActive)ignoreClickUntil=Date.now()+800;touchActive=false},true);
-document.addEventListener('touchend',function(e){var start=touch;touch=null;if(touchActive)ignoreClickUntil=Date.now()+800;touchActive=false;if(!start||e.touches.length||e.changedTouches.length!==1||Date.now()-start.time>700||start.selected||selected()||e.defaultPrevented)return;var p=e.changedTouches[0];if(Math.abs(p.clientX-start.x)>15||Math.abs(p.clientY-start.y)>15||!outside(p,e.target))return;suppressClickUntil=Date.now()+800;closeResult(panel);stop(e)},true);
-function recordMouse(e){if(!panel.hidden)mouseStart={outside:outside(e,e.target),selected:selected(),x:e.clientX,y:e.clientY}}
-document.addEventListener('pointerdown',function(e){if(e.pointerType!=='touch')recordMouse(e)},true);
-document.addEventListener('mousedown',recordMouse,true);
-document.addEventListener('click',function(e){if(Date.now()<suppressClickUntil){suppressClickUntil=0;stop(e);return}if(Date.now()<ignoreClickUntil||panel.hidden||e.defaultPrevented||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||(typeof e.button==='number'&&e.button!==0))return;var start=mouseStart;mouseStart=null;if(!outside(e,e.target)||selected()||(start&&(!start.outside||start.selected||Math.abs(e.clientX-start.x)>15||Math.abs(e.clientY-start.y)>15)))return;closeResult(panel);stop(e)},true);
-}
-var explanationDialog=document.getElementById('explanation-dialog'),explanationText=document.getElementById('explanation-text');
-bindResultDismiss(explanationDialog);
-function showExplanation(text){explanationText.textContent=text;explanationDialog.hidden=false;if(typeof explanationDialog.showModal==='function'&&!explanationDialog.open)explanationDialog.showModal();else explanationDialog.setAttribute('open','')}
-function renderExplanation(nodes){explanationText.textContent='';function append(parent,list){for(var i=0;i<list.length;i++){var n=list[i];if(n.type==='text'&&typeof n.text==='string'){parent.appendChild(document.createTextNode(n.text));continue}if(n.type!=='element'||! /^(p|h[1-6]|blockquote|ul|ol|li|em|strong|s|a|table|thead|tbody|tr|th|td|hr|br|pre|code)$/.test(n.tag)||!Array.isArray(n.children))continue;var el=document.createElement(n.tag);if(n.tag==='a'&&typeof n.href==='string'&&/^(https?:\\/\\/|mailto:|\\/(?!\\/)|#)/i.test(n.href))el.setAttribute('href',n.href);if(n.tag==='ol'&&Number.isSafeInteger(n.start)&&n.start>0)el.setAttribute('start',String(n.start));append(el,n.children);parent.appendChild(el)}}append(explanationText,nodes)}
-function explain(fields,ready){if(!fields||busy||!explanationDialog||!explanationText){if(ready)ready(false);return}busy=true;function release(close){if(ready){var fn=ready;ready=null;fn(close)}}function failed(e){settle();release();showExplanation(e.message||'解释失败，请稍后再试。')}return authorized(function(){var request={action:'explain',field:fields.field,ranges:JSON.stringify(fields.ranges)};return send(request,null,'解释失败').then(function(d){settle();release();if(Array.isArray(d.markdown)){showExplanation('');renderExplanation(d.markdown)}else showExplanation(d.explanation)})},'解释失败',failed,null,function(){release(false)}).catch(failed)}
-var originalMatchDialog=document.getElementById('original-match-dialog'),originalMatchText=document.getElementById('original-match-text'),originalMatchCurrent=document.getElementById('original-match-current');
-bindResultDismiss(originalMatchDialog);
-function showOriginalMatch(original,current){originalMatchText.textContent=original;originalMatchCurrent.textContent=current||'';originalMatchDialog.hidden=false;if(typeof originalMatchDialog.showModal==='function'&&!originalMatchDialog.open)originalMatchDialog.showModal();else originalMatchDialog.setAttribute('open','')}
-function matchOriginal(fields,ready){if(!fields||busy||!originalMatchDialog||!originalMatchText){if(ready)ready();return}busy=true;var shown=false,current=fields.ranges.map(function(range){return range.quote}).join('\\n');function release(){if(ready){var fn=ready;ready=null;fn()}}function failed(e){release();settle();if(!shown||resultOpen(originalMatchDialog))showOriginalMatch(e.message||'原文匹配失败，请稍后再试。',current)}return authorized(function(){shown=true;showOriginalMatch('正在匹配原文…',current);return send({action:'original',field:fields.field,ranges:JSON.stringify(fields.ranges)},null,'原文匹配失败').then(function(d){if(resultOpen(originalMatchDialog))showOriginalMatch(d.paragraph||'未找到匹配段落。',current);settle()})},'原文匹配失败',failed,release).catch(failed)}
-function removeSaved(id){if(!id||busy)return;busy=true;return authorized(function(){return send({action:'delete',id:id},null,'取消划线失败').then(function(d){unpaint(id);settle()})},'取消划线失败',settle).catch(settle)}
-window.removeHighlight=removeSaved;
-window.performParagraphAction=function(p,body,mode,ready){
-if(!p||!body||body.hidden){if(ready)ready();return}var all=nodes(body),text='',base=0,found=false;for(var i=0;i<all.length;i++){if(p.contains(all[i])){found=true;text+=all[i].nodeValue||''}else if(!found)base+=canon(all[i].nodeValue||'').length}var clean=canon(text);if(!clean){if(ready)ready();return}if(clean.length>1500){if(ready)ready();if(mode==='explain')showExplanation('解释最多 1500 字。');else if(mode==='original')showOriginalMatch('段落最多 1500 字。',text);else showError('划线最多 1500 字。','划线',null);return}var field=body.getAttribute('data-field')||'translation',range={start:base,end:base+clean.length,quote:text};if(mode==='explain')explain({field:field,ranges:[range]},ready);else if(mode==='original')matchOriginal({field:field,ranges:[range]},ready);else save({field:field,start:range.start,end:range.end,quote:text});
-};
-var action=document.getElementById('body-highlight'),explainAction=document.getElementById('body-explain');if(action)action.hidden=false;if(explainAction)explainAction.hidden=false;
-})();</script>`;
 }
 
 async function fetchHighlightExcerpts(env: ConfiguredBindings, ids: number[]): Promise<Map<number, Excerpt>> {
@@ -953,23 +525,6 @@ async function loadHighlightList(db: D1Database | undefined, env: ConfiguredBind
   const resolved = new Set<string>();
   for (const [id, excerpt] of excerpts) for (const row of await resolveHighlights(excerpt, rows.filter(row => row.excerpt_number === id))) resolved.add(row.id);
   return { rows, excerpts, resolved, hasMore: result.results.length > limit && page < 999 };
-}
-
-async function renderHighlightList(db: D1Database | undefined, env: ConfiguredBindings, page: number): Promise<string> {
-  if (!db) return renderEinkList([], READ_LIST_PATH, "highlights").replace("暂无条目", "划线数据库未配置");
-  const { rows, excerpts, resolved, hasMore } = await loadHighlightList(db, env, page);
-  const items = rows.map(row => {
-    const excerpt = excerpts.get(row.excerpt_number);
-    const quote = htmlText(row.quote);
-    const meta = excerpt ? `${einkText(excerpt.title)}${excerpt.sourceTitle ? ` · ${einkText(excerpt.sourceTitle)}` : ""}${resolved.has(row.id) ? "" : " · 正文已变动，未能定位"}` : "文章不可用";
-    const content = `${quote}<p class="meta">${meta}</p>`;
-    const link = excerpt && resolved.has(row.id) ? `<a class="item-link" href="${htmlText(`/r/${excerpt.code}${categorySearch("highlights", page)}#hl-${row.id}`)}">${content}</a>` : content;
-    return `<li>${link}</li>`;
-  }).join("\n");
-  const pageHtml = renderEinkList([], READ_LIST_PATH, "highlights");
-  const more = hasMore ? `<a class="btn" id="load-more" href="${htmlText(`${READ_LIST_PATH}${categorySearch("highlights", page + 1)}`)}">下一页</a>` : "";
-  const previous = page > 1 ? `<a class="btn" href="${htmlText(`${READ_LIST_PATH}${categorySearch("highlights", page - 1)}`)}">上一页</a>` : "";
-  return pageHtml.replace(`<p>${displayText("暂无条目")}</p>`, items ? `<ul>${items}</ul><div class="list-actions" id="list-actions">${previous}${more}</div>` : `<p>${displayText("暂无条目")}</p>${previous}`);
 }
 
 async function fetchExcerptByShortId(env: ConfiguredBindings, shortId: number): Promise<Excerpt | null> {
@@ -1043,14 +598,6 @@ function readerParagraphs(translation: string, pageId: string, imageBaseUrl: str
       start = end;
       return result;
     });
-}
-
-function einkParagraphs(translation: string, pageId: string, imageBaseUrl: string): string {
-  return readerParagraphs(translation, pageId, imageBaseUrl).map(({ parts }) =>
-    `<p>${parts.map(part => "text" in part
-      ? htmlText(part.text).replaceAll("\n", "<br />\n")
-      : `<img src="${htmlText(part.image)}" alt="${einkText("正文图片")}" />`).join("")}</p>`,
-  ).join("\n");
 }
 
 async function appendNotionPage(response: Response, pages: NotionPage[]): Promise<string | null | undefined> {
@@ -1127,7 +674,7 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string, catego
   if (!dataSourceId) throw new Error("Notion view is missing a data source");
 
   const pages: NotionPage[] = [];
-  // The read-later category includes Instapaper entries outside the RSS view's filters.
+  // The read-later category includes entries outside the RSS view's filters.
   const viewFilter = category === "later" ? undefined : viewQueryFilter(view);
   const selectedFilter = categoryFilter(category);
   const filter = viewFilter && selectedFilter
@@ -1215,17 +762,6 @@ async function fetchExcerptImage(env: ConfiguredBindings, pageId: string, blockI
   if (block.type !== "image" || block.parent?.type !== "page_id" || block.parent.page_id !== pageId || block.image?.type !== "file") return null;
   const imageUrl = externalUrl(block.image.file?.url);
   return imageUrl ? fetchImage(imageUrl) : null;
-}
-
-function htmlResponse(body: string | null, method: string, vary?: string): Response {
-  return new Response(method === "HEAD" ? null : body, {
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=300, must-revalidate",
-      "X-Content-Type-Options": "nosniff",
-      ...(vary ? { Vary: vary } : {}),
-    },
-  });
 }
 
 function readerItem(excerpt: Excerpt): ReaderItem {
@@ -1413,9 +949,9 @@ const worker = {
     const coverId = coverIdFromPath(url.pathname);
     const isBookFeed = url.pathname === BOOK_FEED_PATH;
     const isExcerptFeed = url.pathname === READ_FEED_PATH;
-    const isEinkList = url.pathname === READ_LIST_PATH;
-    const detailShortId = pathCodeId(url.pathname, READ_DETAIL_PREFIX);
-    const shortId = detailShortId ?? pathCodeId(url.pathname, SHORT_SHARE_PREFIX);
+    const isEinkList = readerApi && url.pathname === READ_LIST_PATH;
+    const detailShortId = readerApi ? pathCodeId(url.pathname, READ_DETAIL_PREFIX) : null;
+    const shortId = detailShortId ?? (readerApi ? pathCodeId(url.pathname, SHORT_SHARE_PREFIX) : null);
     const imageMatch = url.pathname.match(/^\/read\/p\/([^/]+)\/([^/]+)$/);
     const imageIds = imageMatch && NOTION_PAGE_ID.test(imageMatch[1] ?? "") && NOTION_PAGE_ID.test(imageMatch[2] ?? "") ? [imageMatch[1]!, imageMatch[2]!] : null;
     const usesExcerpts = isExcerptFeed || isEinkList || shortId !== null || Boolean(imageIds);
@@ -1471,62 +1007,39 @@ const worker = {
         if (!excerpt) return readerApi ? highlightError("未找到文章。", 404) : new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=300" } });
         const neighbors = neighborsFor(list, excerpt.code) ?? { prevCode: null, nextCode: null };
         const highlights = showNavigation ? await resolveHighlights(excerpt, highlightRows) : [];
-        if (readerApi) {
-          const paragraphs = (text: string) => readerParagraphs(text, excerpt.id, READ_ASSET_PREFIX);
-          return readerResponse({
-            item: readerItem(excerpt),
-            lang: excerpt.lang,
-            originalLang: excerpt.originalLang,
-            originalTitle: formatText(excerpt.originalTitle),
-            originalUrl: excerpt.originalUrl,
-            publisher: formatText(excerpt.publisher),
-            chapter: formatText(excerpt.chapter),
-            date: excerpt.publishedDate,
-            field: excerpt.chinese ? "original" : "translation",
-            body: paragraphs(excerpt.body),
-            original: showNavigation && !excerpt.chinese ? paragraphs(excerpt.originalBody ?? "") : [],
-            terms: showNavigation ? paragraphs(excerpt.terms) : [],
-            actions: showNavigation ? {
-              favorite: Boolean(excerpt.favorite),
-              notionUrl: excerpt.link,
-              highlightsEnabled: Boolean(env.HIGHLIGHTS_DB),
-              highlights,
-              ...neighbors,
-            } : null,
-          }, request.method, !showNavigation);
-        }
-        const detailResponse = htmlResponse(
-          renderEinkDetail(
-            excerpt,
-            READ_LIST_PATH,
-            `${url.origin}${READ_ASSET_PREFIX}`,
-            neighbors,
-            category,
-            page,
-            showNavigation,
+        const paragraphs = (text: string) => readerParagraphs(text, excerpt.id, READ_ASSET_PREFIX);
+        return readerResponse({
+          item: readerItem(excerpt),
+          lang: excerpt.lang,
+          originalLang: excerpt.originalLang,
+          originalTitle: formatText(excerpt.originalTitle),
+          originalUrl: excerpt.originalUrl,
+          publisher: formatText(excerpt.publisher),
+          chapter: formatText(excerpt.chapter),
+          date: excerpt.publishedDate,
+          field: excerpt.chinese ? "original" : "translation",
+          body: paragraphs(excerpt.body),
+          original: showNavigation && !excerpt.chinese ? paragraphs(excerpt.originalBody ?? "") : [],
+          terms: showNavigation ? paragraphs(excerpt.terms) : [],
+          actions: showNavigation ? {
+            favorite: Boolean(excerpt.favorite),
+            notionUrl: excerpt.link,
+            highlightsEnabled: Boolean(env.HIGHLIGHTS_DB),
             highlights,
-            Boolean(env.HIGHLIGHTS_DB),
-          ),
-          request.method,
-        );
-        if (showNavigation) detailResponse.headers.set("Cache-Control", "no-store");
-        return detailResponse;
+            ...neighbors,
+          } : null,
+        }, request.method, !showNavigation);
       }
 
       if (isEinkList && category === "highlights") {
-        if (readerApi) {
-          const { rows, excerpts, resolved, hasMore } = await loadHighlightList(env.HIGHLIGHTS_DB, configured, page);
-          return readerResponse({
-            kind: "highlights", hasMore, available: Boolean(env.HIGHLIGHTS_DB),
-            items: rows.map(row => {
-              const excerpt = excerpts.get(row.excerpt_number);
-              return { id: row.id, quote: row.quote, located: resolved.has(row.id), article: excerpt ? readerItem(excerpt) : null };
-            }),
-          }, request.method, false);
-        }
-        const listResponse = htmlResponse(await renderHighlightList(env.HIGHLIGHTS_DB, configured, page), request.method);
-        listResponse.headers.set("Cache-Control", "no-store");
-        return listResponse;
+        const { rows, excerpts, resolved, hasMore } = await loadHighlightList(env.HIGHLIGHTS_DB, configured, page);
+        return readerResponse({
+          kind: "highlights", hasMore, available: Boolean(env.HIGHLIGHTS_DB),
+          items: rows.map(row => {
+            const excerpt = excerpts.get(row.excerpt_number);
+            return { id: row.id, quote: row.quote, located: resolved.has(row.id), article: excerpt ? readerItem(excerpt) : null };
+          }),
+        }, request.method, false);
       }
       if (isEinkList) {
         const limit = page * FEED_ITEM_LIMIT;
@@ -1534,14 +1047,9 @@ const worker = {
         const excerpts = pages.slice(0, limit)
           .map(excerptFromPage)
           .filter((item): item is Excerpt => item !== null);
-        if (readerApi) {
-          return readerResponse({
-            kind: "articles", items: excerpts.map(readerItem), hasMore: pages.length > limit && page < 999,
-          }, request.method, category !== "favorites");
-        }
-        const listResponse = htmlResponse(renderEinkList(excerpts, READ_LIST_PATH, category, page, pages.length > limit && page < 999), request.method);
-        if (category === "favorites") listResponse.headers.set("Cache-Control", "no-store");
-        return listResponse;
+        return readerResponse({
+          kind: "articles", items: excerpts.map(readerItem), hasMore: pages.length > limit && page < 999,
+        }, request.method, category !== "favorites");
       }
 
       const feedUrl = `${url.origin}${url.pathname}`;

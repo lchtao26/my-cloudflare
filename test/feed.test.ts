@@ -823,11 +823,12 @@ test("reading API applies category filters and selects article neighbors", async
   }
   const later = await worker.fetch(new Request("https://example.com/api/read?tab=later"), env);
   assert.equal(later.status, 200);
-  assert.deepEqual(queries.at(-1)?.filter, { property: "提取来源", select: { equals: "Instapaper" } });
+  assert.deepEqual(queries.at(-1)?.filter, { property: "提取来源", select: { equals: "稍后阅读" } });
   for (const category of ["later", "weekly", "likes"]) {
     const detail = await worker.fetch(new Request(`https://example.com/api/r/${code}?tab=${category}`), env);
     const article = await detail.json<import("../src/reader-data.ts").ReaderArticle>();
     assert.equal(article.actions?.nextCode, nextCode);
+    if (category === "later") assert.deepEqual(queries.at(-1)?.filter, { property: "提取来源", select: { equals: "稍后阅读" } });
     if (category === "likes") assert.deepEqual(queries.at(-1), { page_size: 30, filter: favoritesFilter, sorts: favoritesSorts });
   }
   const fallback = await worker.fetch(new Request("https://example.com/api/read?tab=unknown"), env);
