@@ -82,7 +82,7 @@ function backLink(code: string, query: string): string {
   return `<p><a class="btn" href="/r/${code}${query}">返回文章</a></p>`;
 }
 
-function form(code: string, query: string, token: string, authenticated: boolean, error = "", desired = true): string {
+function form(code: string, query: string, token: string, nonce: string, authenticated: boolean, error = "", desired = true): string {
   return [
     error ? `<p role="alert">${error}</p>` : "",
     `<form id="favorite-form" method="post" action="/read/favorite/${code}${query}">`,
@@ -90,7 +90,7 @@ function form(code: string, query: string, token: string, authenticated: boolean
     authenticated ? `<p>${desired ? "正在收藏…" : "正在取消收藏…"}</p>` : PIN_FIELD,
     `<noscript><button type="submit" class="btn">${desired ? "收藏" : "取消收藏"}</button></noscript>`,
     "</form>",
-    `<script nonce="${token}">${pinFormScript("favorite-form")}</script>`,
+    `<script nonce="${nonce}">${pinFormScript("favorite-form")}</script>`,
     `<style>body{padding-top:28vh}${PIN_STYLE}form .btn{font:inherit;font-weight:700;color:inherit;background:#fff;cursor:pointer;width:100%}${PIN_DARK_STYLE}</style>`,
   ].join("\n");
 }
@@ -145,10 +145,13 @@ export async function favoriteRequest(
   }
   const key = await hmacKey(env.FAVORITE_SESSION_SECRET);
   const authenticated = await sessionValid(request, key, env.FAVORITE_PIN);
+  const nonce = crypto.randomUUID().replaceAll("-", "");
   if (request.method === "GET") {
-    const token = hex(crypto.getRandomValues(new Uint8Array(32)));
     const names = cookieNames(request);
-    return reply(form(code, query, token, authenticated, "", requested !== "0"), 200, [`${names.csrf}=${token}; Path=/${names.secure}; HttpOnly; SameSite=Strict`], token, { authenticated, csrf: token });
+    const current = cookie(request, names.csrf);
+    // Reading forms share this cookie; rotating it on GET expires other open forms.
+    const token = fromHex(current) ? current : hex(crypto.getRandomValues(new Uint8Array(32)));
+    return reply(form(code, query, token, nonce, authenticated, "", requested !== "0"), 200, [`${names.csrf}=${token}; Path=/${names.secure}; HttpOnly; SameSite=Strict`], nonce, { authenticated, csrf: token });
   }
   if (request.headers.get("Origin") !== new URL(request.url).origin) return reply(`<h1>请求无效</h1>${backLink(code, returnQuery)}`, 403, [], "", { error: "请求无效，请重试。" });
   const data = await readForm(request, options.maxBytes);
@@ -164,17 +167,17 @@ export async function favoriteRequest(
   if (!authenticated) {
     const pin = data?.get("pin") || "";
     if (json && !pin) return reply("", 401, [], "", { requiresPin: true });
-    if (!/^\d{6}$/.test(pin)) return reply(form(code, query, token, false, "请输入 6 位数字。", desired), 400, [], token, { error: "请输入 6 位数字。" });
+    if (!/^\d{6}$/.test(pin)) return reply(form(code, query, token, nonce, false, "请输入 6 位数字。", desired), 400, [], nonce, { error: "请输入 6 位数字。" });
     try {
       if (!await env.FAVORITE_LOGIN_LIMIT.getByName("favorite-pin").attempt()) {
-        return reply(form(code, query, token, false, "尝试次数过多，请稍后再试。", desired), 429, [], token, { error: "尝试次数过多，请稍后再试。" });
+        return reply(form(code, query, token, nonce, false, "尝试次数过多，请稍后再试。", desired), 429, [], nonce, { error: "尝试次数过多，请稍后再试。" });
       }
     } catch (error) {
       captureException(error);
       return reply(`<h1>收藏暂不可用</h1><p>请稍后再试。</p>${backLink(code, returnQuery)}`, 503, [], "", { error: "收藏暂不可用，请稍后再试。" });
     }
     if (!await crypto.subtle.verify("HMAC", key, await sign(key, `pin:${env.FAVORITE_PIN}`), encoder.encode(`pin:${pin}`))) {
-      return reply(form(code, query, token, false, "密码不正确。", desired), 401, [], token, { error: "密码不正确。", requiresPin: true });
+      return reply(form(code, query, token, nonce, false, "密码不正确。", desired), 401, [], nonce, { error: "密码不正确。", requiresPin: true });
     }
   }
   try {

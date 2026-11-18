@@ -27,7 +27,10 @@ async function open(env: ReturnType<typeof configuration>, session = "") {
   const csrf = response.headers.get("set-cookie")!.split(";")[0]!;
   const token = html.match(/name="csrf" value="([a-f0-9]+)"/)?.[1];
   assert.ok(token);
-  return { response, html, csrf, token };
+  const nonce = html.match(/<script nonce="([a-f0-9]+)">/)?.[1];
+  assert.ok(nonce);
+  assert.notEqual(nonce, token);
+  return { response, html, csrf, token, nonce };
 }
 
 function submit(csrf: string, token: string, pin?: string, session = "", requestOrigin = origin) {
@@ -67,14 +70,19 @@ test("favorites require a valid PIN and CSRF token, then reuse a secure session"
   const slots = page.html.match(/<div class="pin-slots" aria-hidden="true">([\s\S]*?)<\/div>/)?.[1];
   assert.equal((slots?.match(/<span/g) || []).length, 6);
   assert.doesNotMatch(page.html, /返回文章/);
-  assert.match(page.response.headers.get("Content-Security-Policy") || "", new RegExp(`script-src 'nonce-${page.token}'`));
+  assert.match(page.response.headers.get("Content-Security-Policy") || "", new RegExp(`script-src 'nonce-${page.nonce}'`));
   assert.match(page.html, /tab=weekly&amp;page=2/);
   assert.equal((await worker.fetch(submit(page.csrf, page.token, "012345", "", "https://evil.example"), env)).status, 403);
   assert.equal((await worker.fetch(submit(page.csrf, "0".repeat(64), "012345"), env)).status, 403);
   const wrong = await worker.fetch(submit(page.csrf, page.token, "999999"), env);
   assert.equal(wrong.status, 401);
-  assert.match(wrong.headers.get("Content-Security-Policy") || "", new RegExp(`script-src 'nonce-${page.token}'`));
-  assert.match(await wrong.text(), /密码不正确/);
+  const wrongHtml = await wrong.text();
+  const wrongNonce = wrongHtml.match(/<script nonce="([a-f0-9]+)">/)?.[1];
+  assert.ok(wrongNonce);
+  assert.notEqual(wrongNonce, page.nonce);
+  assert.notEqual(wrongNonce, page.token);
+  assert.match(wrong.headers.get("Content-Security-Policy") || "", new RegExp(`script-src 'nonce-${wrongNonce}'`));
+  assert.match(wrongHtml, /密码不正确/);
   assert.equal(calls.length, 0);
 
   const success = await worker.fetch(submit(page.csrf, page.token, "012345"), env);

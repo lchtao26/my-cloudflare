@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
+import { favoriteRequest } from "../src/favorite.ts";
 import { shareCode } from "../src/index.ts";
 import { protectRead, readLogin } from "../src/read-auth.ts";
 import { readProgress } from "../src/read-progress.ts";
@@ -48,6 +49,41 @@ test("reading access requires the existing session and login rejects forged requ
   assert.match(session, /^__Host-read-session=/);
   assert.equal(await protectRead(new Request(`${origin}/api/r/${code}`, { headers: { Cookie: session } }), env), null);
   assert.ok(await protectRead(new Request(`${origin}/read`, { headers: { Cookie: session } }), { ...env, FAVORITE_PIN: "654321" }));
+});
+
+test("refreshes, other tabs and reading actions do not expire an open login form", async () => {
+  const env = environment();
+  const loginUrl = `${origin}/auth?next=%2Fread`;
+  const first = await readLogin(new Request(loginUrl), env);
+  const firstHtml = await first.text();
+  const token = firstHtml.match(/name="csrf" value="([a-f0-9]+)"/)![1]!;
+  const firstNonce = firstHtml.match(/<script nonce="([a-f0-9]+)">/)![1]!;
+  let browserCookie = first.headers.get("set-cookie")!.split(";")[0]!;
+  for (let i = 0; i < 2; i++) {
+    const page = await readLogin(new Request(loginUrl, { headers: { Cookie: browserCookie } }), env);
+    browserCookie = page.headers.get("set-cookie")!.split(";")[0]!;
+    const html = await page.text();
+    assert.equal(html.match(/name="csrf" value="([a-f0-9]+)"/)?.[1], token);
+    const nonce = html.match(/<script nonce="([a-f0-9]+)">/)?.[1];
+    assert.ok(nonce);
+    assert.notEqual(nonce, token);
+    assert.notEqual(nonce, firstNonce);
+    assert.ok(page.headers.get("Content-Security-Policy")?.includes(`script-src 'nonce-${nonce}'`));
+  }
+  const action = await favoriteRequest(new Request(`${origin}/read/favorite/${code}`, { headers: { Cookie: browserCookie, Accept: "application/json" } }), env, code, async () => true, () => "");
+  browserCookie = action.headers.get("set-cookie")!.split(";")[0]!;
+  assert.equal((await action.json<{ csrf: string }>()).csrf, token);
+  const submit = (pin: string, cookie = browserCookie) => readLogin(new Request(loginUrl, {
+    method: "POST", headers: { Origin: origin, Cookie: cookie, "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf: token, pin }),
+  }), env);
+  assert.equal((await submit("012345", "")).status, 403);
+  const wrong = await submit("999999");
+  assert.equal(wrong.status, 401);
+  browserCookie = wrong.headers.get("set-cookie")!.split(";")[0]!;
+  assert.equal((await wrong.text()).match(/name="csrf" value="([a-f0-9]+)"/)?.[1], token);
+  const success = await submit("012345");
+  assert.equal(success.status, 303);
+  assert.equal(success.headers.get("Location"), "/read");
 });
 
 test("login page reuses the PIN input and submits once when six digits are entered", async () => {
