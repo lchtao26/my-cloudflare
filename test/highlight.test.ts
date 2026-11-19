@@ -97,6 +97,15 @@ test("highlight writes reuse PIN and CSRF, validate text and expose private data
   const changedDetail = await worker.fetch(new Request(`${origin}/api/r/${code}`), env);
   const changedArticle = await changedDetail.json<import("../src/reader-data.ts").ReaderArticle>();
   assert.ok(!changedArticle.actions?.highlights.some(mark => mark.id === value.highlight.id));
+  activePage.properties["正文翻译"].rich_text[0]!.plain_text = "## 标题\n\n这是 **重点** 和 [链接](https://example.com)。\n\n```\n第一行\n\n第二行\n```";
+  const markdownResponse = await worker.fetch(new Request(`${origin}/api/r/${code}`), env);
+  const markdownArticle = await markdownResponse.json<import("../src/reader-data.ts").ReaderArticle>();
+  assert.equal(markdownArticle.body[0]!.quote, "标题");
+  assert.equal(markdownArticle.body[1]!.quote, "这是 重点 和 链接。");
+  assert.equal(markdownArticle.body[2]!.quote, "第一行\n\n第二行\n");
+  const formatted = markdownArticle.body[1]!;
+  const savedFormatted = await post({ start: String(formatted.start), end: String(formatted.end), quote: formatted.quote }, origin, session);
+  assert.equal(savedFormatted.status, 200, "formatted paragraph uses rendered text for highlight offsets");
   const failedDb = { prepare() { throw new Error("D1 unavailable"); } } as unknown as D1Database;
   // A database read failure must not take down the article.
   // The Promise chain below expects a prepared statement; use an asynchronous failure.

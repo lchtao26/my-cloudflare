@@ -551,8 +551,24 @@ function einkParagraphTexts(translation: string, pageId: string): string[] {
     if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) return match;
     return match.replace(/>[\s\S]*<\/image>$/i, "></image>");
   });
-  return formatText(withoutCaptions.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim())
-    .split(/\n(?:[^\S\n]*\n)+/);
+  const text = withoutCaptions.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim();
+  const paragraphs: string[] = [];
+  let lines: string[] = [];
+  let fence: { character: string; length: number } | null = null;
+  for (const line of text.split("\n")) {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (marker) {
+      const run = marker[1]!;
+      if (!fence) fence = { character: run[0]!, length: run.length };
+      else if (run[0] === fence.character && run.length >= fence.length && /^\s*$/.test(line.slice(marker[0].length))) fence = null;
+    }
+    if (!fence && !marker && !line.trim()) {
+      if (lines.length) paragraphs.push(lines.join("\n"));
+      lines = [];
+    } else lines.push(line);
+  }
+  if (lines.length) paragraphs.push(lines.join("\n"));
+  return paragraphs;
 }
 
 function readerParagraphs(translation: string, pageId: string, imageBaseUrl: string): ReaderParagraph[] {
@@ -592,6 +608,20 @@ function readerParagraphs(translation: string, pageId: string, imageBaseUrl: str
         offset = replacement.index + replacement.length;
       }
       parts.push({ text: paragraph.slice(offset) });
+      function plain(nodes: import("./explanation-markdown.ts").MarkdownNode[]): string {
+        return nodes.map(node => node.type === "text" ? node.text : node.tag === "br" ? "\n" : plain(node.children)).join("");
+      }
+      function formatNodes(nodes: import("./explanation-markdown.ts").MarkdownNode[], code = false): void {
+        for (const node of nodes) {
+          if (node.type === "text") { if (!code) node.text = formatText(node.text); }
+          else formatNodes(node.children, code || node.tag === "code" || node.tag === "pre");
+        }
+      }
+      for (const part of parts) if ("text" in part) {
+        part.markdown = explanationMarkdown(part.text, true);
+        formatNodes(part.markdown);
+        part.text = plain(part.markdown);
+      }
       const quote = parts.map(part => "text" in part ? part.text : "").join("");
       const end = start + canonicalText(quote).length;
       const result = { parts, quote, start, end };

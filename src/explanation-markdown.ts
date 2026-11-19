@@ -1,12 +1,13 @@
 import MarkdownIt from "markdown-it";
 
-export type MarkdownNode = { type: "text"; text: string } | { type: "element"; tag: string; children: MarkdownNode[]; href?: string; start?: number };
+export type MarkdownNode = { type: "text"; text: string } | { type: "element"; tag: string; children: MarkdownNode[]; href?: string; src?: string; alt?: string; start?: number };
 const parser = new MarkdownIt({ html: false, linkify: false }).disable("image");
+const bodyParser = new MarkdownIt({ html: false, linkify: false });
 type Token = ReturnType<typeof parser.parse>[number];
 const allowedTags = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "ul", "ol", "li", "em", "strong", "s", "a", "table", "thead", "tbody", "tr", "th", "td", "hr", "br"]);
 
 /** Convert model output to an allowlisted tree; no HTML from the model is inserted into the page. */
-export function explanationMarkdown(text: string): MarkdownNode[] {
+export function explanationMarkdown(text: string, images = false): MarkdownNode[] {
   const root: MarkdownNode[] = [];
   const stack: MarkdownNode[][] = [root];
   const current = () => stack[stack.length - 1]!;
@@ -20,6 +21,15 @@ export function explanationMarkdown(text: string): MarkdownNode[] {
     for (const token of tokens) {
       if (token.hidden) continue;
       if (token.type === "inline") { visit(token.children || []); continue; }
+      if (token.type === "image") {
+        const src = String(token.attrGet("src") || "");
+        if (/^(https?:\/\/|\/(?!\/))/i.test(src)) {
+          const image = addElement("img");
+          image.src = src;
+          image.alt = token.content;
+        } else addText(token.content);
+        continue;
+      }
       if (token.type === "text" || token.type === "html_inline" || token.type === "html_block") { addText(token.content); continue; }
       if (token.type === "softbreak") { addText("\n"); continue; }
       if (token.type === "hardbreak") { addElement("br"); continue; }
@@ -42,6 +52,6 @@ export function explanationMarkdown(text: string): MarkdownNode[] {
       if (token.nesting === 1) stack.push(element.children);
     }
   }
-  visit(parser.parse(text, {}));
+  visit((images ? bodyParser : parser).parse(text, {}));
   return root;
 }

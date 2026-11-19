@@ -10,3 +10,10 @@ test("explanation Markdown preserves structure while treating HTML as text", () 
   assert.match(json, /<script>alert\(1\)<\/script>/);
   assert.doesNotMatch(json, /"tag":"script"|"href":"javascript:/);
 });
+
+test("article Markdown renders safe images without accepting unsafe URLs", () => {
+  const nodes = explanationMarkdown("![图片](https://example.com/a.png) ![坏图](javascript:alert(1))", true);
+  const json = JSON.stringify(nodes);
+  assert.match(json, /"src":"https:\/\/example\.com\/a\.png"/);
+  assert.doesNotMatch(json, /"src":"javascript:/);
+});

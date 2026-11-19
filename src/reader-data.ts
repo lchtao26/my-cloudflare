@@ -34,7 +34,9 @@ export type ReaderList =
   | { kind: "highlights"; items: ReaderHighlight[]; hasMore: boolean; available: boolean };
 
 export type ReaderField = "original" | "translation" | "terms";
-export type ReaderPart = { text: string } | { image: string };
+import type { MarkdownNode } from "./explanation-markdown.ts";
+
+export type ReaderPart = { text: string; markdown?: MarkdownNode[] } | { image: string };
 export type ReaderParagraph = { parts: ReaderPart[]; quote: string; start: number; end: number };
 export type ResolvedHighlight = { id: string; field: string; start: number; end: number };
 

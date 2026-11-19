@@ -1,4 +1,5 @@
-import { Fragment, useRef, type MouseEvent, type ReactNode } from "react";
+import { Fragment, createElement, useRef, type MouseEvent, type ReactNode } from "react";
+import type { MarkdownNode } from "../explanation-markdown.ts";
 import type { ReaderField, ReaderParagraph, ResolvedHighlight } from "../reader-data.ts";
 
 export type ParagraphSelection = {
@@ -59,7 +60,7 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
 
   function targetParagraph(event: TapEvent) {
     if (!(event.target instanceof Element) || event.target.closest("a,button,img")) return null;
-    const value = event.target.closest("p[data-paragraph]")?.getAttribute("data-paragraph");
+    const value = event.target.closest("[data-paragraph]")?.getAttribute("data-paragraph");
     return value == null ? null : Number(value);
   }
 
@@ -153,12 +154,24 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
       {paragraphs.map((paragraph, index) => {
         let offset = paragraph.start;
         const relevant = marks.filter(mark => mark.start < paragraph.end && mark.end > paragraph.start);
-        return <p key={index} data-paragraph={index}>{paragraph.parts.map((part, partIndex) => {
+        function render(nodes: MarkdownNode[]): ReactNode[] {
+          return nodes.map((node, index) => {
+            if (node.type === "text") {
+              const content = markedText(node.text, offset, relevant, anchors);
+              offset += node.text.replace(/\s/g, "").length;
+              return <Fragment key={index}>{content}</Fragment>;
+            }
+            return createElement(node.tag, { key: index, href: node.href, src: node.src, alt: node.alt, start: node.start },
+              node.tag === "img" || node.tag === "br" || node.tag === "hr" ? undefined : render(node.children));
+          });
+        }
+        return <div key={index} data-paragraph={index}>{paragraph.parts.map((part, partIndex) => {
           if ("image" in part) return <img key={partIndex} src={part.image} alt="正文图片" />;
+          if (part.markdown) return <Fragment key={partIndex}>{render(part.markdown)}</Fragment>;
           const content = markedText(part.text, offset, relevant, anchors);
           offset += part.text.replace(/\s/g, "").length;
           return <Fragment key={partIndex}>{content}</Fragment>;
-        })}</p>;
+        })}</div>;
       })}
     </div>
   );

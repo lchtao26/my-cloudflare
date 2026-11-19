@@ -21,6 +21,7 @@ export const EINK_STYLE = [
   "p{margin:0.85em 0;}",
   // Reserve paragraph double taps for actions while retaining scrolling and pinch zoom.
   ".excerpt-body[data-paragraph-actions]{touch-action:manipulation;}",
+  ".excerpt-body ul{list-style:disc;padding-left:1.5em}.excerpt-body ol{padding-left:1.5em}.excerpt-body li,.excerpt-body li:last-child{border:0;padding:0;margin:0}.excerpt-body a{text-decoration:underline}.excerpt-body blockquote{border-left:2px solid;margin:1em 0;padding-left:1em}.excerpt-body pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}.excerpt-body table{border-collapse:collapse;display:block;overflow-x:auto}.excerpt-body th,.excerpt-body td{border:1px solid;padding:0.3em 0.5em}",
   "li{margin:0;}",
   "ul{list-style:none;margin:0;padding:0;}",
   "li{border-top:2px solid #000;padding:2rem 0;}",
