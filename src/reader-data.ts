@@ -8,10 +8,13 @@ export const READ_CATEGORIES = [
   { id: "highlights", label: "划线" },
   { id: "later", label: "稍后阅读" },
 ] as const;
-export type ReadCategory = typeof READ_CATEGORIES[number]["id"];
+export type ReadCategory = (typeof READ_CATEGORIES)[number]["id"];
 
 export function readCategory(value: unknown): ReadCategory {
-  return READ_CATEGORIES.find((category) => category.id === (value === "likes" ? "favorites" : value))?.id ?? "all";
+  return (
+    READ_CATEGORIES.find((category) => category.id === (value === "likes" ? "favorites" : value))
+      ?.id ?? "all"
+  );
 }
 
 export type ReaderItem = {
@@ -22,7 +25,7 @@ export type ReaderItem = {
   author: string;
 };
 
-export type ReaderHighlight = {
+type ReaderHighlight = {
   id: string;
   quote: string;
   article: ReaderItem | null;
@@ -36,7 +39,7 @@ export type ReaderList =
 export type ReaderField = "original" | "translation" | "terms";
 import type { MarkdownNode } from "./explanation-markdown.ts";
 
-export type ReaderPart = { text: string; markdown?: MarkdownNode[] } | { image: string };
+type ReaderPart = { text: string; markdown?: MarkdownNode[] } | { image: string };
 export type ReaderParagraph = { parts: ReaderPart[]; quote: string; start: number; end: number };
 export type ResolvedHighlight = { id: string; field: string; start: number; end: number };
 

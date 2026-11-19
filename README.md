@@ -14,7 +14,7 @@ Cloudflare Worker 从 Notion「书籍推荐」数据库读取最近编辑的前 
 
 推送到 `main` 后，GitHub Actions 会运行 `npm test` 和 `npm run build`，再执行 `wrangler deploy`。部署任务使用 `production` 环境，因此 `CLOUDFLARE_API_TOKEN`（权限为 Edit Cloudflare Workers，且只限本账号）和 `CLOUDFLARE_ACCOUNT_ID` 要放在该环境的 Secrets 中。
 
-本地可运行 `npm run hooks:install` 启用 Git `pre-push` hook；之后每次 push 都会先运行 `npm test`，测试失败时 push 会被阻止。
+本地可运行 `npm run hooks:install` 启用 Git `pre-push` hook；之后每次 push 都会运行 Oxlint、测试和 Knip，并对本次推送修改的 JS/TS/JSON 文件运行 Oxfmt 检查。任一检查失败都会阻止 push。
 
 `NOTION_TOKEN` 和 Instapaper 凭据保存在 Cloudflare Worker Secret 中。Worker 上还没有所需密钥时，Actions 会拒绝部署；先在本地执行一次 `npm run deploy -- --secrets-file .dev.vars`。不要再把这个仓库接到 Cloudflare Worker 的 Builds，否则每次推送会部署两次。
 

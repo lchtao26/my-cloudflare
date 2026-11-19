@@ -1,0 +1,4 @@
+package-lock.json
+src/routeTree.gen.ts
+worker-configuration.d.ts
+wrangler.highlights.local.jsonc

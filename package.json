@@ -8,22 +8,13 @@
     "check": "tsc --noEmit",
     "hooks:install": "git config core.hooksPath .githooks",
     "lint": "oxlint .",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "knip": "knip",
     "types": "wrangler types",
     "test": "tsc --noEmit && node --test",
     "build": "vite build",
     "preview": "vite preview"
-  },
-  "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.69.1",
-    "@types/markdown-it": "^14.2.0",
-    "@types/node": "^26.6.5",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.3.0",
-    "oxlint": "^1.94.0",
-    "typescript": "^7.0.2",
-    "vite": "^8.3.8",
-    "wrangler": "^4.0.0"
   },
   "dependencies": {
     "@sentry/cloudflare": "^11.13.0",
@@ -37,5 +28,19 @@
     "pangu": "^10.4.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.69.1",
+    "@types/markdown-it": "^14.2.0",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "knip": "^6.46.1",
+    "oxfmt": "^0.79.0",
+    "oxlint": "^1.94.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "wrangler": "^4.0.0"
   }
 }

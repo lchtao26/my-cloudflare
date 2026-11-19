@@ -1,0 +1,4 @@
+{
+  "$schema": "https://knip.dev/schema.json",
+  "ignoreDependencies": ["@types/markdown-it"]
+}
