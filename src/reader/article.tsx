@@ -176,7 +176,12 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
             {(actions || hasOriginal) && <span className="byline-actions">
             {actions && <Link className="other-link" to="/read" search={readerSearch()} onClick={backToPreviousPage}>返回</Link>}
             {hasOriginal && <button className="other-link" type="button" aria-controls="original-body"
-              aria-expanded={showOriginal} onClick={() => setShowOriginal(value => !value)}>{showOriginal ? "显示翻译" : "显示原文"}</button>}
+              aria-expanded={showOriginal} onClick={() => setShowOriginal(value => {
+                const next = !value;
+                try { localStorage.setItem(`read-view:${item.code}`, next ? "original" : "translation"); }
+                catch { /* Local storage can be disabled. */ }
+                return next;
+              })}>{showOriginal ? "显示翻译" : "显示原文"}</button>}
             </span>}
           </p>
           <ReadingBody id={hasOriginal ? "translated-body" : undefined} field={data.field} lang={data.lang}
