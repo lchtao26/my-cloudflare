@@ -7,6 +7,9 @@ export type ParagraphSelection = {
   highlightId: string | null;
 };
 
+type TapEvent = Pick<MouseEvent, "target" | "clientX" | "clientY">
+  & Partial<Pick<MouseEvent, "altKey" | "ctrlKey" | "metaKey" | "shiftKey">>;
+
 function lines(text: string): ReactNode {
   return text.split("\n").map((line, index) => <Fragment key={index}>{index > 0 && <br />}{line}</Fragment>);
 }
@@ -49,11 +52,12 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
   select?: (selection: ParagraphSelection) => void;
 }) {
   const lastTap = useRef<{ paragraph: number; time: number } | null>(null);
-  const press = useRef<{ paragraph: number; x: number; y: number; scroll: number; time: number; mouse: boolean } | null>(null);
+  const press = useRef<{ paragraph: number; x: number; y: number; scroll: number; time: number } | null>(null);
+  const lastTouch = useRef(-Infinity);
   const anchors = new Set<string>();
   const marks = highlights.filter(mark => mark.field === field);
 
-  function targetParagraph(event: MouseEvent) {
+  function targetParagraph(event: TapEvent) {
     if (!(event.target instanceof Element) || event.target.closest("a,button,img")) return null;
     const value = event.target.closest("p[data-paragraph]")?.getAttribute("data-paragraph");
     return value == null ? null : Number(value);
@@ -64,7 +68,26 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
     lastTap.current = null;
   }
 
-  function finishTap(event: MouseEvent) {
+  function startTap(event: TapEvent) {
+    const paragraph = targetParagraph(event);
+    if (!select || paragraph === null || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
+      || window.getSelection()?.toString()) {
+      clearTaps();
+      return;
+    }
+    press.current = {
+      paragraph, x: event.clientX, y: event.clientY, scroll: window.scrollY,
+      time: performance.now(),
+    };
+  }
+
+  function moveTap(event: { clientX: number; clientY: number }) {
+    const start = press.current;
+    if (start && (Math.abs(start.x - event.clientX) > 10 || Math.abs(start.y - event.clientY) > 10
+      || Math.abs(start.scroll - window.scrollY) > 5)) clearTaps();
+  }
+
+  function finishTap(event: TapEvent) {
     const start = press.current;
     press.current = null;
     const paragraph = targetParagraph(event);
@@ -87,26 +110,46 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
   }
 
   return (
-    <div id={id} className="excerpt-body" data-field={field} lang={lang} hidden={hidden}
+    <div id={id} className="excerpt-body" data-field={field} data-paragraph-actions={select ? "" : undefined} lang={lang} hidden={hidden}
       onPointerDown={event => {
-        const paragraph = targetParagraph(event);
-        if (!select || !event.isPrimary || event.button !== 0 || paragraph === null
-          || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || window.getSelection()?.toString()) {
+        if (!event.isPrimary || event.button !== 0) {
           clearTaps();
           return;
         }
-        press.current = {
-          paragraph, x: event.clientX, y: event.clientY, scroll: window.scrollY,
-          time: performance.now(), mouse: event.pointerType === "mouse",
-        };
+        startTap(event);
       }}
+      onPointerMove={moveTap}
       onPointerCancel={clearTaps}
-      onPointerUp={event => {
-        if (event.pointerType !== "mouse") finishTap(event);
+      // Older Android WebViews send Touch/Mouse events without Pointer Events.
+      onTouchStart={event => {
+        if (window.PointerEvent) return;
+        lastTouch.current = performance.now();
+        if (event.touches.length !== 1) return clearTaps();
+        const touch = event.touches[0]!;
+        startTap({ target: event.target, clientX: touch.clientX, clientY: touch.clientY });
       }}
-      onClick={event => {
-        if (press.current?.mouse) finishTap(event);
-      }}>
+      onTouchMove={event => {
+        if (window.PointerEvent) return;
+        if (event.touches.length !== 1) return clearTaps();
+        moveTap(event.touches[0]!);
+      }}
+      onTouchCancel={clearTaps}
+      onTouchEnd={event => {
+        if (window.PointerEvent) return;
+        lastTouch.current = performance.now();
+        if (event.touches.length || event.changedTouches.length !== 1) return clearTaps();
+      }}
+      onMouseDown={event => {
+        // A touch can synthesize mouse events; count each physical tap only once.
+        if (window.PointerEvent || performance.now() - lastTouch.current < 1000) return;
+        if (event.button !== 0) return clearTaps();
+        startTap(event);
+      }}
+      onMouseMove={event => {
+        if (!window.PointerEvent) moveTap(event);
+      }}
+      // Open after pointerup/touchend: their synthesized click must not land on the new backdrop.
+      onClick={finishTap}>
       {paragraphs.map((paragraph, index) => {
         let offset = paragraph.start;
         const relevant = marks.filter(mark => mark.start < paragraph.end && mark.end > paragraph.start);

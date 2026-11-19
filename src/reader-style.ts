@@ -19,6 +19,8 @@ export const EINK_STYLE = [
   "h1{font-size:1.5rem;line-height:1.35;font-weight:700;margin:0 0 1rem;}",
   // Keep mixed-language reading text evenly spaced and scale paragraph gaps with its size.
   "p{margin:0.85em 0;}",
+  // Reserve paragraph double taps for actions while retaining scrolling and pinch zoom.
+  ".excerpt-body[data-paragraph-actions]{touch-action:manipulation;}",
   "li{margin:0;}",
   "ul{list-style:none;margin:0;padding:0;}",
   "li{border-top:2px solid #000;padding:2rem 0;}",
