@@ -3,7 +3,7 @@ import test from "node:test";
 import { withScope, type Event } from "@sentry/core";
 import { ServerRuntimeClient } from "@sentry/core/server";
 import worker from "../src/index.ts";
-import { readLaterFeed } from "../src/read-later.ts";
+import { instapaperFeed } from "../src/reader/instapaper.ts";
 import { sentryDataCollection } from "../src/sentry-options.ts";
 
 test("handled upstream failures reach Sentry while ordinary 4xx responses do not", async t => {
@@ -27,7 +27,7 @@ test("handled upstream failures reach Sentry while ordinary 4xx responses do not
       NOTION_TOKEN: "test-token", NOTION_DATA_SOURCE_ID: "source",
     });
     assert.equal(feed.status, 502);
-    const later = await readLaterFeed(new Request("https://example.com/read/later.xml"), {
+    const later = await instapaperFeed(new Request("https://example.com/read/later.xml"), {
       INSTAPAPER_CONSUMER_ID: "id", INSTAPAPER_CONSUMER_SECRET: "secret",
       INSTAPAPER_OAUTH_TOKEN: "token", INSTAPAPER_OAUTH_TOKEN_SECRET: "secret",
     });

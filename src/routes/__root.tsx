@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
-import { EINK_STYLE } from "../reader-style.ts";
+import { EINK_STYLE } from "../reader/style.ts";
 
 export const Route = createRootRoute({
   head: () => ({

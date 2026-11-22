@@ -1,7 +1,7 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback } from "react";
-import { READ_CATEGORIES, readCategory } from "../reader-data.ts";
+import { READ_CATEGORIES, readCategory } from "../reader/data.ts";
 import { listQuery, readerSearch, validateReaderSearch } from "../reader/queries.ts";
 import { LoadingStatus } from "../reader/loading.tsx";
 import { usePullToRefresh } from "../reader/pull-to-refresh.ts";

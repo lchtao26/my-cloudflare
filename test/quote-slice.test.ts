@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ReaderParagraph, ResolvedHighlight } from "../src/reader-data.ts";
+import type { ReaderParagraph, ResolvedHighlight } from "../src/reader/data.ts";
 import type { ParagraphSelection } from "../src/reader/body.tsx";
 import { selectionPreview } from "../src/reader/quote-slice.ts";
 

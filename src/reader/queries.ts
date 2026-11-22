@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
-import { readCategory, readPage, type ReadCategory, type ReaderArticle, type ReaderList, type ResolvedHighlight } from "../reader-data.ts";
-import type { MarkdownNode } from "../explanation-markdown.ts";
+import { readCategory, readPage, type ReadCategory, type ReaderArticle, type ReaderList, type ResolvedHighlight } from "./data.ts";
+import type { MarkdownNode } from "./explanation-markdown.ts";
 
 export function readerSearch(category: ReadCategory = "all", page = 1) {
   return {

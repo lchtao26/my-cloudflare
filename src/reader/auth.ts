@@ -1,5 +1,5 @@
 import { favoriteRequest, isReadAuthorized, PIN_FIELD, pinFormScript, type FavoriteBindings } from "./favorite.ts";
-import { EINK_STYLE } from "./reader-style.ts";
+import { EINK_STYLE } from "./style.ts";
 
 export async function protectRead(request: Request, env: FavoriteBindings): Promise<Response | null> {
   const url = new URL(request.url);

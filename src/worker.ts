@@ -4,8 +4,8 @@ import { sentryOptions } from "./sentry.server.ts";
 import { DurableObject } from "cloudflare:workers";
 import start from "@tanstack/react-start/server-entry";
 import worker from "./index.ts";
-import { protectRead, readLogin } from "./read-auth.ts";
-import { readProgress } from "./read-progress.ts";
+import { protectRead, readLogin } from "./reader/auth.ts";
+import { readProgress } from "./reader/progress.ts";
 
 // One shared PIN needs one global counter: per-IP limits can be bypassed with multiple IPs.
 class FavoriteLoginLimitBase extends DurableObject<Env> {

@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated, useLocation } from "@tanstack/react-router";
 import { createElement, useCallback, useRef, useState, type MouseEvent, type ReactNode, type RefCallback } from "react";
-import type { MarkdownNode } from "../explanation-markdown.ts";
-import { canonicalText } from "../highlight-anchor.ts";
-import type { ReadCategory, ReaderArticle } from "../reader-data.ts";
+import type { MarkdownNode } from "./explanation-markdown.ts";
+import { canonicalText } from "./highlight-anchor.ts";
+import type { ReadCategory, ReaderArticle } from "./data.ts";
 import { ReadingBody, type ParagraphSelection } from "./body.tsx";
 import { BodyActionSheet } from "./body-actions.tsx";
 import { quoteBetween, selectionPreview } from "./quote-slice.ts";

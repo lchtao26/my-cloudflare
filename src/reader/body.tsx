@@ -1,6 +1,6 @@
 import { Fragment, createElement, useRef, type MouseEvent, type ReactNode } from "react";
-import type { MarkdownNode } from "../explanation-markdown.ts";
-import type { ReaderField, ReaderParagraph, ResolvedHighlight } from "../reader-data.ts";
+import type { MarkdownNode } from "./explanation-markdown.ts";
+import type { ReaderField, ReaderParagraph, ResolvedHighlight } from "./data.ts";
 
 export type ParagraphSelection = {
   field: ReaderField;

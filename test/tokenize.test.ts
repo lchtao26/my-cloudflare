@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canonicalText } from "../src/highlight-anchor.ts";
+import { canonicalText } from "../src/reader/highlight-anchor.ts";
 import { tokenRanges, tokenize, type Token } from "../src/reader/tokenize.ts";
 
 function wordTokens(quote: string, offset = 0) {

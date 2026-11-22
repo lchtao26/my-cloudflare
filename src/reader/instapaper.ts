@@ -46,7 +46,7 @@ async function authorization(env: Required<InstapaperBindings>, body: Record<str
   return `OAuth ${Object.entries(oauth).map(([key, value]) => `${encode(key)}="${encode(value)}"`).join(", ")}`;
 }
 
-export async function readLaterFeed(request: Request, env: InstapaperBindings): Promise<Response> {
+export async function instapaperFeed(request: Request, env: InstapaperBindings): Promise<Response> {
   const { INSTAPAPER_CONSUMER_ID, INSTAPAPER_CONSUMER_SECRET, INSTAPAPER_OAUTH_TOKEN, INSTAPAPER_OAUTH_TOKEN_SECRET } = env;
   if (!INSTAPAPER_CONSUMER_ID || !INSTAPAPER_CONSUMER_SECRET || !INSTAPAPER_OAUTH_TOKEN || !INSTAPAPER_OAUTH_TOKEN_SECRET) {
     return new Response("Instapaper feed is not configured", { status: 503, headers: { "Cache-Control": "no-store" } });
@@ -89,7 +89,7 @@ ${items}
   }
 }
 
-export async function addReadLater(env: InstapaperBindings, url: string, title: string): Promise<void> {
+export async function addInstapaper(env: InstapaperBindings, url: string, title: string): Promise<void> {
   const { INSTAPAPER_CONSUMER_ID, INSTAPAPER_CONSUMER_SECRET, INSTAPAPER_OAUTH_TOKEN, INSTAPAPER_OAUTH_TOKEN_SECRET } = env;
   if (!INSTAPAPER_CONSUMER_ID || !INSTAPAPER_CONSUMER_SECRET || !INSTAPAPER_OAUTH_TOKEN || !INSTAPAPER_OAUTH_TOKEN_SECRET) throw new Error("Instapaper is not configured");
   const endpoint = "https://www.instapaper.com/api/1/bookmarks/add";

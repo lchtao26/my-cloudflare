@@ -11,7 +11,7 @@ const env = {
   INSTAPAPER_OAUTH_TOKEN_SECRET: "token secret",
 };
 
-test("read-later feed signs the Instapaper request and renders bookmarks", async (context) => {
+test("instapaper feed signs the Instapaper request and renders bookmarks", async (context) => {
   const originalFetch = globalThis.fetch;
   context.after(() => { globalThis.fetch = originalFetch; });
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -44,7 +44,7 @@ test("read-later feed signs the Instapaper request and renders bookmarks", async
   assert.equal(await head.text(), "");
 });
 
-test("read-later feed handles missing credentials and unsupported methods", async () => {
+test("instapaper feed handles missing credentials and unsupported methods", async () => {
   const missing = await worker.fetch(new Request("https://chui.dev/read/later.xml"), {});
   assert.equal(missing.status, 503);
   const method = await worker.fetch(new Request("https://chui.dev/read/later.xml", { method: "POST" }), env);

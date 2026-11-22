@@ -4,7 +4,7 @@ import { createIsomorphicFn } from "@tanstack/react-start";
 import { getRequest, setResponseStatus } from "@tanstack/react-start/server";
 import worker from "../index.ts";
 import { ArticleRoute, type InitialArticle } from "../reader/article.tsx";
-import { readCategory, type ReadCategory, type ReaderArticle } from "../reader-data.ts";
+import { readCategory, type ReadCategory, type ReaderArticle } from "../reader/data.ts";
 import { articlePath, validateReaderSearch } from "../reader/queries.ts";
 
 const loadInitialArticle = createIsomorphicFn()

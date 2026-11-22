@@ -826,7 +826,7 @@ test("reading API applies category filters and selects article neighbors", async
   assert.deepEqual(queries.at(-1)?.filter, { property: "提取来源", select: { equals: "稍后阅读" } });
   for (const category of ["later", "weekly", "likes"]) {
     const detail = await worker.fetch(new Request(`https://example.com/api/r/${code}?tab=${category}`), env);
-    const article = await detail.json<import("../src/reader-data.ts").ReaderArticle>();
+    const article = await detail.json<import("../src/reader/data.ts").ReaderArticle>();
     assert.equal(article.actions?.nextCode, nextCode);
     if (category === "later") assert.deepEqual(queries.at(-1)?.filter, { property: "提取来源", select: { equals: "稍后阅读" } });
     if (category === "likes") assert.deepEqual(queries.at(-1), { page_size: 30, filter: favoritesFilter, sorts: favoritesSorts });
@@ -869,12 +869,12 @@ test("reading list API expands pages within its category", async (context) => {
   const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
   for (const [page, count, hasMore] of [[1, 30, true], [2, 60, true], [3, 65, false]] as const) {
     const response = await worker.fetch(new Request(`https://example.com/api/read?tab=weekly&page=${page}`), env);
-    const list = await response.json<import("../src/reader-data.ts").ReaderList>();
+    const list = await response.json<import("../src/reader/data.ts").ReaderList>();
     assert.equal(list.items.length, count);
     assert.equal(list.hasMore, hasMore);
   }
   const detail = await worker.fetch(new Request(`https://example.com/api/r/${code(40)}?tab=weekly&page=2`), env);
-  const article = await detail.json<import("../src/reader-data.ts").ReaderArticle>();
+  const article = await detail.json<import("../src/reader/data.ts").ReaderArticle>();
   assert.equal(article.actions?.nextCode, code(41));
 });
 
@@ -904,7 +904,7 @@ test("article and share APIs resolve the Notion ID property", async (context) =>
   for (const prefix of ["r", "s"]) {
     const response = await worker.fetch(new Request(`https://example.com/api/${prefix}/${shareCode(42)}`), env);
     assert.equal(response.status, 200);
-    const article = await response.json<import("../src/reader-data.ts").ReaderArticle>();
+    const article = await response.json<import("../src/reader/data.ts").ReaderArticle>();
     assert.equal(article.item.title, "标题");
     assert.equal(article.actions === null, prefix === "s");
     const missing = await worker.fetch(new Request(`https://example.com/api/${prefix}/${shareCode(7)}`), env);

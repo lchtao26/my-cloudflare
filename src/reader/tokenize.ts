@@ -1,4 +1,4 @@
-import { canonicalText } from "../highlight-anchor.ts";
+import { canonicalText } from "./highlight-anchor.ts";
 
 export type Token =
   | { kind: "space"; text: string }

@@ -1,4 +1,4 @@
-import { shareCodeId } from "./index.ts";
+import { shareCodeId } from "../index.ts";
 
 async function readProgressBody(request: Request): Promise<unknown> {
   if (!request.body) return null;

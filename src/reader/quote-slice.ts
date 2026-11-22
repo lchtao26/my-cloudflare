@@ -1,4 +1,4 @@
-import type { ReaderParagraph, ResolvedHighlight } from "../reader-data.ts";
+import type { ReaderParagraph, ResolvedHighlight } from "./data.ts";
 import type { ParagraphSelection } from "./body.tsx";
 
 function sliceQuote(quote: string, quoteStart: number, start: number, end: number) {

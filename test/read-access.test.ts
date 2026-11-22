@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
-import { favoriteRequest } from "../src/favorite.ts";
+import { favoriteRequest } from "../src/reader/favorite.ts";
 import { shareCode } from "../src/index.ts";
-import { protectRead, readLogin } from "../src/read-auth.ts";
-import { readProgress } from "../src/read-progress.ts";
+import { protectRead, readLogin } from "../src/reader/auth.ts";
+import { readProgress } from "../src/reader/progress.ts";
 import { shouldOfferRemoteSync } from "../src/reader/reading.ts";
 
 const origin = "https://example.com";

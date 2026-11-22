@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { canonicalText, hashText, resolveAnchor } from "../src/highlight-anchor.ts";
+import { canonicalText, hashText, resolveAnchor } from "../src/reader/highlight-anchor.ts";
 
 test("canonical text preserves Unicode and uses DOM-compatible UTF-16 offsets", () => {
   assert.equal(canonicalText("甲 \n😀\u3000乙"), "甲😀乙");

@@ -1,12 +1,12 @@
 import { captureException, logger } from "@sentry/core";
 import { generateRssFeed, type RssFeed } from "feedsmith";
-import { canonicalText, hashText, resolveAnchor } from "./highlight-anchor.ts";
+import { canonicalText, hashText, resolveAnchor } from "./reader/highlight-anchor.ts";
 import { formatText } from "./format-text.ts";
-import { addReadLater, readLaterFeed } from "./read-later.ts";
-import { favoriteRequest, type FavoriteBindings } from "./favorite.ts";
-import { explanationMarkdown } from "./explanation-markdown.ts";
-import { EINK_STYLE } from "./reader-style.ts";
-import { readCategory, readPage, type ReadCategory, type ReaderArticle, type ReaderItem, type ReaderList, type ReaderParagraph, type ResolvedHighlight } from "./reader-data.ts";
+import { addInstapaper, instapaperFeed } from "./reader/instapaper.ts";
+import { favoriteRequest, type FavoriteBindings } from "./reader/favorite.ts";
+import { explanationMarkdown } from "./reader/explanation-markdown.ts";
+import { EINK_STYLE } from "./reader/style.ts";
+import { readCategory, readPage, type ReadCategory, type ReaderArticle, type ReaderItem, type ReaderList, type ReaderParagraph, type ResolvedHighlight } from "./reader/data.ts";
 
 const NOTION_VERSION = "2026-03-11";
 const FEED_TITLE = "书籍推荐";
@@ -624,10 +624,10 @@ function readerParagraphs(translation: string, pageId: string, imageBaseUrl: str
         offset = replacement.index + replacement.length;
       }
       parts.push({ text: paragraph.slice(offset) });
-      function plain(nodes: import("./explanation-markdown.ts").MarkdownNode[]): string {
+      function plain(nodes: import("./reader/explanation-markdown.ts").MarkdownNode[]): string {
         return nodes.map(node => node.type === "text" ? node.text : node.tag === "br" ? "\n" : plain(node.children)).join("");
       }
-      function formatNodes(nodes: import("./explanation-markdown.ts").MarkdownNode[], code = false): void {
+      function formatNodes(nodes: import("./reader/explanation-markdown.ts").MarkdownNode[], code = false): void {
         for (const node of nodes) {
           if (node.type === "text") { if (!code) node.text = formatText(node.text); }
           else formatNodes(node.children, code || node.tag === "code" || node.tag === "pre");
@@ -986,7 +986,7 @@ const worker = {
         if (!env.NOTION_TOKEN || !env.NOTION_EXCERPTS_DATA_SOURCE_ID) throw new Error("Notion is not configured");
         const excerpt = await fetchExcerptByShortId({ NOTION_TOKEN: env.NOTION_TOKEN, NOTION_DATA_SOURCE_ID: env.NOTION_EXCERPTS_DATA_SOURCE_ID }, shortId);
         if (!excerpt) return false;
-        await addReadLater(env, excerpt.originalUrl || new URL(`/s/${code}`, url.origin).toString(), excerpt.originalTitle || excerpt.title);
+        await addInstapaper(env, excerpt.originalUrl || new URL(`/s/${code}`, url.origin).toString(), excerpt.originalTitle || excerpt.title);
         return { added: true };
       }, einkDocument, { errorMessage: "加入待读失败，请稍后再试。" });
     }
@@ -1011,7 +1011,7 @@ const worker = {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
       }
-      return readLaterFeed(request, env);
+      return instapaperFeed(request, env);
     }
     const category = readCategory(url.searchParams.get("tab") ?? url.searchParams.get("category"));
     const page = readPage(url.searchParams.get("page"));
