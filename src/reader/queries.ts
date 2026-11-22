@@ -59,6 +59,19 @@ export function listQuery(category: ReadCategory, page: number, cache?: RequestC
   });
 }
 
+export function readSessionQuery() {
+  return queryOptions({
+    queryKey: ["reader", "session"] as const,
+    queryFn: async ({ signal }) => {
+      const response = await fetch("/api/session", { credentials: "same-origin", cache: "no-store", signal });
+      if (!response.ok) throw new Error("无法确认登录状态");
+      const data = (await response.json()) as { authenticated?: boolean };
+      return data.authenticated === true;
+    },
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
 export function articleQuery(code: string, shared: boolean, category: ReadCategory, page: number) {
   return queryOptions({
     queryKey: [...articleKey(code), shared, category, page],

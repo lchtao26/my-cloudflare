@@ -1,6 +1,7 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRootRoute, HeadContent, Outlet, Scripts, useLocation } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { readSessionQuery } from "../reader/queries.ts";
 import { EINK_STYLE } from "../reader/style.ts";
 
 export const Route = createRootRoute({
@@ -32,30 +33,15 @@ function ReaderApp() {
     <QueryClientProvider client={client}>
       <Outlet />
       <ReadBar />
-      <ReadLoginBanner />
     </QueryClientProvider>
   );
 }
 
 function useReadSession(active: boolean) {
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
-  useEffect(() => {
-    if (!active) return;
-    const controller = new AbortController();
-    void fetch("/api/session", { credentials: "same-origin", cache: "no-store", signal: controller.signal })
-      .then(async response => {
-        if (!response.ok) throw new Error("无法确认登录状态");
-        return response.json() as Promise<{ authenticated?: boolean }>;
-      })
-      .then(data => {
-        if (!controller.signal.aborted) setAuthenticated(data.authenticated === true);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setAuthenticated(null);
-      });
-    return () => controller.abort();
-  }, [active]);
-  return [authenticated, setAuthenticated] as const;
+  const queryClient = useQueryClient();
+  const session = useQuery({ ...readSessionQuery(), enabled: active });
+  const setAuthenticated = (authenticated: boolean) => queryClient.setQueryData(readSessionQuery().queryKey, authenticated);
+  return [session.isSuccess ? session.data : null, setAuthenticated] as const;
 }
 
 function ReadBar() {
@@ -86,22 +72,6 @@ function ReadBar() {
         ) : null}
       </div>
     </header>
-  );
-}
-
-function ReadLoginBanner() {
-  const pathname = useLocation({ select: location => location.pathname });
-  const search = useLocation({ select: location => location.searchStr });
-  const hash = useLocation({ select: location => location.hash });
-  const active = /^\/r\/[A-Za-z0-9]{6}\/?$/.test(pathname);
-  const [authenticated] = useReadSession(active);
-  if (!active || authenticated !== false) return null;
-  const next = pathname + search + hash;
-  return (
-    <div className="login-banner" role="region" aria-label="登录">
-      <span>请登录</span>
-      <a href={`/auth?next=${encodeURIComponent(next)}`}>登录</a>
-    </div>
   );
 }
 

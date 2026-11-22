@@ -10,7 +10,7 @@ import { quoteBetween, selectionPreview } from "./quote-slice.ts";
 import { ReaderDialog } from "./dialog.tsx";
 import type { TokenRange } from "./tokenize.ts";
 import { LoadingStatus } from "./loading.tsx";
-import { articleKey, articleQuery, listKey, performAction, ReaderError, readerSearch, type ReaderAction } from "./queries.ts";
+import { articleKey, articleQuery, listKey, performAction, ReaderError, readerSearch, readSessionQuery, type ReaderAction } from "./queries.ts";
 import { useReaderScroll } from "./reading.ts";
 
 export type InitialArticle = { data: ReaderArticle; error?: never } | { data?: never; error: { message: string; status: number } };
@@ -82,6 +82,10 @@ function isAbortError(error: unknown) {
 function Article({ data, category, page, hydrated }: { data: ReaderArticle; category: ReadCategory; page: number; hydrated: boolean }) {
   const { item, actions } = data;
   const queryClient = useQueryClient();
+  const session = useQuery({ ...readSessionQuery(), enabled: Boolean(actions) });
+  const signedIn = session.data === true;
+  const pathname = useLocation({ select: location => location.pathname });
+  const searchStr = useLocation({ select: location => location.searchStr });
   const hash = useLocation({ select: location => location.hash });
   const { progress, syncError, remoteProgress, syncToRemote, dismissRemote, gutter, mainRef } = useReaderScroll(actions ? item.code : undefined, true, Boolean(hash));
   const highlights = actions?.highlights ?? [];
@@ -428,6 +432,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
       <title>{item.title}</title>
       <main ref={setMain}>
         {syncError && <p role="status">阅读进度暂未同步，请检查网络后继续阅读。</p>}
+        <div onClick={actions ? showReadingActions : undefined}>
         <article>
           <h1 lang={item.titleLang}>{item.title}</h1>
           <p className="article-byline">
@@ -459,9 +464,8 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
               </span>
             )}
           </p>
-          <div onClick={actions ? showReadingActions : undefined}>
-            <ReadingBody id={hasOriginal ? "translated-body" : undefined} field={data.field} lang={data.lang} paragraphs={data.body} highlights={highlights} hidden={showOriginal} select={actions?.highlightsEnabled ? selectParagraph : undefined} />
-            {hasOriginal && <ReadingBody id="original-body" field="original" lang={data.originalLang} paragraphs={data.original} highlights={highlights} hidden={!showOriginal} select={actions?.highlightsEnabled ? selectParagraph : undefined} />}
+            <ReadingBody id={hasOriginal ? "translated-body" : undefined} field={data.field} lang={data.lang} paragraphs={data.body} highlights={highlights} hidden={showOriginal} select={actions?.highlightsEnabled && signedIn ? selectParagraph : undefined} />
+            {hasOriginal && <ReadingBody id="original-body" field="original" lang={data.originalLang} paragraphs={data.original} highlights={highlights} hidden={!showOriginal} select={actions?.highlightsEnabled && signedIn ? selectParagraph : undefined} />}
             <hr />
             <p className="detail-metadata">
               {(data.originalUrl || (data.originalTitle && data.originalTitle !== item.title)) && (
@@ -495,10 +499,9 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
               <>
                 <hr />
                 <p>名词解释</p>
-                <ReadingBody field="terms" paragraphs={data.terms} highlights={highlights} select={actions?.highlightsEnabled ? selectParagraph : undefined} />
+                <ReadingBody field="terms" paragraphs={data.terms} highlights={highlights} select={actions?.highlightsEnabled && signedIn ? selectParagraph : undefined} />
               </>
             )}
-          </div>
         </article>
         {actions && (
           <nav className="nav-row" aria-label="文章导航">
@@ -521,6 +524,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
             )}
           </nav>
         )}
+        </div>
       </main>
       {actions && readingActions && (
         <div ref={readingActionsRef}>
@@ -532,6 +536,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
               {atPageBottom ? "滑到顶部" : "滑到底部"}
             </button>
           </div>
+          {signedIn ? (
           <div className="reading-actions">
             <div className="reading-tabs" role="tablist" aria-label="阅读操作">
               {(
@@ -562,6 +567,14 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
               </div>
             </div>
           </div>
+          ) : session.isSuccess ? (
+          <div className="reading-actions" role="region" aria-label="登录">
+            <div className="reading-actions-row">
+              <span>请登录</span>
+              <a href={`/auth?next=${encodeURIComponent(pathname + searchStr + hash)}`}>登录</a>
+            </div>
+          </div>
+          ) : null}
         </div>
       )}
       {remoteProgress !== null && (
@@ -580,7 +593,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
       <div className="progress" aria-hidden="true">
         <span className="progress-bar" style={{ width: `${progress * 100}%` }} />
       </div>
-      {selected && (
+      {selected && signedIn && (
         <BodyActionSheet
           key={`${selected.field}:${selected.paragraph.start}:${selected.highlightId ?? ""}`}
           selected={selected}
