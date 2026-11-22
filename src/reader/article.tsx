@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated, useLocation } from "@tanstack/react-router";
-import { createElement, useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefCallback } from "react";
+import { createElement, useCallback, useRef, useState, type MouseEvent, type ReactNode, type RefCallback } from "react";
+import { useEffect } from "./external-effect.ts";
 import type { MarkdownNode } from "./explanation-markdown.ts";
 import { canonicalText } from "./highlight-anchor.ts";
 import { listNeighborCodes, type ReadCategory, type ReaderArticle, type ReaderList, type ReaderNeighbors } from "./data.ts";

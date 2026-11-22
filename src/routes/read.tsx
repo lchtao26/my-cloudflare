@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
+import { useEffect } from "../reader/external-effect.ts";
 import { READ_CATEGORIES, readCategory } from "../reader/data.ts";
 import { articleQuery, listQuery, readerSearch, revalidateReader, validateReaderSearch } from "../reader/queries.ts";
 import { LoadingStatus } from "../reader/loading.tsx";
