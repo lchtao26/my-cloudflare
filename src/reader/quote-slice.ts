@@ -1,7 +1,7 @@
 import type { ReaderParagraph, ResolvedHighlight } from "../reader-data.ts";
 import type { ParagraphSelection } from "./body.tsx";
 
-export function sliceQuote(quote: string, quoteStart: number, start: number, end: number) {
+function sliceQuote(quote: string, quoteStart: number, start: number, end: number) {
   let canonical = quoteStart;
   let from = -1;
   let to = quote.length;
