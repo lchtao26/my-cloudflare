@@ -25,7 +25,7 @@ const SHORT_ID_PROPERTY = "ID";
 // IDs stay below 2^20, so a random code decodes to a valid ID only about 1 time in 4096.
 // Changing the keys or alphabet breaks every detail and share link already sent out.
 const SHORT_ID_LIMIT = 2 ** 20;
-const JEV_CANDIDATE_RADIUS = 8;
+const JEV_CANDIDATE_RADIUS = 3;
 const JEV_CANDIDATE_TEXT_LIMIT = 1200;
 const SHARE_CODE_KEYS = [0x3c6e, 0xa54f, 0x510e, 0x9b05];
 const SHARE_CODE_ALPHABET = "hqAiRYEFKT2xePmzuOfgrw4dBbNscH78S9kI30LQjpaGUJXonCMZ6ly15DtWvV";
@@ -467,12 +467,28 @@ type HighlightRow = {
   start: number; end: number; quote: string; prefix: string; suffix: string; body_hash: string; created_at: string;
 };
 
-function bodyText(excerpt: Excerpt, field: string): string | null {
-  const raw = field === "translation" ? (!excerpt.chinese ? excerpt.body : "") :
+function fieldSource(excerpt: Excerpt, field: string) {
+  return field === "translation" ? (!excerpt.chinese ? excerpt.body : "") :
     field === "original" ? (excerpt.chinese ? excerpt.body : excerpt.originalBody || "") :
     field === "terms" ? excerpt.terms : "";
+}
+
+function bodyText(excerpt: Excerpt, field: string): string | null {
+  const raw = fieldSource(excerpt, field);
   if (!raw) return null;
   return canonicalText(readerParagraphs(raw, excerpt.id, "").map(({ quote }) => quote).join(""));
+}
+
+function explainContext(excerpt: Excerpt, field: string, ranges: Array<{ start: number; end: number }>, mode: "paragraph" | "around") {
+  const raw = fieldSource(excerpt, field);
+  if (!raw) return "";
+  const paragraphs = readerParagraphs(raw, excerpt.id, "").filter(paragraph => paragraph.end > paragraph.start);
+  const index = paragraphs.findIndex(paragraph => paragraph.start <= ranges[0]!.start && ranges[0]!.start < paragraph.end);
+  if (index < 0) return "";
+  const chosen = mode === "paragraph"
+    ? paragraphs.filter(paragraph => ranges.some(range => range.start < paragraph.end && range.end > paragraph.start))
+    : [...paragraphs.slice(Math.max(0, index - 3), index), ...paragraphs.slice(index + 1, index + 4)];
+  return chosen.map(paragraph => paragraph.quote.trim()).filter(Boolean).join("\n\n");
 }
 
 async function resolveHighlights(excerpt: Excerpt, rows: HighlightRow[]): Promise<ResolvedHighlight[]> {
@@ -814,8 +830,8 @@ function readerResponse(data: ReaderList | ReaderArticle, method: string, cachea
   });
 }
 
-function highlightRanges(data: URLSearchParams, allowMultiple: boolean): Array<{ start: number; end: number; quote: string }> {
-  const rangesJson = allowMultiple ? data.get("ranges") : null;
+function highlightRanges(data: URLSearchParams): Array<{ start: number; end: number; quote: string }> {
+  const rangesJson = data.get("ranges");
   let ranges: Array<{ start: number; end: number; quote: string }>;
   if (rangesJson !== null) {
     try { ranges = JSON.parse(rangesJson); } catch { throw highlightError("选区无效。", 400); }
@@ -827,8 +843,8 @@ function highlightRanges(data: URLSearchParams, allowMultiple: boolean): Array<{
     ranges = [{ start: Number(start), end: Number(end), quote: data.get("quote") || "" }];
   }
   let previousEnd = 0, selectedLength = 0;
-  for (const range of ranges) {
-    if (!range || !Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || typeof range.quote !== "string" || range.start < previousEnd || range.end <= range.start || range.end > 999999999) throw highlightError("选区无效。", 400);
+  for (const [index, range] of ranges.entries()) {
+    if (!range || !Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || typeof range.quote !== "string" || range.end <= range.start || range.end > 999999999 || (index === 0 ? range.start < previousEnd : range.start <= previousEnd)) throw highlightError("选区无效。", 400);
     const clean = canonicalText(range.quote);
     if (clean.length !== range.end - range.start || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(clean)) throw highlightError("选区无效。", 400);
     selectedLength += clean.length;
@@ -836,6 +852,34 @@ function highlightRanges(data: URLSearchParams, allowMultiple: boolean): Array<{
     previousEnd = range.end;
   }
   return ranges;
+}
+
+async function saveHighlights(db: D1Database, excerptNumber: number, pageId: string, field: string, text: string, ranges: Array<{ start: number; end: number; quote: string }>): Promise<ResolvedHighlight[]> {
+  const hash = await hashText(text);
+  const createdAt = new Date().toISOString();
+  const json = JSON.stringify(ranges.map(range => ({
+    id: crypto.randomUUID(),
+    start: range.start,
+    end: range.end,
+    quote: Array.from(range.quote).length <= 1500 ? range.quote : canonicalText(range.quote),
+    prefix: text.slice(Math.max(0, range.start - 32), range.start),
+    suffix: text.slice(range.end, range.end + 32),
+  })));
+  await db.prepare(`INSERT OR IGNORE INTO highlights (id,excerpt_number,excerpt_page_id,field,start,"end",quote,prefix,suffix,body_hash,created_at)
+    SELECT json_extract(r.value,'$.id'), ?1, ?2, ?3, json_extract(r.value,'$.start'), json_extract(r.value,'$.end'),
+      json_extract(r.value,'$.quote'), json_extract(r.value,'$.prefix'), json_extract(r.value,'$.suffix'), ?4, ?5
+    FROM json_each(?6) r
+    WHERE (SELECT count(*) FROM highlights WHERE excerpt_number=?1)
+      + (SELECT count(*) FROM json_each(?6) n WHERE NOT EXISTS (
+        SELECT 1 FROM highlights h WHERE h.excerpt_number=?1 AND h.excerpt_page_id=?2 AND h.field=?3
+          AND h.start=json_extract(n.value,'$.start') AND h."end"=json_extract(n.value,'$.end') AND h.body_hash=?4)) <= 200`)
+    .bind(excerptNumber, pageId, field, hash, createdAt, json).run();
+  const selected = await db.prepare(`SELECT id,field,start,"end" FROM highlights
+    WHERE excerpt_number=?1 AND excerpt_page_id=?2 AND field=?3 AND body_hash=?4
+      AND (start,"end") IN (SELECT json_extract(value,'$.start'), json_extract(value,'$.end') FROM json_each(?5))
+    ORDER BY start`).bind(excerptNumber, pageId, field, hash, json).all<ResolvedHighlight>();
+  if (selected.results.length < ranges.length) throw highlightError("每篇文章最多保存 200 条划线。", 429);
+  return selected.results;
 }
 
 const worker = {
@@ -863,12 +907,11 @@ const worker = {
           }
         }
         const field = data.get("field") || "";
-        const quote = data.get("quote") || "";
         const explaining = data.get("action") === "explain";
         const matchingOriginal = data.get("action") === "original";
         if (!/^(original|translation|terms)$/.test(field)) throw highlightError("选区无效。", 400);
-        const ranges = highlightRanges(data, explaining || matchingOriginal);
-        const { start, end } = ranges[0]!;
+        const ranges = highlightRanges(data);
+        const { start } = ranges[0]!;
         if (!env.NOTION_TOKEN || !env.NOTION_EXCERPTS_DATA_SOURCE_ID) throw highlightError("文章服务未配置。", 503);
         const excerpt = await fetchExcerptByShortId({ NOTION_TOKEN: env.NOTION_TOKEN, NOTION_DATA_SOURCE_ID: env.NOTION_EXCERPTS_DATA_SOURCE_ID }, id);
         if (!excerpt) throw highlightError("未找到文章。", 404);
@@ -877,14 +920,15 @@ const worker = {
         if (ranges.some(range => text.slice(range.start, range.end) !== canonicalText(range.quote))) throw highlightError("正文已更新，请刷新后重试。", 409);
         if (explaining) {
           if (!env.AI302_API_KEY) throw highlightError("解释服务未配置，请设置 AI302_API_KEY。", 503);
-          const context = field === "original" ? (excerpt.chinese ? excerpt.body : excerpt.originalBody || "") : field === "terms" ? excerpt.terms : excerpt.body;
-          const source = excerpt.originalUrl ? `\n原文地址：${excerpt.originalUrl}` : "";
+          const highlights = data.get("save") === "1" ? await saveHighlights(db, id, excerpt.id, field, text, ranges) : undefined;
+          const contextMode = data.get("context") === "paragraph" ? "paragraph" : data.get("context") === "around" ? "around" : "";
+          const context = contextMode ? explainContext(excerpt, field, ranges, contextMode) : "";
           const response = await fetch("https://api.302.ai/v1/responses", {
             method: "POST",
             headers: { Authorization: `Bearer ${env.AI302_API_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({ model: "gpt-6-luna", store: false, reasoning: { effort: "none" }, max_output_tokens: 1500,
-              input: `文章标题：${excerpt.title}${source}\n文章上下文（过长时可能截断）：\n${context.slice(0, 40000)}\n\n解释一下：${ranges.map(range => range.quote).join("\n")}` }),
-            signal: AbortSignal.timeout(60000),
+              input: `文章标题：${excerpt.title}${context ? `\n上下文：\n${context}` : ""}\n\n解释一下：${ranges.map(range => range.quote).join("\n")}` }),
+            signal: AbortSignal.any([request.signal, AbortSignal.timeout(60000)]),
           });
           if (!response.ok) {
             const failure = await response.json().catch(() => null) as { error?: { type?: unknown; code?: unknown } } | null;
@@ -894,7 +938,7 @@ const worker = {
           const result = await response.json() as { status?: string; output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }> };
           const explanation = result.output?.flatMap(item => item.type === "message" ? item.content || [] : []).filter(part => part.type === "output_text" && typeof part.text === "string").map(part => part.text).join("\n").trim();
           if (!explanation || result.status === "incomplete") throw highlightError("未能生成完整解释，请稍后再试。", 502);
-          return { explanation, markdown: explanationMarkdown(explanation) };
+          return { explanation, markdown: explanationMarkdown(explanation), ...(highlights ? { highlights } : {}) };
         }
         if (matchingOriginal) {
           if (!env.AI302_API_KEY) throw highlightError("原文匹配服务未配置，请设置 AI302_API_KEY。", 503);
@@ -916,7 +960,7 @@ const worker = {
               state: JSON.stringify({ title: excerpt.originalTitle || excerpt.title, selected_paragraph: ranges.map((range) => range.quote).join("\n"), estimated_source_position: `${estimatedIndex + 1} / ${allCandidates.length}` }),
               questions: { match: { type: "choice", instructions: "从原文候选段落中，选择与所选译文段落内容最对应的原文。依据语义、实体、细节和段落主旨匹配，不要只按关键词匹配。若都不匹配，也选择最可能的一段。", criteria } },
             }),
-            signal: AbortSignal.timeout(30000),
+            signal: AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
           });
           if (!response.ok) {
             console.error("302.AI Jev request failed", { status: response.status });
@@ -930,14 +974,9 @@ const worker = {
           if (index < 0 || index >= candidates.length || typeof confidence !== "number") throw highlightError("未能匹配原文段落，请稍后再试。", 502);
           return { paragraph: candidates[index], confidence };
         }
-        const cleanQuote = canonicalText(quote);
-        const hash = await hashText(text), uuid = crypto.randomUUID();
-        await db.prepare('INSERT OR IGNORE INTO highlights (id,excerpt_number,excerpt_page_id,field,start,"end",quote,prefix,suffix,body_hash,created_at) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE (SELECT count(*) FROM highlights WHERE excerpt_number=?) < 200')
-          .bind(uuid, id, excerpt.id, field, start, end, Array.from(quote).length <= 1500 ? quote : cleanQuote, text.slice(Math.max(0, start - 32), start), text.slice(end, end + 32), hash, new Date().toISOString(), id).run();
-        const row = await db.prepare('SELECT id,field,start,"end" FROM highlights WHERE excerpt_number=? AND excerpt_page_id=? AND field=? AND start=? AND "end"=? AND body_hash=?').bind(id, excerpt.id, field, start, end, hash).first<ResolvedHighlight>();
-        if (!row) throw highlightError("每篇文章最多保存 200 条划线。", 429);
-        return { highlight: row };
-      }, einkDocument, { maxBytes: 16384, errorMessage: "请求失败，请稍后再试。" });
+        const highlights = await saveHighlights(db, id, excerpt.id, field, text, ranges);
+        return data.get("ranges") === null ? { highlight: highlights[0], highlights } : { highlights };
+      }, einkDocument, { maxBytes: 65536, errorMessage: "请求失败，请稍后再试。" });
     }
     if (url.pathname.startsWith("/read/add-later/")) {
       const code = url.pathname.slice("/read/add-later/".length);

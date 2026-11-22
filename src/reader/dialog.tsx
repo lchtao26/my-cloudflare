@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef, type ReactNode } from "react";
 export function ReaderDialog({ id, label, mode, dismiss, children }: {
   id: string;
   label: string;
-  mode?: "body" | "mark";
+  mode?: "body" | "mark" | "token";
   dismiss: () => void;
   children: ReactNode;
 }) {

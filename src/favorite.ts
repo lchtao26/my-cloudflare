@@ -188,6 +188,7 @@ export async function favoriteRequest(
     const names = cookieNames(request);
     return reply(`<h1>${desired ? "已收藏" : "已取消收藏"}</h1>${backLink(code, returnQuery)}`, 200, [`${names.session}=${session}; Path=/; Max-Age=${SESSION_SECONDS}${names.secure}; HttpOnly; SameSite=Strict`], "", { ok: true, favorite: desired, ...(typeof result === "object" ? result : {}) });
   } catch (error) {
+    if (request.signal.aborted) return new Response(null, { status: 499 });
     if (error instanceof Response) {
       if (error.status >= 500) captureException(new Error(`Favorite operation returned ${error.status}`));
       return error;

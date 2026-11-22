@@ -2,9 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated, useLocation } from "@tanstack/react-router";
 import { createElement, useCallback, useRef, useState, type MouseEvent, type ReactNode, type RefCallback } from "react";
 import type { MarkdownNode } from "../explanation-markdown.ts";
-import type { ReadCategory, ReaderArticle } from "../reader-data.ts";
+import { canonicalText } from "../highlight-anchor.ts";
+import type { ReadCategory, ReaderArticle, ReaderParagraph } from "../reader-data.ts";
 import { ReadingBody, type ParagraphSelection } from "./body.tsx";
+import { BodyActionSheet } from "./body-actions.tsx";
 import { ReaderDialog } from "./dialog.tsx";
+import type { TokenRange } from "./tokenize.ts";
 import { LoadingStatus } from "./loading.tsx";
 import { articleKey, articleQuery, listKey, performAction, ReaderError, readerSearch, type ReaderAction } from "./queries.ts";
 import { useReaderScroll } from "./reading.ts";
@@ -55,6 +58,31 @@ function isModelAction(action: ReaderAction) {
   return action.type === "original" || action.type === "explain";
 }
 
+function isAbortError(error: unknown) {
+  return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
+}
+
+function sliceQuote(quote: string, quoteStart: number, start: number, end: number) {
+  let canonical = quoteStart;
+  let from = -1;
+  let to = quote.length;
+  for (let index = 0; index < quote.length && canonical < end; index++) {
+    if (/\s/.test(quote[index]!)) continue;
+    if (canonical === start) from = index;
+    canonical += 1;
+    if (canonical === end) to = index + 1;
+  }
+  return from < 0 ? "" : quote.slice(from, to);
+}
+
+function quoteBetween(paragraphs: ReaderParagraph[], start: number, end: number) {
+  return paragraphs.flatMap(paragraph => {
+    if (paragraph.end <= start || paragraph.start >= end) return [];
+    const slice = sliceQuote(paragraph.quote, paragraph.start, Math.max(start, paragraph.start), Math.min(end, paragraph.end));
+    return slice ? [slice] : [];
+  }).join("");
+}
+
 function Article({ data, category, page, hydrated }: { data: ReaderArticle; category: ReadCategory; page: number; hydrated: boolean }) {
   const { item, actions } = data;
   const queryClient = useQueryClient();
@@ -71,6 +99,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const [addedLater, setAddedLater] = useState(false);
   const syncedAnchor = useRef<string | null>(null);
   const scrolledAnchor = useRef<string | null>(null);
+  const modelAbort = useRef<AbortController | null>(null);
 
   if (anchoredMark && syncedAnchor.current !== anchoredMark.id) {
     syncedAnchor.current = anchoredMark.id;
@@ -92,19 +121,27 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   }, [anchoredMark, hash, mainRef]);
 
   const mutation = useMutation({
-    mutationFn: ({ action, pin }: { action: ReaderAction; pin?: string }) => performAction(item.code, action, pin),
+    mutationFn: ({ action, pin, signal }: { action: ReaderAction; pin?: string; signal?: AbortSignal }) =>
+      performAction(item.code, action, pin, signal),
     onSuccess: async (result, { action }) => {
       if (action.type === "favorite") {
         queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current =>
           current?.actions ? { ...current, actions: { ...current.actions, favorite: Boolean(result.favorite) } } : current);
         await queryClient.invalidateQueries({ queryKey: listKey("favorites") });
       }
-      if (action.type === "highlight" || action.type === "delete") {
-        const saved = result.highlight;
+      if (action.type === "delete") {
         queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current => {
           if (!current?.actions) return current;
-          const updated = current.actions.highlights.filter(mark => mark.id !== (saved?.id ?? result.id));
-          if (saved) updated.push(saved);
+          return { ...current, actions: { ...current.actions, highlights: current.actions.highlights.filter(mark => mark.id !== result.id) } };
+        });
+        await queryClient.invalidateQueries({ queryKey: listKey("highlights") });
+      }
+      if (result.highlights?.length) {
+        const savedIds = new Set(result.highlights.map(mark => mark.id));
+        queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current => {
+          if (!current?.actions) return current;
+          const updated = current.actions.highlights.filter(mark => !savedIds.has(mark.id));
+          updated.push(...result.highlights!);
           return { ...current, actions: { ...current.actions, highlights: updated } };
         });
         await queryClient.invalidateQueries({ queryKey: listKey("highlights") });
@@ -115,9 +152,16 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   function run(action: ReaderAction, pin?: string) {
     if (mutation.isPending) return;
     setFailure(null);
+    const controller = isModelAction(action) ? new AbortController() : null;
+    modelAbort.current = controller;
     if (!pin && isModelAction(action)) setResultPanel(action);
-    mutation.mutate({ action, pin }, {
+    mutation.mutate({ action, pin, signal: controller?.signal }, {
       onError(error) {
+        if (action.data.save === "1") {
+          void queryClient.invalidateQueries({ queryKey: articleKey(item.code) });
+          void queryClient.invalidateQueries({ queryKey: listKey("highlights") });
+        }
+        if (isAbortError(error)) return;
         if (error instanceof ReaderError && error.requiresPin) {
           setResultPanel(null);
           setPinPrompt(action);
@@ -141,11 +185,46 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
     });
   }
 
-  function paragraphAction(type: "highlight" | "delete" | "explain" | "original") {
+  function paragraphAction(type: "highlight" | "delete" | "explain" | "original", ranges?: TokenRange[]) {
     if (!selected) return;
+    if (ranges) {
+      const length = ranges.reduce((total, range) => total + range.end - range.start, 0);
+      if (!ranges.length || length > 1500) {
+        if (length > 1500) setFailure({ message: "最多选择 1500 字。" });
+        return;
+      }
+      setSelected(null);
+      const field = selected.field;
+      if (type === "highlight") run({ type, data: { field, ranges: JSON.stringify(ranges) } });
+      else if (type === "explain") run({
+        type, data: { action: "explain", field, ranges: JSON.stringify(ranges), save: "1", context: "paragraph" },
+        quote: ranges.map(range => range.quote).join("\n"),
+      });
+      return;
+    }
     setSelected(null);
     if (type === "delete") {
       if (selected.highlightId) run({ type, data: { action: "delete", id: selected.highlightId } });
+      return;
+    }
+    if (type === "explain" && selected.highlightId) {
+      const mark = highlights.find(item => item.id === selected.highlightId);
+      if (!mark || mark.end <= mark.start) return;
+      if (mark.end - mark.start > 1500) {
+        setFailure({ message: "最多选择 1500 字。" });
+        return;
+      }
+      const source = selected.field === "original" ? data.original : selected.field === "terms" ? data.terms : data.body;
+      const quote = quoteBetween(source, mark.start, mark.end);
+      if (canonicalText(quote).length !== mark.end - mark.start) {
+        setFailure({ message: "正文已更新，请刷新后重试。" });
+        return;
+      }
+      run({
+        type,
+        data: { action: "explain", field: selected.field, ranges: JSON.stringify([{ start: mark.start, end: mark.end, quote }]) },
+        quote,
+      });
       return;
     }
     const { start, end, quote } = selected.paragraph;
@@ -157,10 +236,17 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
     const field = selected.field;
     const params: Record<string, string> = type === "highlight"
       ? { field, start: String(start), end: String(end), quote }
-      : { action: type, field, ranges: JSON.stringify([{ start, end, quote }]) };
+      : { action: type, field, ranges: JSON.stringify([{ start, end, quote }]), ...(type === "explain" ? { context: "around" } : {}) };
     run({ type, data: params, quote });
   }
 
+  function dismissResult() {
+    const action = mutation.isPending ? mutation.variables?.action : undefined;
+    if (action && resultPanel?.type === action.type && isModelAction(action)) modelAbort.current?.abort();
+    setResultPanel(null);
+  }
+
+  const modelError = mutation.error && !isAbortError(mutation.error) ? mutation.error.message : undefined;
   const search = readerSearch(category, page);
   const originalTitle = data.originalTitle || item.title;
   const origTitleLang = data.originalTitle ? data.originalLang : item.titleLang;
@@ -238,17 +324,9 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
         </div>
       )}
       <div className="progress" aria-hidden="true"><span className="progress-bar" style={{ width: `${progress * 100}%` }} /></div>
-      {selected && <ReaderDialog id="body-actions" label="正文操作" mode={selected.highlightId ? "mark" : "body"} dismiss={() => setSelected(null)}>
-        <div id="body-preview-scroll"><p id="body-preview">{selected.paragraph.quote}</p></div>
-        <div id="body-actions-buttons">
-          {selected.highlightId ? <button id="body-unhighlight" type="button" onClick={() => paragraphAction("delete")}>取消划线</button>
-            : <>
-              {hasOriginal && selected.field === "translation" && <button id="body-toggle" type="button" disabled={mutation.isPending} onClick={() => paragraphAction("original")}>显示原文</button>}
-              <button id="body-explain" type="button" disabled={mutation.isPending} onClick={() => paragraphAction("explain")}>解释</button>
-              <button id="body-highlight" type="button" disabled={mutation.isPending} onClick={() => paragraphAction("highlight")}>划线</button>
-            </>}
-        </div>
-      </ReaderDialog>}
+      {selected && <BodyActionSheet key={`${selected.field}:${selected.paragraph.start}`} selected={selected}
+        showOriginalButton={hasOriginal && selected.field === "translation"} pending={mutation.isPending}
+        dismiss={() => setSelected(null)} act={paragraphAction} />}
       {pinPrompt && <ReaderDialog id="favorite-dialog" label="收藏验证" dismiss={() => setPinPrompt(null)}>
         <PinForm pending={mutation.isPending} error={mutation.isError && mutation.error instanceof ReaderError && mutation.error.requiresPin
           ? (mutation.error.message === "请输入 6 位密码。" ? "" : mutation.error.message) : undefined}
@@ -261,18 +339,18 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
         </div>
       </ReaderDialog>}
       {resultPanel && (resultPanel.type === "original" ? (
-        <ReaderDialog id="original-match-dialog" label="原文匹配" dismiss={() => setResultPanel(null)}>
+        <ReaderDialog id="original-match-dialog" label="原文匹配" dismiss={dismissResult}>
           <div id="original-match-content">
             <section><h2>译文</h2><p id="original-match-current">{resultPanel.quote}</p></section>
             <section><h2>原文</h2><p id="original-match-text" role="status">
-              {mutation.isPending ? "正在匹配原文…" : mutation.error?.message ?? mutation.data?.paragraph ?? "未找到匹配段落。"}
+              {mutation.isPending ? "正在匹配原文…" : modelError ?? mutation.data?.paragraph ?? "未找到匹配段落。"}
             </p></section>
           </div>
         </ReaderDialog>
       ) : (
-        <ReaderDialog id="explanation-dialog" label="段落解释" dismiss={() => setResultPanel(null)}>
+        <ReaderDialog id="explanation-dialog" label="段落解释" dismiss={dismissResult}>
           <div id="explanation-text" aria-live="polite">{mutation.isPending ? "正在解释…"
-            : mutation.error?.message ?? (mutation.data?.markdown ? markdown(mutation.data.markdown) : mutation.data?.explanation)}</div>
+            : modelError ?? (mutation.data?.markdown ? markdown(mutation.data.markdown) : mutation.data?.explanation)}</div>
         </ReaderDialog>
       ))}
     </div>

@@ -73,6 +73,7 @@ type ReaderActionResult = {
   explanation?: string;
   markdown?: MarkdownNode[];
   highlight?: ResolvedHighlight;
+  highlights?: ResolvedHighlight[];
   id?: string;
 };
 
@@ -82,10 +83,10 @@ export type ReaderAction = {
   quote?: string;
 };
 
-export async function performAction(code: string, action: ReaderAction, pin?: string) {
+export async function performAction(code: string, action: ReaderAction, pin?: string, signal?: AbortSignal) {
   const endpoint = action.type === "favorite" || action.type === "add-later" ? action.type : "highlight";
   const path = `/read/${endpoint}/${encodeURIComponent(code)}`;
-  const options = { cache: "no-store" } as const;
+  const options = { cache: "no-store" as const, signal };
   const { csrf, authenticated } = await requestJson<{ csrf: string; authenticated: boolean }>(path, options, "无法验证身份。");
   if (!authenticated && !pin) throw new ReaderError("请输入 6 位密码。", 401, true);
   if (!authenticated && endpoint === "highlight") {
