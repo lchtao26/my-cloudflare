@@ -87,7 +87,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
               return (
                 <li key={item.id}>
                   {article && item.located ? (
-                    <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={search} hash={`hl-${item.id}`}>
+                    <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={search} hash={`hl-${item.id}`} hashScrollIntoView={{ block: "center", behavior: "instant" }}>
                       {item.quote}
                       {meta}
                     </Link>

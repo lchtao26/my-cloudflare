@@ -15,8 +15,16 @@ import { useReaderScroll } from "./reading.ts";
 
 export type InitialArticle = { data: ReaderArticle; error?: never } | { data?: never; error: { message: string; status: number } };
 
+function referrerIsCurrentOrigin(): boolean {
+  try {
+    return new URL(document.referrer).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 function backToPreviousPage(event: MouseEvent<HTMLAnchorElement>) {
-  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || (event.currentTarget.target && event.currentTarget.target !== "_self") || event.currentTarget.hasAttribute("download") || window.history.length <= 1) return;
+  if (!referrerIsCurrentOrigin() || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || (event.currentTarget.target && event.currentTarget.target !== "_self") || event.currentTarget.hasAttribute("download") || window.history.length <= 1) return;
   try {
     window.history.back();
     event.preventDefault();
@@ -85,6 +93,20 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const [resultPanel, setResultPanel] = useState<ReaderAction | null>(null);
   const [failure, setFailure] = useState<{ message: string; retry?: ReaderAction } | null>(null);
   const [addedLater, setAddedLater] = useState(false);
+  const [readingActions, setReadingActions] = useState(false);
+  const [readingTab, setReadingTab] = useState<"page" | "article" | "share">("page");
+  const activePress = useRef<{ x: number; y: number; scroll: number } | null>(null);
+  const bindReadingPanel = useCallback(
+    (panel: HTMLDivElement | null) => {
+      if (!panel) return;
+      const frame = requestAnimationFrame(() => {
+        if (panel.id === `reading-panel-${readingTab}`) panel.removeAttribute("hidden");
+        else panel.setAttribute("hidden", "until-found");
+      });
+      return () => cancelAnimationFrame(frame);
+    },
+    [readingTab],
+  );
   const syncedAnchor = useRef<string | null>(null);
   const scrolledAnchor = useRef<string | null>(null);
   const modelAbort = useRef<AbortController | null>(null);
@@ -101,10 +123,19 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
     element => {
       const cleanup = mainRef(element);
       if (!element || !anchoredMark || scrolledAnchor.current === hash) return cleanup;
-      scrolledAnchor.current = hash;
-      const frame = requestAnimationFrame(() => document.getElementById(hash)?.scrollIntoView({ block: "center" }));
+      let timer = 0;
+      const frame = requestAnimationFrame(() => {
+        // The router's hash scroll runs in an effect and aligns to the top unless the link overrides it.
+        timer = window.setTimeout(() => {
+          const node = document.getElementById(hash);
+          if (!node) return;
+          node.scrollIntoView({ block: "center", behavior: "instant" });
+          scrolledAnchor.current = hash;
+        }, 0);
+      });
       return () => {
         cancelAnimationFrame(frame);
+        window.clearTimeout(timer);
         cleanup?.();
       };
     },
@@ -238,10 +269,155 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
     setResultPanel(null);
   }
 
+  const readingActionsRef = useCallback((bar: HTMLDivElement | null) => {
+    if (!bar) return;
+    const tabs = () => [...bar.querySelectorAll<HTMLButtonElement>(".reading-tabs button")];
+    const toolbarItems = () => {
+      const panel = [...bar.querySelectorAll<HTMLElement>('[role="tabpanel"]')].find(item => !item.hasAttribute("hidden"));
+      return panel ? [...panel.querySelectorAll<HTMLElement>("button, a")] : [];
+    };
+    bar.querySelector(".reading-tabs")?.setAttribute("focusgroup", "tablist nomemory");
+    for (const row of bar.querySelectorAll(".reading-actions-row")) row.setAttribute("focusgroup", "toolbar wrap");
+    for (const tab of tabs()) tab.toggleAttribute("focusgroupstart", tab.getAttribute("aria-selected") === "true");
+    const onBeforeMatch = (event: Event) => {
+      const panel = event.target;
+      if (!(panel instanceof HTMLElement)) return;
+      const id = panel.getAttribute("aria-labelledby");
+      if (id === "reading-tab-page" || id === "reading-tab-article" || id === "reading-tab-share") setReadingTab(id.slice("reading-tab-".length) as "page" | "article" | "share");
+    };
+    bar.addEventListener("beforematch", onBeforeMatch);
+    const onDocClick = (event: globalThis.MouseEvent) => {
+      if (!(event.target instanceof Node) || bar.contains(event.target)) return;
+      setReadingActions(false);
+    };
+    const rememberPress = (x: number, y: number, target: EventTarget | null) => {
+      if (target instanceof Node && bar.contains(target)) {
+        activePress.current = null;
+        return;
+      }
+      activePress.current = { x, y, scroll: window.scrollY };
+    };
+    const dismissScrolledPress = (x: number, y: number) => {
+      const press = activePress.current;
+      if (!press) return;
+      if (Math.abs(x - press.x) <= 10 && Math.abs(y - press.y) <= 10 && Math.abs(window.scrollY - press.scroll) <= 5) return;
+      activePress.current = null;
+      setReadingActions(false);
+    };
+    const onPointerDown = (event: globalThis.PointerEvent) => {
+      if (!event.isPrimary || event.button !== 0) return;
+      rememberPress(event.clientX, event.clientY, event.target);
+    };
+    const onPointerMove = (event: globalThis.PointerEvent) => {
+      if (!event.isPrimary) return;
+      dismissScrolledPress(event.clientX, event.clientY);
+    };
+    const onTouchStart = (event: globalThis.TouchEvent) => {
+      if (window.PointerEvent) return;
+      const touch = event.touches[0];
+      if (event.touches.length === 1 && touch) rememberPress(touch.clientX, touch.clientY, event.target);
+    };
+    const onTouchMove = (event: globalThis.TouchEvent) => {
+      if (window.PointerEvent) return;
+      const touch = event.touches[0];
+      if (touch) dismissScrolledPress(touch.clientX, touch.clientY);
+    };
+    const onScroll = () => {
+      const press = activePress.current;
+      if (press) dismissScrolledPress(press.x, press.y);
+    };
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("touchstart", onTouchStart, true);
+    document.addEventListener("touchmove", onTouchMove);
+    window.addEventListener("scroll", onScroll);
+    let removeKeys = () => {};
+    if (!("focusGroup" in HTMLElement.prototype)) {
+      const mark = (controls: HTMLElement[], selected: HTMLElement | undefined) => {
+        controls.forEach(control => {
+          control.tabIndex = control === selected ? 0 : -1;
+        });
+      };
+      mark(
+        tabs(),
+        tabs().find(tab => tab.getAttribute("aria-selected") === "true"),
+      );
+      mark(toolbarItems(), toolbarItems()[0]);
+      const onFocusIn = (event: FocusEvent) => {
+        const tabList = tabs();
+        if (event.target instanceof HTMLButtonElement && tabList.includes(event.target)) {
+          mark(tabList, event.target);
+          return;
+        }
+        const controls = toolbarItems();
+        if (!(event.target instanceof HTMLElement) || !controls.includes(event.target)) return;
+        mark(controls, event.target);
+      };
+      const onKeyDown = (event: KeyboardEvent) => {
+        const move = (controls: HTMLElement[]) => {
+          const index = controls.indexOf(document.activeElement as HTMLElement);
+          if (index < 0) return false;
+          const rtl = getComputedStyle(bar).direction === "rtl";
+          const next = event.key === "Home" ? 0 : event.key === "End" ? controls.length - 1 : event.key === "ArrowRight" ? (index + (rtl ? -1 : 1) + controls.length) % controls.length : event.key === "ArrowLeft" ? (index + (rtl ? 1 : -1) + controls.length) % controls.length : -1;
+          if (next < 0) return false;
+          event.preventDefault();
+          controls[next]?.focus();
+          return true;
+        };
+        if (move(tabs())) return;
+        move(toolbarItems());
+      };
+      bar.addEventListener("focusin", onFocusIn);
+      bar.addEventListener("keydown", onKeyDown);
+      removeKeys = () => {
+        bar.removeEventListener("focusin", onFocusIn);
+        bar.removeEventListener("keydown", onKeyDown);
+      };
+    }
+    return () => {
+      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("touchstart", onTouchStart, true);
+      document.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("scroll", onScroll);
+      bar.removeEventListener("beforematch", onBeforeMatch);
+      removeKeys();
+    };
+  }, []);
+
+  function chooseReadingTab(tab: "page" | "article" | "share") {
+    setReadingTab(tab);
+    for (const button of document.querySelectorAll<HTMLButtonElement>(".reading-tabs button")) button.toggleAttribute("focusgroupstart", button.id === `reading-tab-${tab}`);
+    if ("focusGroup" in HTMLElement.prototype) return;
+    requestAnimationFrame(() => {
+      const panel = document.getElementById(`reading-panel-${tab}`);
+      if (!panel) return;
+      const controls = [...panel.querySelectorAll<HTMLElement>("button, a")];
+      controls.forEach((control, index) => {
+        control.tabIndex = index ? -1 : 0;
+      });
+    });
+  }
+
+  function selectParagraph(selection: ParagraphSelection) {
+    setReadingActions(false);
+    setSelected(selection);
+  }
+
+  function showReadingActions(event: MouseEvent<HTMLDivElement>) {
+    if (event.defaultPrevented) return;
+    const target = event.target;
+    if (!(target instanceof Element) || target.closest("a, button") || window.getSelection()?.toString()) return;
+    setReadingActions(true);
+  }
+
   const modelError = mutation.error && !isAbortError(mutation.error) ? mutation.error.message : undefined;
   const search = readerSearch(category, page);
   const originalTitle = data.originalTitle || item.title;
   const origTitleLang = data.originalTitle ? data.originalLang : item.titleLang;
+  const atPageBottom = progress > 0 && document.documentElement.scrollHeight - window.innerHeight - window.scrollY <= 2;
   return (
     <div className="reader-surface" {...gutter}>
       <title>{item.title}</title>
@@ -254,89 +430,70 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
               <span>{data.date || "—"}</span>
               {item.author && <span>{item.author}</span>}
             </span>
-            {(actions || hasOriginal) && (
+            {hasOriginal && (
               <span className="byline-actions">
-                {actions && (
-                  <Link className="other-link" to="/read" search={readerSearch()} onClick={backToPreviousPage}>
-                    返回
-                  </Link>
-                )}
-                {hasOriginal && (
-                  <button
-                    className="other-link"
-                    type="button"
-                    aria-controls="original-body"
-                    aria-expanded={showOriginal}
-                    onClick={() =>
-                      setShowOriginal(value => {
-                        const next = !value;
-                        try {
-                          localStorage.setItem(`read-view:${item.code}`, next ? "original" : "translation");
-                        } catch {
-                          /* Local storage can be disabled. */
-                        }
-                        return next;
-                      })
-                    }
-                  >
-                    {showOriginal ? "显示翻译" : "显示原文"}
-                  </button>
-                )}
+                <button
+                  className="other-link"
+                  type="button"
+                  aria-controls="original-body"
+                  aria-expanded={showOriginal}
+                  onClick={() =>
+                    setShowOriginal(value => {
+                      const next = !value;
+                      try {
+                        localStorage.setItem(`read-view:${item.code}`, next ? "original" : "translation");
+                      } catch {
+                        /* Local storage can be disabled. */
+                      }
+                      return next;
+                    })
+                  }
+                >
+                  {showOriginal ? "显示翻译" : "显示原文"}
+                </button>
               </span>
             )}
           </p>
-          <ReadingBody id={hasOriginal ? "translated-body" : undefined} field={data.field} lang={data.lang} paragraphs={data.body} highlights={highlights} hidden={showOriginal} select={actions?.highlightsEnabled ? setSelected : undefined} />
-          {hasOriginal && <ReadingBody id="original-body" field="original" lang={data.originalLang} paragraphs={data.original} highlights={highlights} hidden={!showOriginal} select={actions?.highlightsEnabled ? setSelected : undefined} />}
-          {actions && (
-            <p className="other">
-              <button type="button" className="other-link" disabled={mutation.isPending || addedLater} aria-label={addedLater ? "已加入待读" : "待读"} onClick={() => run({ type: "add-later", data: {} })}>
-                <span role="status">{addedLater ? "已加入待读" : "待读"}</span>
-              </button>{" "}
-              <button type="button" className="other-link" disabled={mutation.isPending} aria-label={actions.favorite ? "取消收藏" : "收藏"} onClick={() => run({ type: "favorite", data: { favorite: actions.favorite ? "0" : "1" } })}>
-                <span role="status">{actions.favorite ? "取消收藏" : "收藏"}</span>
-              </button>{" "}
-              <a className="other-link" href={actions.notionUrl}>
-                管理
-              </a>{" "}
-              <ShareButton code={item.code} />
+          <div onClick={actions ? showReadingActions : undefined}>
+            <ReadingBody id={hasOriginal ? "translated-body" : undefined} field={data.field} lang={data.lang} paragraphs={data.body} highlights={highlights} hidden={showOriginal} select={actions?.highlightsEnabled ? selectParagraph : undefined} />
+            {hasOriginal && <ReadingBody id="original-body" field="original" lang={data.originalLang} paragraphs={data.original} highlights={highlights} hidden={!showOriginal} select={actions?.highlightsEnabled ? selectParagraph : undefined} />}
+            <hr />
+            <p className="detail-metadata">
+              {(data.originalUrl || (data.originalTitle && data.originalTitle !== item.title)) && (
+                <>
+                  原文：
+                  {data.originalUrl ? (
+                    <a className="metadata-link" href={data.originalUrl} lang={origTitleLang}>
+                      {originalTitle}
+                    </a>
+                  ) : (
+                    <span lang={origTitleLang}>{originalTitle}</span>
+                  )}
+                  <br />
+                </>
+              )}
+              {data.publisher && (
+                <>
+                  来源：{data.publisher}
+                  <br />
+                </>
+              )}
+              {data.chapter && (
+                <>
+                  章节：{data.chapter}
+                  <br />
+                </>
+              )}
+              日期：{data.date || "—"}
             </p>
-          )}
-          <hr />
-          <p className="detail-metadata">
-            {(data.originalUrl || (data.originalTitle && data.originalTitle !== item.title)) && (
+            {data.terms.length > 0 && (
               <>
-                原文：
-                {data.originalUrl ? (
-                  <a className="metadata-link" href={data.originalUrl} lang={origTitleLang}>
-                    {originalTitle}
-                  </a>
-                ) : (
-                  <span lang={origTitleLang}>{originalTitle}</span>
-                )}
-                <br />
+                <hr />
+                <p>名词解释</p>
+                <ReadingBody field="terms" paragraphs={data.terms} highlights={highlights} select={actions?.highlightsEnabled ? selectParagraph : undefined} />
               </>
             )}
-            {data.publisher && (
-              <>
-                来源：{data.publisher}
-                <br />
-              </>
-            )}
-            {data.chapter && (
-              <>
-                章节：{data.chapter}
-                <br />
-              </>
-            )}
-            日期：{data.date || "—"}
-          </p>
-          {data.terms.length > 0 && (
-            <>
-              <hr />
-              <p>名词解释</p>
-              <ReadingBody field="terms" paragraphs={data.terms} highlights={highlights} select={actions?.highlightsEnabled ? setSelected : undefined} />
-            </>
-          )}
+          </div>
         </article>
         {actions && (
           <nav className="nav-row" aria-label="文章导航">
@@ -360,6 +517,49 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
           </nav>
         )}
       </main>
+      {actions && readingActions && (
+        <div className="reading-actions" ref={readingActionsRef}>
+          <div className="reading-tabs" role="tablist" aria-label="阅读操作">
+            {(
+              [
+                ["page", "页面"],
+                ["article", "文章"],
+                ["share", "分享"],
+              ] as const
+            ).map(([id, label]) => (
+              <button key={id} type="button" id={`reading-tab-${id}`} role="tab" aria-selected={readingTab === id} onFocus={() => chooseReadingTab(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="reading-panels">
+            <div role="tabpanel" id="reading-panel-page" aria-labelledby="reading-tab-page" hidden={readingTab !== "page"} ref={bindReadingPanel}>
+              <div className="reading-actions-row" role="toolbar" aria-label="页面">
+                <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>
+                  返回
+                </Link>
+                <button type="button" onClick={() => window.scrollTo(0, atPageBottom ? 0 : document.documentElement.scrollHeight)}>
+                  {atPageBottom ? "滑到顶部" : "滑到底部"}
+                </button>
+              </div>
+            </div>
+            <div role="tabpanel" id="reading-panel-article" aria-labelledby="reading-tab-article" hidden={readingTab !== "article"} ref={bindReadingPanel}>
+              <div className="reading-actions-row" role="toolbar" aria-label="文章">
+                <button type="button" disabled={mutation.isPending || addedLater} onClick={() => run({ type: "add-later", data: {} })}>
+                  {addedLater ? "已加入待读" : "待读"}
+                </button>
+                <button type="button" disabled={mutation.isPending} onClick={() => run({ type: "favorite", data: { favorite: actions.favorite ? "0" : "1" } })}>
+                  {actions.favorite ? "取消收藏" : "收藏"}
+                </button>
+                <a href={actions.notionUrl}>管理</a>
+              </div>
+            </div>
+            <div role="tabpanel" id="reading-panel-share" aria-labelledby="reading-tab-share" hidden={readingTab !== "share"} ref={bindReadingPanel}>
+              <ShareLink code={item.code} />
+            </div>
+          </div>
+        </div>
+      )}
       {remoteProgress !== null && (
         <div className="progress-sync" role="region" aria-label="阅读进度同步">
           <span>远端已读至 {Math.round(remoteProgress * 100)}%</span>
@@ -487,32 +687,48 @@ function PinFields({ pending, error, submit, cancel }: { pending: boolean; error
   );
 }
 
-function ShareButton({ code }: { code: string }) {
-  const [status, setStatus] = useState("分享");
-  async function share() {
-    const value = new URL(`/s/${code}`, location.origin).href;
+function ShareLink({ code }: { code: string }) {
+  const [status, setStatus] = useState("");
+  const clearStatus = useRef<number | null>(null);
+  const previousStatus = useRef("");
+  const url = new URL(`/s/${code}`, location.origin).href;
+  async function copy() {
+    let copied = false;
     try {
-      await navigator.clipboard.writeText(value);
-      setStatus("已复制");
+      await navigator.clipboard.writeText(url);
+      copied = true;
     } catch {
-      const input = document.createElement("textarea");
-      input.value = value;
-      input.style.position = "fixed";
-      input.style.left = "-10000px";
-      document.body.appendChild(input);
-      input.select();
+      const field = document.createElement("textarea");
+      field.value = url;
+      field.readOnly = true;
+      field.style.cssText = "position:fixed;inset-block-start:0;opacity:0";
+      document.body.appendChild(field);
+      field.select();
       try {
-        setStatus(document.execCommand("copy") ? "已复制" : "复制失败");
+        copied = document.execCommand("copy");
       } catch {
-        setStatus("复制失败");
+        copied = false;
       } finally {
-        input.remove();
+        field.remove();
       }
     }
+    const message = copied ? "已复制" : "复制失败";
+    // VoiceOver skips a repeated live-region string, so a repeat differs by an unpronounced space.
+    const announced = previousStatus.current === message ? `${message}\u00A0` : message;
+    previousStatus.current = announced;
+    if (clearStatus.current !== null) window.clearTimeout(clearStatus.current);
+    setStatus(announced);
+    clearStatus.current = window.setTimeout(() => setStatus(""), 2000);
   }
   return (
-    <button type="button" className="other-link" aria-label={status} onClick={() => void share()}>
-      <span role="status">{status}</span>
-    </button>
+    <div className="reading-share">
+      <input readOnly value={url} aria-label="分享链接" onFocus={event => event.currentTarget.select()} />
+      <button type="button" onClick={() => void copy()}>
+        {status.replace("\u00A0", "") || "复制"}
+      </button>
+      <span className="visually-hidden" role="status">
+        {status}
+      </span>
+    </div>
   );
 }

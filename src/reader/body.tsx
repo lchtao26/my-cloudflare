@@ -1,4 +1,4 @@
-import { Fragment, createElement, useRef, type MouseEvent, type ReactNode } from "react";
+import { Fragment, createElement, useCallback, useRef, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent } from "react";
 import type { MarkdownNode } from "./explanation-markdown.ts";
 import type { ReaderField, ReaderParagraph, ResolvedHighlight } from "./data.ts";
 
@@ -7,6 +7,8 @@ export type ParagraphSelection = {
   paragraph: ReaderParagraph;
   highlightId: string | null;
 };
+
+const HOLD_MS = 500;
 
 type TapEvent = Pick<MouseEvent, "target" | "clientX" | "clientY"> & Partial<Pick<MouseEvent, "altKey" | "ctrlKey" | "metaKey" | "shiftKey">>;
 
@@ -63,8 +65,9 @@ function markedText(text: string, offset: number, highlights: ResolvedHighlight[
 }
 
 export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, select }: { id?: string; field: ReaderField; lang?: string; paragraphs: ReaderParagraph[]; highlights: ResolvedHighlight[]; hidden?: boolean; select?: (selection: ParagraphSelection) => void }) {
-  const lastTap = useRef<{ paragraph: number; time: number } | null>(null);
-  const press = useRef<{ paragraph: number; x: number; y: number; scroll: number; time: number } | null>(null);
+  const stopHold = useRef<() => void>(() => {});
+  const armed = useRef(false);
+  const swallowClick = useRef(false);
   const lastTouch = useRef(-Infinity);
   const anchors = new Set<string>();
   const marks = highlights.filter(mark => mark.field === field);
@@ -75,49 +78,108 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
     return value == null ? null : Number(value);
   }
 
-  function clearTaps() {
-    press.current = null;
-    lastTap.current = null;
-  }
-
-  function startTap(event: TapEvent) {
+  function beginHold(event: TapEvent, kind: "pointer" | "touch" | "mouse") {
+    stopHold.current();
+    swallowClick.current = false;
     const paragraph = targetParagraph(event);
-    if (!select || paragraph === null || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || window.getSelection()?.toString()) {
-      clearTaps();
-      return;
-    }
-    press.current = {
-      paragraph,
-      x: event.clientX,
-      y: event.clientY,
-      scroll: window.scrollY,
-      time: performance.now(),
+    if (!select || paragraph === null || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || window.getSelection()?.toString()) return;
+    const highlightId = event.target instanceof Element ? (event.target.closest("mark[data-hl]")?.getAttribute("data-hl") ?? null) : null;
+    const origin = { x: event.clientX, y: event.clientY, scroll: window.scrollY };
+    let held = false;
+    let timer: number | null = window.setTimeout(() => {
+      timer = null;
+      held = true;
+    }, HOLD_MS);
+    const moved = (x: number, y: number) => Math.abs(origin.x - x) > 10 || Math.abs(origin.y - y) > 10 || Math.abs(origin.scroll - window.scrollY) > 5;
+    const detach = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+      armed.current = false;
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onRelease, true);
+      document.removeEventListener("pointercancel", onCancel, true);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onRelease, true);
+      document.removeEventListener("touchcancel", onCancel, true);
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onRelease, true);
+      stopHold.current = () => {};
     };
-  }
-
-  function moveTap(event: { clientX: number; clientY: number }) {
-    const start = press.current;
-    if (start && (Math.abs(start.x - event.clientX) > 10 || Math.abs(start.y - event.clientY) > 10 || Math.abs(start.scroll - window.scrollY) > 5)) clearTaps();
-  }
-
-  function finishTap(event: TapEvent) {
-    const start = press.current;
-    press.current = null;
-    const paragraph = targetParagraph(event);
-    const now = performance.now();
-    if (!select || !start || paragraph === null || start.paragraph !== paragraph || now - start.time > 500 || Math.abs(start.x - event.clientX) > 10 || Math.abs(start.y - event.clientY) > 10 || Math.abs(start.scroll - window.scrollY) > 5) {
-      clearTaps();
-      return;
-    }
-    const highlightId = window.getSelection()?.toString() ? null : ((event.target as Element).closest("mark[data-hl]")?.getAttribute("data-hl") ?? null);
-    if (highlightId || (lastTap.current?.paragraph === paragraph && now - lastTap.current.time <= 500)) {
-      lastTap.current = null;
-      window.getSelection()?.removeAllRanges();
-      select({ field, paragraph: paragraphs[paragraph]!, highlightId });
+    const onPointerMove = (move: PointerEvent) => {
+      if (!moved(move.clientX, move.clientY)) return;
+      swallowClick.current = true;
+      detach();
+    };
+    const onTouchMove = (move: globalThis.TouchEvent) => {
+      const touch = move.touches[0];
+      if (!touch || !moved(touch.clientX, touch.clientY)) return;
+      swallowClick.current = true;
+      detach();
+    };
+    const onMouseMove = (move: globalThis.MouseEvent) => {
+      if (!moved(move.clientX, move.clientY)) return;
+      swallowClick.current = true;
+      detach();
+    };
+    const onCancel = () => {
+      swallowClick.current = true;
+      detach();
+    };
+    // Open from the release click, after that click is stopped, so it cannot dismiss the new dialog.
+    const onRelease = () => {
+      const finished = held;
+      detach();
+      if (!finished || !select) return;
+      swallowClick.current = true;
+      let opened = false;
+      let fallback = 0;
+      const open = () => {
+        if (opened) return;
+        opened = true;
+        window.clearTimeout(fallback);
+        document.removeEventListener("click", absorb, true);
+        window.getSelection()?.removeAllRanges();
+        select({ field, paragraph: paragraphs[paragraph]!, highlightId });
+      };
+      const absorb = (click: Event) => {
+        click.preventDefault();
+        click.stopPropagation();
+        open();
+      };
+      document.addEventListener("click", absorb, true);
+      fallback = window.setTimeout(open, 400);
+    };
+    armed.current = true;
+    stopHold.current = detach;
+    if (kind === "pointer") {
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", onRelease, true);
+      document.addEventListener("pointercancel", onCancel, true);
+    } else if (kind === "touch") {
+      document.addEventListener("touchmove", onTouchMove);
+      document.addEventListener("touchend", onRelease, true);
+      document.addEventListener("touchcancel", onCancel, true);
     } else {
-      lastTap.current = { paragraph, time: now };
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onRelease, true);
     }
   }
+
+  function onClick(event: MouseEvent<HTMLDivElement>) {
+    if (!swallowClick.current) return;
+    swallowClick.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function onContextMenu(event: MouseEvent<HTMLDivElement>) {
+    if (!armed.current) return;
+    event.preventDefault();
+  }
+
+  const bindBody = useCallback((node: HTMLDivElement | null) => {
+    if (!node) stopHold.current();
+  }, []);
 
   return (
     <div
@@ -127,45 +189,33 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
       data-paragraph-actions={select ? "" : undefined}
       lang={lang}
       hidden={hidden}
-      onPointerDown={event => {
+      ref={bindBody}
+      onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
         if (!event.isPrimary || event.button !== 0) {
-          clearTaps();
+          stopHold.current();
           return;
         }
-        startTap(event);
+        beginHold(event, "pointer");
       }}
-      onPointerMove={moveTap}
-      onPointerCancel={clearTaps}
       // Older Android WebViews send Touch/Mouse events without Pointer Events.
-      onTouchStart={event => {
+      onTouchStart={(event: TouchEvent<HTMLDivElement>) => {
         if (window.PointerEvent) return;
         lastTouch.current = performance.now();
-        if (event.touches.length !== 1) return clearTaps();
+        if (event.touches.length !== 1) return stopHold.current();
         const touch = event.touches[0]!;
-        startTap({ target: event.target, clientX: touch.clientX, clientY: touch.clientY });
+        beginHold({ target: event.target, clientX: touch.clientX, clientY: touch.clientY }, "touch");
       }}
-      onTouchMove={event => {
-        if (window.PointerEvent) return;
-        if (event.touches.length !== 1) return clearTaps();
-        moveTap(event.touches[0]!);
-      }}
-      onTouchCancel={clearTaps}
-      onTouchEnd={event => {
+      onTouchEnd={() => {
         if (window.PointerEvent) return;
         lastTouch.current = performance.now();
-        if (event.touches.length || event.changedTouches.length !== 1) return clearTaps();
       }}
-      onMouseDown={event => {
-        // A touch can synthesize mouse events; count each physical tap only once.
+      onMouseDown={(event: MouseEvent<HTMLDivElement>) => {
         if (window.PointerEvent || performance.now() - lastTouch.current < 1000) return;
-        if (event.button !== 0) return clearTaps();
-        startTap(event);
+        if (event.button !== 0) return stopHold.current();
+        beginHold(event, "mouse");
       }}
-      onMouseMove={event => {
-        if (!window.PointerEvent) moveTap(event);
-      }}
-      // Open after pointerup/touchend: their synthesized click must not land on the new backdrop.
-      onClick={finishTap}
+      onClick={onClick}
+      onContextMenu={onContextMenu}
     >
       {paragraphs.map((paragraph, index) => {
         let offset = paragraph.start;
