@@ -153,6 +153,7 @@ test("explanations require authentication, verify the selection, and send the se
   assert.equal((await response.json() as { explanation: string }).explanation, "这段话的意思。");
   assert.equal(requests[0]!.headers.get("authorization"), "Bearer test-key");
   assert.equal(requests[0]!.body.model, "gpt-6-luna");
+  assert.deepEqual(requests[0]!.body.reasoning, { effort: "low" });
   assert.equal(requests[0]!.body.store, false);
   assert.equal(requests[0]!.body.instructions, undefined);
   assert.match(String(requests[0]!.body.input), /文章标题：测试\n\n解释一下：重复/);
@@ -457,7 +458,7 @@ test("aborting the client stops an explanation before the 60s upstream timeout",
   assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights").get() as { n: number }).n, 1);
 });
 
-test("explanation context is the current paragraph or the three paragraphs around it", async t => {
+test("explanation context is the current paragraph with its neighbors, or only the neighbors", async t => {
   const { db, sql } = database();
   t.after(() => sql.close());
   const article = structuredClone(page);
@@ -480,12 +481,21 @@ test("explanation context is the current paragraph or the three paragraphs aroun
   }
   const word = await post({ ranges: JSON.stringify([{ start: 6, end: 7, quote: "四" }]), save: "1", context: "paragraph" });
   assert.equal(word.status, 200);
-  assert.equal(requests[0], "文章标题：测试\n上下文：\n四段\n\n解释一下：四");
+  assert.equal(requests[0], "文章标题：测试\n上下文：\n三段\n\n四段\n\n五段\n\n解释一下：四");
+  const firstWord = await post({ ranges: JSON.stringify([{ start: 0, end: 1, quote: "一" }]), context: "paragraph" });
+  assert.equal(firstWord.status, 200);
+  assert.equal(requests[1], "文章标题：测试\n上下文：\n一段\n\n二段\n\n解释一下：一");
+  const lastWord = await post({ ranges: JSON.stringify([{ start: 12, end: 13, quote: "七" }]), context: "paragraph" });
+  assert.equal(lastWord.status, 200);
+  assert.equal(requests[2], "文章标题：测试\n上下文：\n六段\n\n七段\n\n解释一下：七");
   const paragraph = await post({ ranges: JSON.stringify([{ start: 6, end: 8, quote: "四段" }]), context: "around" });
   assert.equal(paragraph.status, 200);
-  assert.equal(requests[1], "文章标题：测试\n上下文：\n一段\n\n二段\n\n三段\n\n五段\n\n六段\n\n七段\n\n解释一下：四段");
+  assert.equal(requests[3], "文章标题：测试\n上下文：\n三段\n\n五段\n\n解释一下：四段");
   const first = await post({ ranges: JSON.stringify([{ start: 0, end: 2, quote: "一段" }]), context: "around" });
   assert.equal(first.status, 200);
-  assert.equal(requests[2], "文章标题：测试\n上下文：\n二段\n\n三段\n\n四段\n\n解释一下：一段");
+  assert.equal(requests[4], "文章标题：测试\n上下文：\n二段\n\n解释一下：一段");
+  const last = await post({ ranges: JSON.stringify([{ start: 12, end: 14, quote: "七段" }]), context: "around" });
+  assert.equal(last.status, 200);
+  assert.equal(requests[5], "文章标题：测试\n上下文：\n六段\n\n解释一下：七段");
   assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights").get() as { n: number }).n, 1);
 });

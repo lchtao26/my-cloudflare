@@ -6,8 +6,9 @@ import { tokenRanges, tokenize, type TokenRange } from "./tokenize.ts";
 const HOLD_MS = 500;
 const RELEASE_GUARD_MS = 400;
 
-export function BodyActionSheet({ selected, showOriginalButton, pending, dismiss, act }: {
+export function BodyActionSheet({ selected, preview, showOriginalButton, pending, dismiss, act }: {
   selected: ParagraphSelection;
+  preview: string;
   showOriginalButton: boolean;
   pending: boolean;
   dismiss: () => void;
@@ -139,7 +140,7 @@ export function BodyActionSheet({ selected, showOriginalButton, pending, dismiss
                 return next;
               });
             }}>{token.text}</button>;
-          }) : selected.paragraph.quote}
+          }) : preview}
         </p>
       </div>
       <div id="body-actions-buttons">

@@ -3,9 +3,10 @@ import { Link, useHydrated, useLocation } from "@tanstack/react-router";
 import { createElement, useCallback, useRef, useState, type MouseEvent, type ReactNode, type RefCallback } from "react";
 import type { MarkdownNode } from "../explanation-markdown.ts";
 import { canonicalText } from "../highlight-anchor.ts";
-import type { ReadCategory, ReaderArticle, ReaderParagraph } from "../reader-data.ts";
+import type { ReadCategory, ReaderArticle } from "../reader-data.ts";
 import { ReadingBody, type ParagraphSelection } from "./body.tsx";
 import { BodyActionSheet } from "./body-actions.tsx";
+import { quoteBetween, selectionPreview } from "./quote-slice.ts";
 import { ReaderDialog } from "./dialog.tsx";
 import type { TokenRange } from "./tokenize.ts";
 import { LoadingStatus } from "./loading.tsx";
@@ -60,27 +61,6 @@ function isModelAction(action: ReaderAction) {
 
 function isAbortError(error: unknown) {
   return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
-}
-
-function sliceQuote(quote: string, quoteStart: number, start: number, end: number) {
-  let canonical = quoteStart;
-  let from = -1;
-  let to = quote.length;
-  for (let index = 0; index < quote.length && canonical < end; index++) {
-    if (/\s/.test(quote[index]!)) continue;
-    if (canonical === start) from = index;
-    canonical += 1;
-    if (canonical === end) to = index + 1;
-  }
-  return from < 0 ? "" : quote.slice(from, to);
-}
-
-function quoteBetween(paragraphs: ReaderParagraph[], start: number, end: number) {
-  return paragraphs.flatMap(paragraph => {
-    if (paragraph.end <= start || paragraph.start >= end) return [];
-    const slice = sliceQuote(paragraph.quote, paragraph.start, Math.max(start, paragraph.start), Math.min(end, paragraph.end));
-    return slice ? [slice] : [];
-  }).join("");
 }
 
 function Article({ data, category, page, hydrated }: { data: ReaderArticle; category: ReadCategory; page: number; hydrated: boolean }) {
@@ -324,7 +304,8 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
         </div>
       )}
       <div className="progress" aria-hidden="true"><span className="progress-bar" style={{ width: `${progress * 100}%` }} /></div>
-      {selected && <BodyActionSheet key={`${selected.field}:${selected.paragraph.start}`} selected={selected}
+      {selected && <BodyActionSheet key={`${selected.field}:${selected.paragraph.start}:${selected.highlightId ?? ""}`} selected={selected}
+        preview={selectionPreview(selected, highlights, selected.field === "original" ? data.original : selected.field === "terms" ? data.terms : data.body)}
         showOriginalButton={hasOriginal && selected.field === "translation"} pending={mutation.isPending}
         dismiss={() => setSelected(null)} act={paragraphAction} />}
       {pinPrompt && <ReaderDialog id="favorite-dialog" label="收藏验证" dismiss={() => setPinPrompt(null)}>

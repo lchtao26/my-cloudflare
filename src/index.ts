@@ -486,8 +486,8 @@ function explainContext(excerpt: Excerpt, field: string, ranges: Array<{ start: 
   const index = paragraphs.findIndex(paragraph => paragraph.start <= ranges[0]!.start && ranges[0]!.start < paragraph.end);
   if (index < 0) return "";
   const chosen = mode === "paragraph"
-    ? paragraphs.filter(paragraph => ranges.some(range => range.start < paragraph.end && range.end > paragraph.start))
-    : [...paragraphs.slice(Math.max(0, index - 3), index), ...paragraphs.slice(index + 1, index + 4)];
+    ? paragraphs.slice(Math.max(0, index - 1), index + 2)
+    : [paragraphs[index - 1], paragraphs[index + 1]].filter(paragraph => paragraph !== undefined);
   return chosen.map(paragraph => paragraph.quote.trim()).filter(Boolean).join("\n\n");
 }
 
@@ -926,7 +926,7 @@ const worker = {
           const response = await fetch("https://api.302.ai/v1/responses", {
             method: "POST",
             headers: { Authorization: `Bearer ${env.AI302_API_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ model: "gpt-6-luna", store: false, reasoning: { effort: "none" }, max_output_tokens: 1500,
+            body: JSON.stringify({ model: "gpt-6-luna", store: false, reasoning: { effort: "low" }, max_output_tokens: 1500,
               input: `文章标题：${excerpt.title}${context ? `\n上下文：\n${context}` : ""}\n\n解释一下：${ranges.map(range => range.quote).join("\n")}` }),
             signal: AbortSignal.any([request.signal, AbortSignal.timeout(60000)]),
           });
