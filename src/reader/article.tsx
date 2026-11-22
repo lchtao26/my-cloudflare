@@ -87,7 +87,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const pathname = useLocation({ select: location => location.pathname });
   const searchStr = useLocation({ select: location => location.searchStr });
   const hash = useLocation({ select: location => location.hash });
-  const { progress, syncError, remoteProgress, syncToRemote, dismissRemote, gutter, mainRef } = useReaderScroll(actions ? item.code : undefined, true, Boolean(hash));
+  const { progress, syncError, remoteProgress, syncToRemote, dismissRemote, gutter, mainRef } = useReaderScroll(actions ? item.code : undefined, true, Boolean(hash), signedIn);
   const highlights = actions?.highlights ?? [];
   const anchoredMark = highlights.find(mark => hash === `hl-${mark.id}`);
   const hasOriginal = data.original.length > 0;

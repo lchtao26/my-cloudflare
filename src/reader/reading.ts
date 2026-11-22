@@ -1,16 +1,22 @@
-import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 export function shouldOfferRemoteSync(current: number, remote: number | null, maxScrollPx: number): boolean {
   return remote !== null && remote - current >= 0.02 && (remote - current) * maxScrollPx >= 40;
 }
 
-export function useReaderScroll(code?: string, enabled = true, hasAnchor = false) {
+export function useReaderScroll(code?: string, enabled = true, hasAnchor = false, authorized = false) {
   const main = useRef<HTMLElement | null>(null);
   const [progress, setProgress] = useState(0);
   const [syncError, setSyncError] = useState(false);
   const [remoteProgress, setRemoteProgress] = useState<number | null>(null);
   const syncToRemoteRef = useRef<() => void>(() => {});
   const dismissRemoteRef = useRef<() => void>(() => {});
+  const loadRef = useRef<() => void>(() => {});
+  const authorizedRef = useRef(authorized);
+  authorizedRef.current = authorized;
+  useEffect(() => {
+    if (authorized) loadRef.current();
+  }, [authorized, code]);
 
   const mainRef = useCallback(
     (element: HTMLElement | null) => {
@@ -68,7 +74,7 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
         setRemoteProgress(offered);
       }
       function post(value: number) {
-        if (!key || !ready || !(furthestRemote === null ? value > 0 : value > furthestRemote)) return;
+        if (!authorizedRef.current || !key || !ready || !(furthestRemote === null ? value > 0 : value > furthestRemote)) return;
         pending = pending
           .catch(() => {})
           .then(async () => {
@@ -102,7 +108,7 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
         if (ready) postIfAhead();
       }
       function load() {
-        if (!key || loading || disposed) return;
+        if (!authorizedRef.current || !key || loading || disposed) return;
         loading = true;
         void fetch(progressUrl, { credentials: "same-origin", cache: "no-store" })
           .then(async response => {
@@ -200,8 +206,10 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
       resize.observe(column);
       restore();
       update();
+      loadRef.current = load;
       if (key) load();
       return () => {
+        loadRef.current = () => {};
         flush();
         disposed = true;
         syncToRemoteRef.current = () => {};
