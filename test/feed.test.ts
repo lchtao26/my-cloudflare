@@ -881,7 +881,20 @@ test("reading API applies category filters without loading article neighbors", a
   assert.equal(queries.length, beforeDetails);
   const { listNeighborCodes } = await import("../src/reader/data.ts");
   const item = { title: "", titleLang: "", source: "", author: "" };
-  assert.equal(listNeighborCodes({ kind: "articles", hasMore: false, items: [{ ...item, code }, { ...item, code: nextCode }] }, code)?.nextCode, nextCode);
+  assert.equal(
+    listNeighborCodes(
+      {
+        kind: "articles",
+        hasMore: false,
+        items: [
+          { ...item, code },
+          { ...item, code: nextCode },
+        ],
+      },
+      code,
+    )?.nextCode,
+    nextCode,
+  );
   assert.equal(
     listNeighborCodes(
       {

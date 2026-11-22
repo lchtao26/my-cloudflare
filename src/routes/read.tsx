@@ -52,18 +52,16 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
   useEffect(() => {
     const root = list.current;
     if (!root || !data || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(
-      entries => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          const code = (entry.target as HTMLElement).dataset.code;
-          if (!code || prefetched.current.has(code)) continue;
-          prefetched.current.add(code);
-          observer.unobserve(entry.target);
-          void queryClient.prefetchQuery(articleQuery(code, false, category, page, "low")).catch(() => {});
-        }
-      },
-    );
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const code = (entry.target as HTMLElement).dataset.code;
+        if (!code || prefetched.current.has(code)) continue;
+        prefetched.current.add(code);
+        observer.unobserve(entry.target);
+        void queryClient.prefetchQuery(articleQuery(code, false, category, page, "low")).catch(() => {});
+      }
+    });
     for (const link of root.querySelectorAll<HTMLElement>("a.item-link[data-code]")) observer.observe(link);
     return () => observer.disconnect();
   }, [category, data, page, queryClient]);

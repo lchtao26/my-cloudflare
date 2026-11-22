@@ -483,37 +483,37 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
       <main ref={setMain}>
         {syncError && <p role="status">阅读进度暂未同步，请检查网络后继续阅读。</p>}
         <div onClick={actions ? showReadingActions : undefined}>
-        <article>
-          <h1 lang={item.titleLang}>{item.title}</h1>
-          <p className="article-byline">
-            <span className="author-row">
-              <span>{data.date || "—"}</span>
-              {item.author && <span>{item.author}</span>}
-            </span>
-            {hasOriginal && (
-              <span className="byline-actions">
-                <button
-                  className="other-link"
-                  type="button"
-                  aria-controls="original-body"
-                  aria-expanded={showOriginal}
-                  onClick={() =>
-                    setShowOriginal(value => {
-                      const next = !value;
-                      try {
-                        localStorage.setItem(`read-view:${item.code}`, next ? "original" : "translation");
-                      } catch {
-                        /* Local storage can be disabled. */
-                      }
-                      return next;
-                    })
-                  }
-                >
-                  {showOriginal ? "显示翻译" : "显示原文"}
-                </button>
+          <article>
+            <h1 lang={item.titleLang}>{item.title}</h1>
+            <p className="article-byline">
+              <span className="author-row">
+                <span>{data.date || "—"}</span>
+                {item.author && <span>{item.author}</span>}
               </span>
-            )}
-          </p>
+              {hasOriginal && (
+                <span className="byline-actions">
+                  <button
+                    className="other-link"
+                    type="button"
+                    aria-controls="original-body"
+                    aria-expanded={showOriginal}
+                    onClick={() =>
+                      setShowOriginal(value => {
+                        const next = !value;
+                        try {
+                          localStorage.setItem(`read-view:${item.code}`, next ? "original" : "translation");
+                        } catch {
+                          /* Local storage can be disabled. */
+                        }
+                        return next;
+                      })
+                    }
+                  >
+                    {showOriginal ? "显示翻译" : "显示原文"}
+                  </button>
+                </span>
+              )}
+            </p>
             <ReadingBody id={hasOriginal ? "translated-body" : undefined} field={data.field} lang={data.lang} paragraphs={data.body} highlights={highlights} hidden={showOriginal} select={actions?.highlightsEnabled && signedIn ? selectParagraph : undefined} />
             {hasOriginal && <ReadingBody id="original-body" field="original" lang={data.originalLang} paragraphs={data.original} highlights={highlights} hidden={!showOriginal} select={actions?.highlightsEnabled && signedIn ? selectParagraph : undefined} />}
             <hr />
@@ -552,28 +552,28 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
                 <ReadingBody field="terms" paragraphs={data.terms} highlights={highlights} select={actions?.highlightsEnabled && signedIn ? selectParagraph : undefined} />
               </>
             )}
-        </article>
-        {actions && (
-          <nav className="nav-row" aria-label="文章导航" ref={navRef}>
-            {neighbors?.prevCode ? (
-              <Link to="/r/$code" params={{ code: neighbors.prevCode }} search={search}>
-                上一篇
+          </article>
+          {actions && (
+            <nav className="nav-row" aria-label="文章导航" ref={navRef}>
+              {neighbors?.prevCode ? (
+                <Link to="/r/$code" params={{ code: neighbors.prevCode }} search={search}>
+                  上一篇
+                </Link>
+              ) : (
+                <span className="is-disabled">上一篇</span>
+              )}
+              <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>
+                返回
               </Link>
-            ) : (
-              <span className="is-disabled">上一篇</span>
-            )}
-            <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>
-              返回
-            </Link>
-            {neighbors?.nextCode ? (
-              <Link to="/r/$code" params={{ code: neighbors.nextCode }} search={search}>
-                下一篇
-              </Link>
-            ) : (
-              <span className="is-disabled">下一篇</span>
-            )}
-          </nav>
-        )}
+              {neighbors?.nextCode ? (
+                <Link to="/r/$code" params={{ code: neighbors.nextCode }} search={search}>
+                  下一篇
+                </Link>
+              ) : (
+                <span className="is-disabled">下一篇</span>
+              )}
+            </nav>
+          )}
         </div>
       </main>
       {actions && readingActions && (
@@ -587,43 +587,43 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
             </button>
           </div>
           {signedIn ? (
-          <div className="reading-actions">
-            <div className="reading-tabs" role="tablist" aria-label="阅读操作">
-              {(
-                [
-                  ["article", "文章"],
-                  ["share", "分享"],
-                ] as const
-              ).map(([id, label]) => (
-                <button key={id} type="button" id={`reading-tab-${id}`} role="tab" aria-selected={readingTab === id} onFocus={() => chooseReadingTab(id)}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="reading-panels">
-              <div role="tabpanel" id="reading-panel-article" aria-labelledby="reading-tab-article" hidden={readingTab !== "article"} ref={bindReadingPanel}>
-                <div className="reading-actions-row" role="toolbar" aria-label="文章">
-                  <button type="button" disabled={mutation.isPending || addedLater} onClick={() => run({ type: "add-later", data: {} })}>
-                    {addedLater ? "已加入待读" : "待读"}
+            <div className="reading-actions">
+              <div className="reading-tabs" role="tablist" aria-label="阅读操作">
+                {(
+                  [
+                    ["article", "文章"],
+                    ["share", "分享"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button key={id} type="button" id={`reading-tab-${id}`} role="tab" aria-selected={readingTab === id} onFocus={() => chooseReadingTab(id)}>
+                    {label}
                   </button>
-                  <button type="button" disabled={mutation.isPending} onClick={() => run({ type: "favorite", data: { favorite: actions.favorite ? "0" : "1" } })}>
-                    {actions.favorite ? "取消收藏" : "收藏"}
-                  </button>
-                  <a href={actions.notionUrl}>管理</a>
+                ))}
+              </div>
+              <div className="reading-panels">
+                <div role="tabpanel" id="reading-panel-article" aria-labelledby="reading-tab-article" hidden={readingTab !== "article"} ref={bindReadingPanel}>
+                  <div className="reading-actions-row" role="toolbar" aria-label="文章">
+                    <button type="button" disabled={mutation.isPending || addedLater} onClick={() => run({ type: "add-later", data: {} })}>
+                      {addedLater ? "已加入待读" : "待读"}
+                    </button>
+                    <button type="button" disabled={mutation.isPending} onClick={() => run({ type: "favorite", data: { favorite: actions.favorite ? "0" : "1" } })}>
+                      {actions.favorite ? "取消收藏" : "收藏"}
+                    </button>
+                    <a href={actions.notionUrl}>管理</a>
+                  </div>
+                </div>
+                <div role="tabpanel" id="reading-panel-share" aria-labelledby="reading-tab-share" hidden={readingTab !== "share"} ref={bindReadingPanel}>
+                  <ShareLink code={item.code} />
                 </div>
               </div>
-              <div role="tabpanel" id="reading-panel-share" aria-labelledby="reading-tab-share" hidden={readingTab !== "share"} ref={bindReadingPanel}>
-                <ShareLink code={item.code} />
+            </div>
+          ) : session.isSuccess ? (
+            <div className="reading-actions" role="region" aria-label="登录">
+              <div className="reading-actions-row">
+                <span>请登录</span>
+                <a href={`/auth?next=${encodeURIComponent(pathname + searchStr + hash)}`}>登录</a>
               </div>
             </div>
-          </div>
-          ) : session.isSuccess ? (
-          <div className="reading-actions" role="region" aria-label="登录">
-            <div className="reading-actions-row">
-              <span>请登录</span>
-              <a href={`/auth?next=${encodeURIComponent(pathname + searchStr + hash)}`}>登录</a>
-            </div>
-          </div>
           ) : null}
         </div>
       )}
