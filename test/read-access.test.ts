@@ -5,7 +5,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { favoriteRequest } from "../src/reader/favorite.ts";
 import { shareCode } from "../src/index.ts";
-import { protectRead, readLogin } from "../src/reader/auth.ts";
+import { protectRead, readLogin, readLogout, readSession } from "../src/reader/auth.ts";
 import { readProgress } from "../src/reader/progress.ts";
 import { shouldOfferRemoteSync } from "../src/reader/reading.ts";
 
@@ -18,19 +18,15 @@ function environment() {
 
 test("reading access requires the existing session and login rejects forged requests", async () => {
   const env = environment();
-  for (const path of ["/read?tab=weekly", `/r/${code}`, "/api/read", `/api/r/${code}`, `/api/progress/${code}`]) {
-    const response = await protectRead(new Request(origin + path), env);
-    assert.ok(response);
-    assert.equal(response.status, path.startsWith("/api/") ? 401 : 302);
-    assert.equal(response.headers.get("Cache-Control"), "no-store");
-    if (!path.startsWith("/api/")) {
-      const location = new URL(response.headers.get("Location")!);
-      assert.equal(location.pathname, "/auth");
-      assert.equal(location.searchParams.get("next"), path);
-    }
+  for (const path of ["/read?tab=weekly", `/r/${code}`, "/api/read", `/api/r/${code}`, `/s/${code}`, `/api/s/${code}`]) {
+    assert.equal(await protectRead(new Request(origin + path), env), null);
   }
-  assert.equal(await protectRead(new Request(`${origin}/s/${code}`), env), null);
-  assert.equal(await protectRead(new Request(`${origin}/api/s/${code}`), env), null);
+  const progress = await protectRead(new Request(`${origin}/api/progress/${code}`), env);
+  assert.ok(progress);
+  assert.equal(progress.status, 401);
+  assert.equal(progress.headers.get("Cache-Control"), "no-store");
+  assert.equal((await readSession(new Request(`${origin}/api/session`), env)).headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await (await readSession(new Request(`${origin}/api/session`), env)).json(), { authenticated: false });
   const loginUrl = `${origin}/auth?next=${encodeURIComponent(`/r/${code}?tab=weekly`)}`;
   const login = await readLogin(new Request(loginUrl), env);
   const csrfCookie = login.headers.get("set-cookie")!.split(";")[0]!;
@@ -48,8 +44,16 @@ test("reading access requires the existing session and login rejects forged requ
   assert.equal(success.headers.get("Location"), `/r/${code}?tab=weekly`);
   const session = success.headers.get("set-cookie")!.split(";")[0]!;
   assert.match(session, /^__Host-read-session=/);
-  assert.equal(await protectRead(new Request(`${origin}/api/r/${code}`, { headers: { Cookie: session } }), env), null);
-  assert.ok(await protectRead(new Request(`${origin}/read`, { headers: { Cookie: session } }), { ...env, FAVORITE_PIN: "654321" }));
+  assert.equal(await protectRead(new Request(`${origin}/api/progress/${code}`, { headers: { Cookie: session } }), env), null);
+  assert.deepEqual(await (await readSession(new Request(`${origin}/api/session`, { headers: { Cookie: session } }), env)).json(), { authenticated: true });
+  assert.ok(await protectRead(new Request(`${origin}/api/progress/${code}`, { headers: { Cookie: session } }), { ...env, FAVORITE_PIN: "654321" }));
+  assert.deepEqual(await (await readSession(new Request(`${origin}/api/session`, { headers: { Cookie: session } }), { ...env, FAVORITE_PIN: "654321" })).json(), { authenticated: false });
+  const logout = readLogout(new Request(`${origin}/api/session`, { method: "POST", headers: { Origin: origin, Cookie: session } }));
+  assert.equal(logout.status, 204);
+  assert.match(logout.headers.get("Set-Cookie")!, /^__Host-read-session=;/);
+  assert.match(logout.headers.get("Set-Cookie")!, /Max-Age=0/);
+  assert.equal(readLogout(new Request(`${origin}/api/session`, { method: "POST", headers: { Origin: "https://evil.example", Cookie: session } })).status, 403);
+  assert.deepEqual(await (await readSession(new Request(`${origin}/api/session`, { headers: { Cookie: logout.headers.get("Set-Cookie")!.split(";")[0]! } }), env)).json(), { authenticated: false });
 });
 
 test("refreshes, other tabs and reading actions do not expire an open login form", async () => {

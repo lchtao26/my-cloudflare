@@ -4,7 +4,7 @@ import { sentryOptions } from "./sentry.server.ts";
 import { DurableObject } from "cloudflare:workers";
 import start from "@tanstack/react-start/server-entry";
 import worker from "./index.ts";
-import { protectRead, readLogin } from "./reader/auth.ts";
+import { protectRead, readLogin, readSession } from "./reader/auth.ts";
 import { readProgress } from "./reader/progress.ts";
 
 // One shared PIN needs one global counter: per-IP limits can be bypassed with multiple IPs.
@@ -40,6 +40,7 @@ export default Sentry.withSentry(sentryOptions, {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/auth") return readLogin(request, env);
+    if (url.pathname === "/api/session") return readSession(request, env);
     const progressMatch = url.pathname.match(/^\/api\/progress\/([A-Za-z0-9]{6})$/);
     const blocked = await protectRead(request, env);
     if (blocked) return blocked;

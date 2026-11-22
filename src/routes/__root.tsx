@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { createRootRoute, HeadContent, Outlet, Scripts, useLocation } from "@tanstack/react-router";
+import { useEffect, useState, type ReactNode } from "react";
 import { EINK_STYLE } from "../reader/style.ts";
 
 export const Route = createRootRoute({
@@ -31,7 +31,77 @@ function ReaderApp() {
   return (
     <QueryClientProvider client={client}>
       <Outlet />
+      <ReadBar />
+      <ReadLoginBanner />
     </QueryClientProvider>
+  );
+}
+
+function useReadSession(active: boolean) {
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    const controller = new AbortController();
+    void fetch("/api/session", { credentials: "same-origin", cache: "no-store", signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error("无法确认登录状态");
+        return response.json() as Promise<{ authenticated?: boolean }>;
+      })
+      .then(data => {
+        if (!controller.signal.aborted) setAuthenticated(data.authenticated === true);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setAuthenticated(null);
+      });
+    return () => controller.abort();
+  }, [active]);
+  return [authenticated, setAuthenticated] as const;
+}
+
+function ReadBar() {
+  const pathname = useLocation({ select: location => location.pathname });
+  const search = useLocation({ select: location => location.searchStr });
+  const active = /^\/read\/?$/.test(pathname);
+  const [authenticated, setAuthenticated] = useReadSession(active);
+  if (!active) return null;
+  const next = pathname + search;
+  return (
+    <header className="read-bar">
+      <div className="read-bar-side" />
+      <p className="read-bar-title">Read</p>
+      <div className="read-bar-side">
+        {authenticated === true ? (
+          <button
+            type="button"
+            onClick={() => {
+              void fetch("/api/session", { method: "POST", credentials: "same-origin", cache: "no-store" }).then(response => {
+                if (response.ok) setAuthenticated(false);
+              });
+            }}
+          >
+            登出
+          </button>
+        ) : authenticated === false ? (
+          <a href={`/auth?next=${encodeURIComponent(next)}`}>登录</a>
+        ) : null}
+      </div>
+    </header>
+  );
+}
+
+function ReadLoginBanner() {
+  const pathname = useLocation({ select: location => location.pathname });
+  const search = useLocation({ select: location => location.searchStr });
+  const hash = useLocation({ select: location => location.hash });
+  const active = /^\/r\/[A-Za-z0-9]{6}\/?$/.test(pathname);
+  const [authenticated] = useReadSession(active);
+  if (!active || authenticated !== false) return null;
+  const next = pathname + search + hash;
+  return (
+    <div className="login-banner" role="region" aria-label="登录">
+      <span>请登录</span>
+      <a href={`/auth?next=${encodeURIComponent(next)}`}>登录</a>
+    </div>
   );
 }
 

@@ -80,6 +80,7 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
               body: JSON.stringify({ progress: value }),
               keepalive: true,
             });
+            if (response.status === 401) return;
             if (!response.ok) throw new Error("无法保存阅读进度");
             if (furthestRemote === null || value > furthestRemote) furthestRemote = value;
             if (!disposed) setSyncError(false);
@@ -105,6 +106,7 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
         loading = true;
         void fetch(progressUrl, { credentials: "same-origin", cache: "no-store" })
           .then(async response => {
+            if (response.status === 401) return;
             if (!response.ok) throw new Error("无法读取阅读进度");
             const result = (await response.json()) as { progress: number | null };
             if (disposed) return;

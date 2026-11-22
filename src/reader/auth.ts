@@ -1,14 +1,26 @@
-import { favoriteRequest, isReadAuthorized, PIN_FIELD, pinFormScript, type FavoriteBindings } from "./favorite.ts";
+import { clearedSessionCookie, favoriteRequest, isReadAuthorized, PIN_FIELD, pinFormScript, type FavoriteBindings } from "./favorite.ts";
 import { EINK_STYLE } from "./style.ts";
 
 export async function protectRead(request: Request, env: FavoriteBindings): Promise<Response | null> {
   const url = new URL(request.url);
-  if (!/^\/(?:read\/?|r\/[A-Za-z0-9]{6}\/?|api\/read\/?|api\/r\/[A-Za-z0-9]{6}\/?|api\/progress\/[A-Za-z0-9]{6})$/.test(url.pathname)) return null;
+  // Pages and article data load without a session. Only saved progress stays behind the PIN.
+  if (!/^\/api\/progress\/[A-Za-z0-9]{6}$/.test(url.pathname)) return null;
   if (await isReadAuthorized(request, env)) return null;
-  if (url.pathname.startsWith("/api/")) return Response.json({ error: "请先授权。" }, { status: 401, headers: { "Cache-Control": "no-store" } });
-  const login = new URL("/auth", url.origin);
-  login.searchParams.set("next", url.pathname + url.search);
-  return new Response(null, { status: 302, headers: { Location: login.toString(), "Cache-Control": "no-store" } });
+  return Response.json({ error: "请先授权。" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+}
+
+export async function readSession(request: Request, env: FavoriteBindings): Promise<Response> {
+  if (request.method === "POST") return readLogout(request);
+  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD, POST", "Cache-Control": "no-store" } });
+  const authenticated = await isReadAuthorized(request, env);
+  return new Response(request.method === "HEAD" ? null : JSON.stringify({ authenticated }), {
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
+  });
+}
+
+export function readLogout(request: Request): Response {
+  if (request.headers.get("Origin") !== new URL(request.url).origin) return new Response("请求无效，请重试。", { status: 403, headers: { "Cache-Control": "no-store" } });
+  return new Response(null, { status: 204, headers: { "Cache-Control": "no-store", "Set-Cookie": clearedSessionCookie(request) } });
 }
 
 function destination(url: URL): string {

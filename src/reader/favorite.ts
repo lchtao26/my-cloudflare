@@ -13,6 +13,11 @@ const LOCAL_SESSION_COOKIE = "read-session";
 const LOCAL_CSRF_COOKIE = "read-csrf";
 const encoder = new TextEncoder();
 
+export function clearedSessionCookie(request: Request): string {
+  const names = cookieNames(request);
+  return `${names.session}=; Path=/; Max-Age=0${names.secure}; HttpOnly; SameSite=Strict`;
+}
+
 function cookieNames(request: Request): { session: string; csrf: string; secure: string } {
   const secure = new URL(request.url).protocol === "https:";
   return secure ? { session: SESSION_COOKIE, csrf: CSRF_COOKIE, secure: "; Secure" } : { session: LOCAL_SESSION_COOKIE, csrf: LOCAL_CSRF_COOKIE, secure: "" };
