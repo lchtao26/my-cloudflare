@@ -8,9 +8,9 @@ export const EINK_STYLE = [
   // Fixed rem gutters + main max-width (no vw); Kindles often ignore CSS min()/max().
   // OS-bundled faces first: Safari hides user-installed fonts, and partial installs (e.g. Heavy only) render body text too bold in Chrome.
   "body{margin:0;padding:1.25rem 1.625rem 2.5rem;font-family:serif;font-size:1.0625rem;font-weight:400;line-height:1.75;letter-spacing:normal;text-align:left;word-break:normal;overflow-wrap:break-word;color:#000;background:#fff;}",
-  ":lang(zh){font-family:\"Songti SC\",\"STSong\",\"Noto Serif CJK SC\",\"SimSun\",serif;}",
-  ":lang(ja){font-family:\"Hiragino Mincho ProN\",\"Hiragino Mincho Pro\",\"Yu Mincho\",\"YuMincho\",\"Noto Serif CJK JP\",\"MS PMincho\",serif;}",
-  ":lang(en){font-family:Georgia,\"Times New Roman\",serif;}",
+  ':lang(zh){font-family:"Songti SC","STSong","Noto Serif CJK SC","SimSun",serif;}',
+  ':lang(ja){font-family:"Hiragino Mincho ProN","Hiragino Mincho Pro","Yu Mincho","YuMincho","Noto Serif CJK JP","MS PMincho",serif;}',
+  ':lang(en){font-family:Georgia,"Times New Roman",serif;}',
   ":lang(zh),:lang(ja){line-break:strict;}",
   // Pangu already inserts mixed-script spaces; leave unsupported CSS harmless on old readers.
   "body{text-autospace:no-autospace;}",
@@ -85,7 +85,6 @@ export const EINK_STYLE = [
   ".progress-sync{position:fixed;z-index:2;bottom:4px;left:1.625rem;right:1.625rem;display:flex;align-items:center;justify-content:space-between;gap:0.5rem;max-width:365px;margin:0 auto;padding:0.35rem 0.5rem;border:1px solid #000;background:#fff;color:#000;box-sizing:border-box;font-size:0.9375rem;line-height:1.6;}.progress-sync-actions{display:flex;flex:none;}.progress-sync button{flex:none;min-height:2.25rem;min-width:3.25rem;margin:0.15rem;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;color:#000;font:inherit;}.progress-sync button:focus-visible{outline:3px solid #000;outline-offset:3px;}@media (min-width:440px){.progress-sync{left:1.25rem;right:1.25rem;}}@media (min-width:720px){.progress-sync{max-width:36rem;}}.reader-surface:has(.progress-sync){padding-bottom:calc(4.75rem + env(safe-area-inset-bottom,0px));}",
   "#body-actions[hidden]{display:none}#body-actions:modal{overscroll-behavior:contain}#body-actions::backdrop{background:transparent;overflow:hidden;overscroll-behavior:contain}#body-actions{position:fixed;z-index:9;top:auto;right:0;bottom:4px;left:0;background:#fff;border:0;border-top:1px solid #000}#body-actions div{display:flex;justify-content:flex-end}#body-actions button{flex:none;min-height:2.25rem;min-width:3.25rem;margin:0.15rem;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;color:#000;font:inherit}#body-toggle{order:0}#body-highlight{order:1}#body-unhighlight{order:2}#body-actions[data-mode=mark] #body-toggle,#body-actions[data-mode=mark] #body-highlight{display:none}#body-actions:not([data-mode=mark]) #body-unhighlight{display:none}#body-actions button:focus{outline:none}#body-actions button[hidden]{display:none}mark.hl{background:none;color:inherit;border-bottom:2px solid #000}",
 
-
   "#body-actions[open]{width:calc(100% - 3.25rem);max-width:365px;margin:0 auto;display:flex;flex-direction:column;box-sizing:border-box;bottom:0;height:auto;max-height:90vh;padding:1rem;border-top:0;font-size:0.9375rem;line-height:1.6}#body-actions::backdrop{background:rgba(0,0,0,.35)}#body-actions #body-preview-scroll{display:block;flex:none;height:32vh;max-height:calc(90vh - 6rem);min-height:0;overflow-y:auto}#body-preview{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}#body-actions #body-actions-buttons{flex:none;display:flex;justify-content:flex-end;margin:0 -1rem;padding:0.75rem 1rem 0;border-top:1px solid #000}@media (min-width:440px){#body-actions{width:calc(100% - 2.5rem)}}@media (min-width:720px){#body-actions{max-width:36rem}}",
   "#body-actions #body-toggle{margin-right:auto}#body-explain{order:1}#body-highlight{order:2}#body-unhighlight{order:3}#explanation-dialog[open],#original-match-dialog[open]{position:fixed;inset:0;width:calc(100% - 3.25rem);max-width:365px;max-height:80vh;overflow:auto;background:#fff;color:#000;border:2px solid #000;padding:1rem}@media (min-width:440px){#explanation-dialog[open],#original-match-dialog[open]{width:calc(100% - 2.5rem)}}@media (min-width:720px){#explanation-dialog[open],#original-match-dialog[open]{max-width:36rem}}#explanation-dialog:modal,#original-match-dialog:modal{overscroll-behavior:contain}#explanation-dialog::backdrop,#original-match-dialog::backdrop{background:rgba(0,0,0,.35);overflow:hidden;overscroll-behavior:contain}#explanation-text,#original-match-text{white-space:pre-wrap;overflow-wrap:anywhere}",
   "#body-actions button{font-size:0.9375rem;line-height:1.6}",
@@ -100,7 +99,7 @@ export const EINK_STYLE = [
   // Dual expanding rings; black on the white page (source demo used white on dark).
   ".loading{position:fixed;inset:0;z-index:1;display:grid;place-items:center;margin:0;pointer-events:none;}",
   ".loader{--color-1:#000;--size:1px;width:calc(48 * var(--size));height:calc(48 * var(--size));display:inline-block;position:relative;}",
-  ".loader::after,.loader::before{content:\"\";box-sizing:border-box;width:calc(48 * var(--size));height:calc(48 * var(--size));border-radius:50%;border:calc(2 * var(--size)) solid var(--color-1);position:absolute;left:0;top:0;opacity:0.4;}",
+  '.loader::after,.loader::before{content:"";box-sizing:border-box;width:calc(48 * var(--size));height:calc(48 * var(--size));border-radius:50%;border:calc(2 * var(--size)) solid var(--color-1);position:absolute;left:0;top:0;opacity:0.4;}',
   "@media (prefers-reduced-motion:no-preference){.loader::after,.loader::before{animation:animloader 2s linear infinite!important;}.loader::after{animation-delay:1s!important;}}",
   "@keyframes animloader{0%{transform:scale(0);opacity:0.4}100%{transform:scale(1);opacity:0}}",
   // Media-query overrides keep the existing light theme usable on older readers.

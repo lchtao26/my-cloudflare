@@ -1,9 +1,6 @@
 import { canonicalText } from "./highlight-anchor.ts";
 
-export type Token =
-  | { kind: "space"; text: string }
-  | { kind: "mark"; text: string; index: number; start: number; end: number }
-  | { kind: "token"; text: string; index: number; start: number; end: number };
+export type Token = { kind: "space"; text: string } | { kind: "mark"; text: string; index: number; start: number; end: number } | { kind: "token"; text: string; index: number; start: number; end: number };
 
 export type TokenRange = { start: number; end: number; quote: string };
 
@@ -171,13 +168,7 @@ function isAttacher(text: string): boolean {
 }
 
 function isExtHan(code: number): boolean {
-  return (code >= 0x20000 && code <= 0x2a6df)
-    || (code >= 0x2a700 && code <= 0x2b73f)
-    || (code >= 0x2b740 && code <= 0x2b81f)
-    || (code >= 0x2b820 && code <= 0x2ceaf)
-    || (code >= 0x2ceb0 && code <= 0x2ebef)
-    || (code >= 0x30000 && code <= 0x3134f)
-    || (code >= 0x31350 && code <= 0x323af);
+  return (code >= 0x20000 && code <= 0x2a6df) || (code >= 0x2a700 && code <= 0x2b73f) || (code >= 0x2b740 && code <= 0x2b81f) || (code >= 0x2b820 && code <= 0x2ceaf) || (code >= 0x2ceb0 && code <= 0x2ebef) || (code >= 0x30000 && code <= 0x3134f) || (code >= 0x31350 && code <= 0x323af);
 }
 
 function graphemeClusters(quote: string): string[] {

@@ -8,11 +8,15 @@ export type ParagraphSelection = {
   highlightId: string | null;
 };
 
-type TapEvent = Pick<MouseEvent, "target" | "clientX" | "clientY">
-  & Partial<Pick<MouseEvent, "altKey" | "ctrlKey" | "metaKey" | "shiftKey">>;
+type TapEvent = Pick<MouseEvent, "target" | "clientX" | "clientY"> & Partial<Pick<MouseEvent, "altKey" | "ctrlKey" | "metaKey" | "shiftKey">>;
 
 function lines(text: string): ReactNode {
-  return text.split("\n").map((line, index) => <Fragment key={index}>{index > 0 && <br />}{line}</Fragment>);
+  return text.split("\n").map((line, index) => (
+    <Fragment key={index}>
+      {index > 0 && <br />}
+      {line}
+    </Fragment>
+  ));
 }
 
 function markedText(text: string, offset: number, highlights: ResolvedHighlight[], anchors: Set<string>) {
@@ -21,9 +25,15 @@ function markedText(text: string, offset: number, highlights: ResolvedHighlight[
   const spans = highlights.flatMap(highlight => {
     const start = Math.max(0, highlight.start - offset);
     const end = Math.min(characters.length, highlight.end - offset);
-    return start < end ? [{
-      id: highlight.id, start: characters[start]!, end: characters[end - 1]! + 1,
-    }] : [];
+    return start < end
+      ? [
+          {
+            id: highlight.id,
+            start: characters[start]!,
+            end: characters[end - 1]! + 1,
+          },
+        ]
+      : [];
   });
   if (!spans.length) return lines(text);
   const edges = [...new Set([0, text.length, ...spans.flatMap(span => [span.start, span.end])])].sort((a, b) => a - b);
@@ -34,24 +44,25 @@ function markedText(text: string, offset: number, highlights: ResolvedHighlight[
     const newAnchors = active.filter(span => !anchors.has(span.id));
     for (const span of newAnchors) anchors.add(span.id);
     const content = active.reduceRight<ReactNode>(
-      (child, span) => <mark className="hl" data-hl={span.id}>{child}</mark>, lines(text.slice(start, end)),
+      (child, span) => (
+        <mark className="hl" data-hl={span.id}>
+          {child}
+        </mark>
+      ),
+      lines(text.slice(start, end)),
     );
-    return <Fragment key={start}>
-      {newAnchors.map(span => <span key={span.id} id={`hl-${span.id}`} />)}
-      {content}
-    </Fragment>;
+    return (
+      <Fragment key={start}>
+        {newAnchors.map(span => (
+          <span key={span.id} id={`hl-${span.id}`} />
+        ))}
+        {content}
+      </Fragment>
+    );
   });
 }
 
-export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, select }: {
-  id?: string;
-  field: ReaderField;
-  lang?: string;
-  paragraphs: ReaderParagraph[];
-  highlights: ResolvedHighlight[];
-  hidden?: boolean;
-  select?: (selection: ParagraphSelection) => void;
-}) {
+export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, select }: { id?: string; field: ReaderField; lang?: string; paragraphs: ReaderParagraph[]; highlights: ResolvedHighlight[]; hidden?: boolean; select?: (selection: ParagraphSelection) => void }) {
   const lastTap = useRef<{ paragraph: number; time: number } | null>(null);
   const press = useRef<{ paragraph: number; x: number; y: number; scroll: number; time: number } | null>(null);
   const lastTouch = useRef(-Infinity);
@@ -71,21 +82,22 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
 
   function startTap(event: TapEvent) {
     const paragraph = targetParagraph(event);
-    if (!select || paragraph === null || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
-      || window.getSelection()?.toString()) {
+    if (!select || paragraph === null || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || window.getSelection()?.toString()) {
       clearTaps();
       return;
     }
     press.current = {
-      paragraph, x: event.clientX, y: event.clientY, scroll: window.scrollY,
+      paragraph,
+      x: event.clientX,
+      y: event.clientY,
+      scroll: window.scrollY,
       time: performance.now(),
     };
   }
 
   function moveTap(event: { clientX: number; clientY: number }) {
     const start = press.current;
-    if (start && (Math.abs(start.x - event.clientX) > 10 || Math.abs(start.y - event.clientY) > 10
-      || Math.abs(start.scroll - window.scrollY) > 5)) clearTaps();
+    if (start && (Math.abs(start.x - event.clientX) > 10 || Math.abs(start.y - event.clientY) > 10 || Math.abs(start.scroll - window.scrollY) > 5)) clearTaps();
   }
 
   function finishTap(event: TapEvent) {
@@ -93,14 +105,11 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
     press.current = null;
     const paragraph = targetParagraph(event);
     const now = performance.now();
-    if (!select || !start || paragraph === null || start.paragraph !== paragraph || now - start.time > 500
-      || Math.abs(start.x - event.clientX) > 10 || Math.abs(start.y - event.clientY) > 10
-      || Math.abs(start.scroll - window.scrollY) > 5) {
+    if (!select || !start || paragraph === null || start.paragraph !== paragraph || now - start.time > 500 || Math.abs(start.x - event.clientX) > 10 || Math.abs(start.y - event.clientY) > 10 || Math.abs(start.scroll - window.scrollY) > 5) {
       clearTaps();
       return;
     }
-    const highlightId = window.getSelection()?.toString()
-      ? null : (event.target as Element).closest("mark[data-hl]")?.getAttribute("data-hl") ?? null;
+    const highlightId = window.getSelection()?.toString() ? null : ((event.target as Element).closest("mark[data-hl]")?.getAttribute("data-hl") ?? null);
     if (highlightId || (lastTap.current?.paragraph === paragraph && now - lastTap.current.time <= 500)) {
       lastTap.current = null;
       window.getSelection()?.removeAllRanges();
@@ -111,7 +120,13 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
   }
 
   return (
-    <div id={id} className="excerpt-body" data-field={field} data-paragraph-actions={select ? "" : undefined} lang={lang} hidden={hidden}
+    <div
+      id={id}
+      className="excerpt-body"
+      data-field={field}
+      data-paragraph-actions={select ? "" : undefined}
+      lang={lang}
+      hidden={hidden}
       onPointerDown={event => {
         if (!event.isPrimary || event.button !== 0) {
           clearTaps();
@@ -150,7 +165,8 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
         if (!window.PointerEvent) moveTap(event);
       }}
       // Open after pointerup/touchend: their synthesized click must not land on the new backdrop.
-      onClick={finishTap}>
+      onClick={finishTap}
+    >
       {paragraphs.map((paragraph, index) => {
         let offset = paragraph.start;
         const relevant = marks.filter(mark => mark.start < paragraph.end && mark.end > paragraph.start);
@@ -161,17 +177,20 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
               offset += node.text.replace(/\s/g, "").length;
               return <Fragment key={index}>{content}</Fragment>;
             }
-            return createElement(node.tag, { key: index, href: node.href, src: node.src, alt: node.alt, start: node.start },
-              node.tag === "img" || node.tag === "br" || node.tag === "hr" ? undefined : render(node.children));
+            return createElement(node.tag, { key: index, href: node.href, src: node.src, alt: node.alt, start: node.start }, node.tag === "img" || node.tag === "br" || node.tag === "hr" ? undefined : render(node.children));
           });
         }
-        return <div key={index} data-paragraph={index}>{paragraph.parts.map((part, partIndex) => {
-          if ("image" in part) return <img key={partIndex} src={part.image} alt="正文图片" />;
-          if (part.markdown) return <Fragment key={partIndex}>{render(part.markdown)}</Fragment>;
-          const content = markedText(part.text, offset, relevant, anchors);
-          offset += part.text.replace(/\s/g, "").length;
-          return <Fragment key={partIndex}>{content}</Fragment>;
-        })}</div>;
+        return (
+          <div key={index} data-paragraph={index}>
+            {paragraph.parts.map((part, partIndex) => {
+              if ("image" in part) return <img key={partIndex} src={part.image} alt="正文图片" />;
+              if (part.markdown) return <Fragment key={partIndex}>{render(part.markdown)}</Fragment>;
+              const content = markedText(part.text, offset, relevant, anchors);
+              offset += part.text.replace(/\s/g, "").length;
+              return <Fragment key={partIndex}>{content}</Fragment>;
+            })}
+          </div>
+        );
       })}
     </div>
   );

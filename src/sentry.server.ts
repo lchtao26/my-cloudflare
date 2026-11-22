@@ -6,9 +6,11 @@ export function sentryOptions(env: Env): CloudflareOptions {
   return {
     dsn,
     enabled: Boolean(dsn),
-    integrations: [serveTunnelIntegration({
-      allowedDsns: import.meta.env.VITE_SENTRY_DSN ? [import.meta.env.VITE_SENTRY_DSN] : [],
-    })],
+    integrations: [
+      serveTunnelIntegration({
+        allowedDsns: import.meta.env.VITE_SENTRY_DSN ? [import.meta.env.VITE_SENTRY_DSN] : [],
+      }),
+    ],
     environment: import.meta.env.DEV ? "development" : env.SENTRY_ENVIRONMENT,
     tracesSampleRate: import.meta.env.DEV ? 1 : tracesSampleRate(env.SENTRY_TRACES_SAMPLE_RATE),
     dataCollection: sentryDataCollection,

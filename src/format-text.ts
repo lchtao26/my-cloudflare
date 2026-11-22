@@ -13,8 +13,8 @@ const CLOSING_QUOTES: Record<string, string> = {
 /** Apply Chinese typography to plain text while preserving markup and URLs. */
 export function formatText(value: string): string {
   const parts = value.split(PROTECTED_TEXT);
-  const protectedParts = Array.from(value.matchAll(PROTECTED_TEXT), (match) => match[0]);
-  const characters = parts.map((part) => part.split(""));
+  const protectedParts = Array.from(value.matchAll(PROTECTED_TEXT), match => match[0]);
+  const characters = parts.map(part => part.split(""));
   const stack: Array<{ quote: string; part: number; index: number }> = [];
 
   if (/\p{Script=Han}/u.test(parts.join(""))) {
@@ -44,21 +44,24 @@ export function formatText(value: string): string {
   while (value.includes(marker)) marker += "\uE000";
   const tags: string[] = [];
   const urls: string[] = [];
-  const text = characters.map((part, index) => {
-    const protectedPart = protectedParts[index] ?? "";
-    if (protectedPart.startsWith("<")) {
-      tags.push(protectedPart);
-      return part.join("") + protectedPart;
-    }
-    if (protectedPart) {
-      urls.push(protectedPart);
-      return part.join("") + marker + (urls.length - 1) + marker;
-    }
-    return part.join("");
-  }).join("");
+  const text = characters
+    .map((part, index) => {
+      const protectedPart = protectedParts[index] ?? "";
+      if (protectedPart.startsWith("<")) {
+        tags.push(protectedPart);
+        return part.join("") + protectedPart;
+      }
+      if (protectedPart) {
+        urls.push(protectedPart);
+        return part.join("") + marker + (urls.length - 1) + marker;
+      }
+      return part.join("");
+    })
+    .join("");
 
   let tagIndex = 0;
-  return pangu.spaceText(text)
+  return pangu
+    .spaceText(text)
     .replace(/<[^>]*>/g, () => tags[tagIndex++]!)
     .replace(new RegExp(`${marker}(\\d+)${marker}`, "g"), (_, index: string) => urls[Number(index)]!);
 }

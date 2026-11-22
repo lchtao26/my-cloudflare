@@ -11,7 +11,9 @@ export function explanationMarkdown(text: string, images = false): MarkdownNode[
   const root: MarkdownNode[] = [];
   const stack: MarkdownNode[][] = [root];
   const current = () => stack[stack.length - 1]!;
-  const addText = (value: string) => { if (value) current().push({ type: "text", text: value }); };
+  const addText = (value: string) => {
+    if (value) current().push({ type: "text", text: value });
+  };
   const addElement = (tag: string, children: MarkdownNode[] = []): Extract<MarkdownNode, { type: "element" }> => {
     const element: Extract<MarkdownNode, { type: "element" }> = { type: "element", tag, children };
     current().push(element);
@@ -20,7 +22,10 @@ export function explanationMarkdown(text: string, images = false): MarkdownNode[
   function visit(tokens: Token[]): void {
     for (const token of tokens) {
       if (token.hidden) continue;
-      if (token.type === "inline") { visit(token.children || []); continue; }
+      if (token.type === "inline") {
+        visit(token.children || []);
+        continue;
+      }
       if (token.type === "image") {
         const src = String(token.attrGet("src") || "");
         if (/^(https?:\/\/|\/(?!\/))/i.test(src)) {
@@ -30,16 +35,31 @@ export function explanationMarkdown(text: string, images = false): MarkdownNode[
         } else addText(token.content);
         continue;
       }
-      if (token.type === "text" || token.type === "html_inline" || token.type === "html_block") { addText(token.content); continue; }
-      if (token.type === "softbreak") { addText("\n"); continue; }
-      if (token.type === "hardbreak") { addElement("br"); continue; }
-      if (token.type === "code_inline") { addElement("code", [{ type: "text", text: token.content }]); continue; }
+      if (token.type === "text" || token.type === "html_inline" || token.type === "html_block") {
+        addText(token.content);
+        continue;
+      }
+      if (token.type === "softbreak") {
+        addText("\n");
+        continue;
+      }
+      if (token.type === "hardbreak") {
+        addElement("br");
+        continue;
+      }
+      if (token.type === "code_inline") {
+        addElement("code", [{ type: "text", text: token.content }]);
+        continue;
+      }
       if (token.type === "fence" || token.type === "code_block") {
         addElement("pre", [{ type: "element", tag: "code", children: [{ type: "text", text: token.content }] }]);
         continue;
       }
       if (!allowedTags.has(token.tag)) continue;
-      if (token.nesting === -1) { if (stack.length > 1) stack.pop(); continue; }
+      if (token.nesting === -1) {
+        if (stack.length > 1) stack.pop();
+        continue;
+      }
       const element = addElement(token.tag);
       if (token.tag === "a") {
         const href = String(token.attrGet("href") || "");

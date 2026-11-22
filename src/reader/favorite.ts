@@ -15,14 +15,15 @@ const encoder = new TextEncoder();
 
 function cookieNames(request: Request): { session: string; csrf: string; secure: string } {
   const secure = new URL(request.url).protocol === "https:";
-  return secure
-    ? { session: SESSION_COOKIE, csrf: CSRF_COOKIE, secure: "; Secure" }
-    : { session: LOCAL_SESSION_COOKIE, csrf: LOCAL_CSRF_COOKIE, secure: "" };
+  return secure ? { session: SESSION_COOKIE, csrf: CSRF_COOKIE, secure: "; Secure" } : { session: LOCAL_SESSION_COOKIE, csrf: LOCAL_CSRF_COOKIE, secure: "" };
 }
 
-export const PIN_FIELD = '<p><label for="pin">请输入 6 位密码</label></p><div class="pin-wrap"><input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" pattern="[0-9]{6}" minlength="6" maxlength="6" required /><div class="pin-slots" aria-hidden="true"><span class="active"></span><span></span><span></span><span></span><span></span><span></span></div></div>';
-export const PIN_STYLE = '.pin-wrap{position:relative}input#pin{box-sizing:border-box;display:block;font:1.25rem/1.75 monospace;width:100%;min-height:3rem;padding:0.5rem;border:2px solid #000;border-radius:0;background:#fff;color:#000}input#pin:focus-visible{outline:3px solid #000;outline-offset:3px}.pin-slots{display:none}.pin-enhanced input#pin{position:absolute;inset:0;z-index:1;height:100%;opacity:0}.pin-enhanced .pin-slots{display:flex;height:3rem;pointer-events:none}.pin-slots span{display:flex;align-items:center;justify-content:center;flex:1;min-width:0;border:2px solid #000}.pin-slots span+span{margin-left:0.5rem}.pin-slots span.filled::after{content:"";display:block;width:0.5rem;height:0.5rem;border-radius:50%;background:#000}.pin-enhanced input#pin:focus-visible + .pin-slots span.active{outline:2px solid #000;outline-offset:2px}@media (forced-colors:active){.pin-enhanced input#pin{position:static;opacity:1}.pin-enhanced .pin-slots{display:none}}';
-export const PIN_DARK_STYLE = '@media (prefers-color-scheme:dark){input#pin{background:#111;color:#eee;border-color:#eee}input#pin:focus-visible,.pin-enhanced input#pin:focus-visible + .pin-slots span.active{outline-color:#eee}.pin-slots span{border-color:#eee}.pin-slots span.filled::after{background:#eee}form .btn{background:#111;color:#eee}}';
+export const PIN_FIELD =
+  '<p><label for="pin">请输入 6 位密码</label></p><div class="pin-wrap"><input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" pattern="[0-9]{6}" minlength="6" maxlength="6" required /><div class="pin-slots" aria-hidden="true"><span class="active"></span><span></span><span></span><span></span><span></span><span></span></div></div>';
+export const PIN_STYLE =
+  '.pin-wrap{position:relative}input#pin{box-sizing:border-box;display:block;font:1.25rem/1.75 monospace;width:100%;min-height:3rem;padding:0.5rem;border:2px solid #000;border-radius:0;background:#fff;color:#000}input#pin:focus-visible{outline:3px solid #000;outline-offset:3px}.pin-slots{display:none}.pin-enhanced input#pin{position:absolute;inset:0;z-index:1;height:100%;opacity:0}.pin-enhanced .pin-slots{display:flex;height:3rem;pointer-events:none}.pin-slots span{display:flex;align-items:center;justify-content:center;flex:1;min-width:0;border:2px solid #000}.pin-slots span+span{margin-left:0.5rem}.pin-slots span.filled::after{content:"";display:block;width:0.5rem;height:0.5rem;border-radius:50%;background:#000}.pin-enhanced input#pin:focus-visible + .pin-slots span.active{outline:2px solid #000;outline-offset:2px}@media (forced-colors:active){.pin-enhanced input#pin{position:static;opacity:1}.pin-enhanced .pin-slots{display:none}}';
+export const PIN_DARK_STYLE =
+  "@media (prefers-color-scheme:dark){input#pin{background:#111;color:#eee;border-color:#eee}input#pin:focus-visible,.pin-enhanced input#pin:focus-visible + .pin-slots span.active{outline-color:#eee}.pin-slots span{border-color:#eee}.pin-slots span.filled::after{background:#eee}form .btn{background:#111;color:#eee}}";
 
 export function pinFormScript(formId: "favorite-form" | "auth-form"): string {
   return `(function(){var form=document.getElementById('${formId}');var pin=document.getElementById('pin');if(!pin){form.submit();return}var slots=pin.nextElementSibling.children;var submitted=false;function mark(){var active=Math.min(pin.selectionStart||0,5);for(var i=0;i<slots.length;i++){slots[i].classList.toggle('active',i===active);slots[i].classList.toggle('filled',i<pin.value.length)}}function check(e){mark();if(!submitted&&!(e&&e.isComposing)&&/^[0-9]{6}$/.test(pin.value)){submitted=true;form.submit()}}pin.addEventListener('focus',mark);pin.addEventListener('click',mark);pin.addEventListener('keyup',mark);pin.addEventListener('select',mark);pin.addEventListener('input',check);pin.addEventListener('change',check);pin.addEventListener('compositionend',check);mark();pin.parentElement.classList.add('pin-enhanced')})();`;
@@ -37,12 +38,12 @@ function cookie(request: Request, name: string): string {
 }
 
 function hex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function fromHex(value: string): Uint8Array<ArrayBuffer> | null {
   if (!/^[a-f0-9]{64}$/.test(value)) return null;
-  return Uint8Array.from(value.match(/../g)!, (part) => parseInt(part, 16));
+  return Uint8Array.from(value.match(/../g)!, part => parseInt(part, 16));
 }
 
 async function hmacKey(secret: string): Promise<CryptoKey> {
@@ -105,23 +106,22 @@ async function readForm(request: Request, maxBytes = 4096): Promise<URLSearchPar
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > maxBytes) { await reader.cancel(); return null; }
+    if (size > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
     chunks.push(value);
   }
   const bytes = new Uint8Array(size);
   let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
   return new URLSearchParams(new TextDecoder().decode(bytes));
 }
 
-export async function favoriteRequest(
-  request: Request,
-  env: FavoriteBindings,
-  code: string,
-  favorite: (desired: boolean, data: URLSearchParams) => Promise<boolean | Record<string, unknown>>,
-  render: DocumentRenderer,
-  options: { maxBytes?: number; errorMessage?: string } = {},
-): Promise<Response> {
+export async function favoriteRequest(request: Request, env: FavoriteBindings, code: string, favorite: (desired: boolean, data: URLSearchParams) => Promise<boolean | Record<string, unknown>>, render: DocumentRenderer, options: { maxBytes?: number; errorMessage?: string } = {}): Promise<Response> {
   const url = new URL(request.url);
   const params = new URLSearchParams();
   const tab = url.searchParams.get("tab");
@@ -158,7 +158,7 @@ export async function favoriteRequest(
   const token = data?.get("csrf") || "";
   const cookieToken = cookie(request, cookieNames(request).csrf);
   const signature = fromHex(cookieToken);
-  if (!signature || !fromHex(token) || !await crypto.subtle.verify("HMAC", key, await sign(key, `csrf:${cookieToken}`), encoder.encode(`csrf:${token}`))) {
+  if (!signature || !fromHex(token) || !(await crypto.subtle.verify("HMAC", key, await sign(key, `csrf:${cookieToken}`), encoder.encode(`csrf:${token}`)))) {
     return reply(`<h1>页面已过期</h1><p>请返回文章后重试。</p>${backLink(code, returnQuery)}`, 403, [], "", { error: "验证已过期，请重试。" });
   }
   const target = data?.get("favorite") ?? requested ?? "1";
@@ -169,14 +169,14 @@ export async function favoriteRequest(
     if (json && !pin) return reply("", 401, [], "", { requiresPin: true });
     if (!/^\d{6}$/.test(pin)) return reply(form(code, query, token, nonce, false, "请输入 6 位数字。", desired), 400, [], nonce, { error: "请输入 6 位数字。" });
     try {
-      if (!await env.FAVORITE_LOGIN_LIMIT.getByName("favorite-pin").attempt()) {
+      if (!(await env.FAVORITE_LOGIN_LIMIT.getByName("favorite-pin").attempt())) {
         return reply(form(code, query, token, nonce, false, "尝试次数过多，请稍后再试。", desired), 429, [], nonce, { error: "尝试次数过多，请稍后再试。" });
       }
     } catch (error) {
       captureException(error);
       return reply(`<h1>收藏暂不可用</h1><p>请稍后再试。</p>${backLink(code, returnQuery)}`, 503, [], "", { error: "收藏暂不可用，请稍后再试。" });
     }
-    if (!await crypto.subtle.verify("HMAC", key, await sign(key, `pin:${env.FAVORITE_PIN}`), encoder.encode(`pin:${pin}`))) {
+    if (!(await crypto.subtle.verify("HMAC", key, await sign(key, `pin:${env.FAVORITE_PIN}`), encoder.encode(`pin:${pin}`)))) {
       return reply(form(code, query, token, nonce, false, "密码不正确。", desired), 401, [], nonce, { error: "密码不正确。", requiresPin: true });
     }
   }

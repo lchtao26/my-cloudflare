@@ -22,7 +22,11 @@ function searchParams(category: ReadCategory, page: number) {
 }
 
 export class ReaderError extends Error {
-  constructor(message: string, readonly status: number, readonly requiresPin = false) {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly requiresPin = false,
+  ) {
     super(message);
   }
 }
@@ -94,9 +98,13 @@ export async function performAction(code: string, action: ReaderAction, pin?: st
     // leave the user authenticated for the next attempt.
     await requestJson(path, { ...options, method: "POST", body: new URLSearchParams({ csrf, action: "verify", pin: pin! }) }, "验证失败，请重试。");
   }
-  return requestJson<ReaderActionResult>(path, {
-    ...options,
-    method: "POST",
-    body: new URLSearchParams({ ...action.data, csrf, ...(pin && endpoint !== "highlight" ? { pin } : {}) }),
-  }, "操作失败，请稍后重试。");
+  return requestJson<ReaderActionResult>(
+    path,
+    {
+      ...options,
+      method: "POST",
+      body: new URLSearchParams({ ...action.data, csrf, ...(pin && endpoint !== "highlight" ? { pin } : {}) }),
+    },
+    "操作失败，请稍后重试。",
+  );
 }

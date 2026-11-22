@@ -71,12 +71,24 @@ test("refreshes, other tabs and reading actions do not expire an open login form
     assert.notEqual(nonce, firstNonce);
     assert.ok(page.headers.get("Content-Security-Policy")?.includes(`script-src 'nonce-${nonce}'`));
   }
-  const action = await favoriteRequest(new Request(`${origin}/read/favorite/${code}`, { headers: { Cookie: browserCookie, Accept: "application/json" } }), env, code, async () => true, () => "");
+  const action = await favoriteRequest(
+    new Request(`${origin}/read/favorite/${code}`, { headers: { Cookie: browserCookie, Accept: "application/json" } }),
+    env,
+    code,
+    async () => true,
+    () => "",
+  );
   browserCookie = action.headers.get("set-cookie")!.split(";")[0]!;
   assert.equal((await action.json<{ csrf: string }>()).csrf, token);
-  const submit = (pin: string, cookie = browserCookie) => readLogin(new Request(loginUrl, {
-    method: "POST", headers: { Origin: origin, Cookie: cookie, "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf: token, pin }),
-  }), env);
+  const submit = (pin: string, cookie = browserCookie) =>
+    readLogin(
+      new Request(loginUrl, {
+        method: "POST",
+        headers: { Origin: origin, Cookie: cookie, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ csrf: token, pin }),
+      }),
+      env,
+    );
   assert.equal((await submit("012345", "")).status, 403);
   const wrong = await submit("999999");
   assert.equal(wrong.status, 401);
@@ -101,14 +113,27 @@ test("login page reuses the PIN input and submits once when six digits are enter
   const handlers = new Map<string, (event: { isComposing?: boolean }) => void>();
   const filled = Array(6).fill(false);
   const pin = {
-    value: "", selectionStart: 0,
+    value: "",
+    selectionStart: 0,
     parentElement: { classList: { add() {} } },
-    nextElementSibling: { children: filled.map((_, index) => ({ classList: { toggle: (name: string, value: boolean) => { if (name === "filled") filled[index] = value; } } })) },
+    nextElementSibling: {
+      children: filled.map((_, index) => ({
+        classList: {
+          toggle: (name: string, value: boolean) => {
+            if (name === "filled") filled[index] = value;
+          },
+        },
+      })),
+    },
     addEventListener: (name: string, handler: (event: { isComposing?: boolean }) => void) => handlers.set(name, handler),
   };
   let submissions = 0;
-  const form = { submit: () => { submissions++; } };
-  runInNewContext(script, { document: { getElementById: (id: string) => id === "pin" ? pin : form } });
+  const form = {
+    submit: () => {
+      submissions++;
+    },
+  };
+  runInNewContext(script, { document: { getElementById: (id: string) => (id === "pin" ? pin : form) } });
   pin.value = "01234";
   handlers.get("input")?.({});
   assert.equal(submissions, 0);
@@ -125,10 +150,22 @@ test("progress keeps the furthest position and rejects invalid or cross-origin w
   const sql = new DatabaseSync(":memory:");
   t.after(() => sql.close());
   sql.exec(readFileSync("migrations/0004_reading_progress.sql", "utf8"));
-  const db = { prepare(query: string) { return { bind(...args: SQLInputValue[]) { return {
-    async run() { return sql.prepare(query).run(...args); },
-    async first() { return sql.prepare(query).get(...args) ?? null; },
-  }; } }; } } as unknown as D1Database;
+  const db = {
+    prepare(query: string) {
+      return {
+        bind(...args: SQLInputValue[]) {
+          return {
+            async run() {
+              return sql.prepare(query).run(...args);
+            },
+            async first() {
+              return sql.prepare(query).get(...args) ?? null;
+            },
+          };
+        },
+      };
+    },
+  } as unknown as D1Database;
   const url = `${origin}/api/progress/${code}`;
   const get = () => readProgress(new Request(url), db, code);
   const post = (body: string, from = origin) => readProgress(new Request(url, { method: "POST", headers: { Origin: from, "Content-Type": "application/json" }, body }), db, code);

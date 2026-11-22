@@ -42,7 +42,7 @@ export function shareCode(id: number): string {
   let left = id >>> 16;
   let right = id & 0xffff;
   for (const key of SHARE_CODE_KEYS) [left, right] = [right, left ^ shareCodeRound(right, key)];
-  let value = (left * 0x10000) + right;
+  let value = left * 0x10000 + right;
   const digits: number[] = [];
   for (let i = 0; i < 6; i++) {
     digits.unshift(value % 62);
@@ -50,19 +50,19 @@ export function shareCode(id: number): string {
   }
   // 2^32 only reaches the first five leading digits; mixing in the rest spreads the first character.
   digits[0] = digits.reduce((sum, digit) => sum + digit, 0) % 62;
-  return digits.map((digit) => SHARE_CODE_ALPHABET[digit]).join("");
+  return digits.map(digit => SHARE_CODE_ALPHABET[digit]).join("");
 }
 
 export function shareCodeId(code: string): number | null {
   if (!SHARE_CODE.test(code)) return null;
-  const digits = Array.from(code, (char) => SHARE_CODE_ALPHABET.indexOf(char));
-  digits[0] = ((digits[0]! - digits.slice(1).reduce((sum, digit) => sum + digit, 0)) % 62 + 62) % 62;
+  const digits = Array.from(code, char => SHARE_CODE_ALPHABET.indexOf(char));
+  digits[0] = (((digits[0]! - digits.slice(1).reduce((sum, digit) => sum + digit, 0)) % 62) + 62) % 62;
   const value = digits.reduce((total, digit) => total * 62 + digit, 0);
   if (value >= 2 ** 32) return null;
   let left = Math.floor(value / 0x10000);
   let right = value & 0xffff;
   for (const key of [...SHARE_CODE_KEYS].reverse()) [left, right] = [right ^ shareCodeRound(left, key), left];
-  const id = (left * 0x10000) + right;
+  const id = left * 0x10000 + right;
   return id > 0 && id < SHORT_ID_LIMIT ? id : null;
 }
 
@@ -76,15 +76,20 @@ function categoryFilter(category: ReadCategory): object | undefined {
   if (category === "novel") return { property: "提取来源", select: { equals: "epub" } };
   if (category === "weekly" || category === "bunshun") {
     const path = category === "weekly" ? "bunshun.jp/denshiban/articles/" : "bunshun.jp/articles/";
-    return { or: [
-      { property: "原文链接", url: { contains: path } },
-      { property: "备注", rich_text: { contains: path } },
-    ] };
+    return {
+      or: [
+        { property: "原文链接", url: { contains: path } },
+        { property: "备注", rich_text: { contains: path } },
+      ],
+    };
   }
-  if (category === "news") return { or: [
-    { property: "原文链接", url: { contains: "news.ycombinator.com" } },
-    { property: "备注", rich_text: { starts_with: "HN " } },
-  ] };
+  if (category === "news")
+    return {
+      or: [
+        { property: "原文链接", url: { contains: "news.ycombinator.com" } },
+        { property: "备注", rich_text: { starts_with: "HN " } },
+      ],
+    };
   return undefined;
 }
 
@@ -194,12 +199,7 @@ export type Book = {
 };
 
 function htmlText(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
 function displayText(value: string): string {
@@ -215,7 +215,10 @@ function textProperty(properties: NotionPage["properties"], name: string): strin
   const property = properties?.[name];
   if (property?.type !== "title" && property?.type !== "rich_text") return "";
   const parts = property.type === "title" ? property.title : property.rich_text;
-  return (parts ?? []).map((part) => part.plain_text ?? part.text?.content ?? "").join("").trim();
+  return (parts ?? [])
+    .map(part => part.plain_text ?? part.text?.content ?? "")
+    .join("")
+    .trim();
 }
 
 function selectProperty(properties: NotionPage["properties"], name: string): string {
@@ -283,11 +286,11 @@ export function bookFromPage(page: NotionPage): Book | null {
 }
 
 function itemDescription(book: Book, feedUrl: string): string {
-  const author = [book.author, book.authorIntro].filter(Boolean).map((value) => displayText(value)).join(" | ");
-  const lines = [
-    `作者：${author}`,
-    `简介：${displayText(book.summary)}`,
-  ];
+  const author = [book.author, book.authorIntro]
+    .filter(Boolean)
+    .map(value => displayText(value))
+    .join(" | ");
+  const lines = [`作者：${author}`, `简介：${displayText(book.summary)}`];
   if (book.publisher) lines.push(`出版社：${displayText(book.publisher)}`);
   if (book.sourceName) {
     const name = displayText(book.sourceName);
@@ -302,7 +305,7 @@ function itemDescription(book: Book, feedUrl: string): string {
 }
 
 export function renderFeed(books: Book[], feedUrl: string): string {
-  const items: Array<RssFeed.Item<Date>> = books.map((book) => {
+  const items: Array<RssFeed.Item<Date>> = books.map(book => {
     const item: RssFeed.Item<Date> = {
       title: formatText(book.title),
       link: book.link,
@@ -357,7 +360,7 @@ export function excerptFromPage(page: NotionPage): Excerpt | null {
     chapter: textProperty(properties, "章节"),
     publisher: textProperty(properties, "出版方"),
     originalUrl: externalUrl(originalLink?.type === "url" ? originalLink.url : null),
-    publishedDate: published?.type === "date" ? published.date?.start?.slice(0, 10) ?? "" : "",
+    publishedDate: published?.type === "date" ? (published.date?.start?.slice(0, 10) ?? "") : "",
     link,
     pubDate: Number.isNaN(date.getTime()) ? null : date,
     code: shareCode(shortId),
@@ -408,7 +411,7 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
     description: "来自 Notion「阅读节选」的书籍、杂志与网页译文及中文原文 RSS",
     language: "zh-CN",
     atom: { links: [{ href: feedUrl, rel: "self", type: "application/rss+xml" }] },
-    items: excerpts.map((excerpt) => {
+    items: excerpts.map(excerpt => {
       const item: RssFeed.Item<Date> = {
         title: formatText(excerpt.title),
         link: excerptDetailUrl(feedUrl, excerpt.code),
@@ -422,13 +425,7 @@ export function renderExcerptFeed(excerpts: Excerpt[], feedUrl: string): string 
   });
 }
 
-function einkDocument(
-  title: string,
-  body: string,
-  panguedTitle = false,
-  afterMain = "",
-  bodyClass = "",
-): string {
+function einkDocument(title: string, body: string, panguedTitle = false, afterMain = "", bodyClass = ""): string {
   const bodyAttrs = bodyClass ? ` class="${bodyClass}"` : "";
   return [
     "<!DOCTYPE html>",
@@ -454,7 +451,7 @@ export type EinkNeighbors = {
 };
 
 export function neighborsFor(excerpts: Excerpt[], code: string): EinkNeighbors | undefined {
-  const index = excerpts.findIndex((item) => item.code === code);
+  const index = excerpts.findIndex(item => item.code === code);
   if (index < 0) return undefined;
   return {
     prevCode: index > 0 ? excerpts[index - 1]!.code : null,
@@ -463,20 +460,31 @@ export function neighborsFor(excerpts: Excerpt[], code: string): EinkNeighbors |
 }
 
 type HighlightRow = {
-  id: string; excerpt_number: number; excerpt_page_id: string; field: "original" | "translation" | "terms";
-  start: number; end: number; quote: string; prefix: string; suffix: string; body_hash: string; created_at: string;
+  id: string;
+  excerpt_number: number;
+  excerpt_page_id: string;
+  field: "original" | "translation" | "terms";
+  start: number;
+  end: number;
+  quote: string;
+  prefix: string;
+  suffix: string;
+  body_hash: string;
+  created_at: string;
 };
 
 function fieldSource(excerpt: Excerpt, field: string) {
-  return field === "translation" ? (!excerpt.chinese ? excerpt.body : "") :
-    field === "original" ? (excerpt.chinese ? excerpt.body : excerpt.originalBody || "") :
-    field === "terms" ? excerpt.terms : "";
+  return field === "translation" ? (!excerpt.chinese ? excerpt.body : "") : field === "original" ? (excerpt.chinese ? excerpt.body : excerpt.originalBody || "") : field === "terms" ? excerpt.terms : "";
 }
 
 function bodyText(excerpt: Excerpt, field: string): string | null {
   const raw = fieldSource(excerpt, field);
   if (!raw) return null;
-  return canonicalText(readerParagraphs(raw, excerpt.id, "").map(({ quote }) => quote).join(""));
+  return canonicalText(
+    readerParagraphs(raw, excerpt.id, "")
+      .map(({ quote }) => quote)
+      .join(""),
+  );
 }
 
 function explainContext(excerpt: Excerpt, field: string, ranges: Array<{ start: number; end: number }>, mode: "paragraph" | "around") {
@@ -485,10 +493,11 @@ function explainContext(excerpt: Excerpt, field: string, ranges: Array<{ start: 
   const paragraphs = readerParagraphs(raw, excerpt.id, "").filter(paragraph => paragraph.end > paragraph.start);
   const index = paragraphs.findIndex(paragraph => paragraph.start <= ranges[0]!.start && ranges[0]!.start < paragraph.end);
   if (index < 0) return "";
-  const chosen = mode === "paragraph"
-    ? paragraphs.slice(Math.max(0, index - 1), index + 2)
-    : [paragraphs[index - 1], paragraphs[index + 1]].filter(paragraph => paragraph !== undefined);
-  return chosen.map(paragraph => paragraph.quote.trim()).filter(Boolean).join("\n\n");
+  const chosen = mode === "paragraph" ? paragraphs.slice(Math.max(0, index - 1), index + 2) : [paragraphs[index - 1], paragraphs[index + 1]].filter(paragraph => paragraph !== undefined);
+  return chosen
+    .map(paragraph => paragraph.quote.trim())
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 async function resolveHighlights(excerpt: Excerpt, rows: HighlightRow[]): Promise<ResolvedHighlight[]> {
@@ -497,7 +506,7 @@ async function resolveHighlights(excerpt: Excerpt, rows: HighlightRow[]): Promis
     const text = bodyText(excerpt, field);
     if (text !== null) fields.set(field, { text, hash: await hashText(text) });
   }
-  return rows.flatMap((row) => {
+  return rows.flatMap(row => {
     const body = fields.get(row.field);
     if (!body || row.excerpt_page_id !== excerpt.id) return [];
     const range = resolveAnchor(body.text, body.hash, { ...row, bodyHash: row.body_hash });
@@ -516,15 +525,19 @@ async function fetchHighlightExcerpts(env: ConfiguredBindings, ids: number[]): P
     let cursor: string | undefined;
     do {
       const response = await fetchNotionJson(`https://api.notion.com/v1/data_sources/${encodeURIComponent(env.NOTION_DATA_SOURCE_ID)}/query`, {
-        method: "POST", headers: { Authorization: `Bearer ${env.NOTION_TOKEN}`, "Notion-Version": NOTION_VERSION, "Content-Type": "application/json" },
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.NOTION_TOKEN}`, "Notion-Version": NOTION_VERSION, "Content-Type": "application/json" },
         body: JSON.stringify({ page_size: 100, filter: { or: batch.map(id => ({ property: SHORT_ID_PROPERTY, unique_id: { equals: id } })) }, ...(cursor ? { start_cursor: cursor } : {}) }),
       });
       if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
-      const result = await response.json() as NotionQuery;
+      const result = (await response.json()) as NotionQuery;
       if (result.request_status?.type === "incomplete" || (result.has_more && !result.next_cursor)) throw new Error("Notion query incomplete");
       for (const page of result.results || []) {
         const excerpt = excerptFromPage(page);
-        if (excerpt) { const id = shareCodeId(excerpt.code); if (id !== null) found.set(id, excerpt); }
+        if (excerpt) {
+          const id = shareCodeId(excerpt.code);
+          if (id !== null) found.set(id, excerpt);
+        }
       }
       cursor = result.has_more ? result.next_cursor || undefined : undefined;
     } while (cursor);
@@ -535,11 +548,19 @@ async function fetchHighlightExcerpts(env: ConfiguredBindings, ids: number[]): P
 async function loadHighlightList(db: D1Database | undefined, env: ConfiguredBindings, page: number) {
   if (!db) return { rows: [], excerpts: new Map<number, Excerpt>(), resolved: new Set<string>(), hasMore: false };
   const limit = FEED_ITEM_LIMIT;
-  const result = await db.prepare('SELECT * FROM highlights ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?').bind(limit + 1, (page - 1) * limit).all<HighlightRow>();
+  const result = await db
+    .prepare("SELECT * FROM highlights ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?")
+    .bind(limit + 1, (page - 1) * limit)
+    .all<HighlightRow>();
   const rows = result.results.slice(0, limit);
   const excerpts = await fetchHighlightExcerpts(env, [...new Set(rows.map(row => row.excerpt_number))]);
   const resolved = new Set<string>();
-  for (const [id, excerpt] of excerpts) for (const row of await resolveHighlights(excerpt, rows.filter(row => row.excerpt_number === id))) resolved.add(row.id);
+  for (const [id, excerpt] of excerpts)
+    for (const row of await resolveHighlights(
+      excerpt,
+      rows.filter(row => row.excerpt_number === id),
+    ))
+      resolved.add(row.id);
   return { rows, excerpts, resolved, hasMore: result.results.length > limit && page < 999 };
 }
 
@@ -554,7 +575,7 @@ async function fetchExcerptByShortId(env: ConfiguredBindings, shortId: number): 
     body: JSON.stringify({ page_size: 1, filter: { property: SHORT_ID_PROPERTY, unique_id: { equals: shortId } } }),
   });
   if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
-  const page = (await response.json() as NotionQuery).results?.[0];
+  const page = ((await response.json()) as NotionQuery).results?.[0];
   return page ? excerptFromPage(page) : null;
 }
 
@@ -567,7 +588,10 @@ function einkParagraphTexts(translation: string, pageId: string): string[] {
     if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) return match;
     return match.replace(/>[\s\S]*<\/image>$/i, "></image>");
   });
-  const text = withoutCaptions.replace(/\r\n?/g, "\n").replace(/<br\s*\/?\s*>/gi, "\n").trim();
+  const text = withoutCaptions
+    .replace(/\r\n?/g, "\n")
+    .replace(/<br\s*\/?\s*>/gi, "\n")
+    .trim();
   const paragraphs: string[] = [];
   let lines: string[] = [];
   let fence: { character: string; length: number } | null = null;
@@ -591,66 +615,67 @@ function readerParagraphs(translation: string, pageId: string, imageBaseUrl: str
   if (!translation) return [];
   let start = 0;
   // Use the same paragraph boundaries for display and Jev candidate selection.
-  return einkParagraphTexts(translation, pageId)
-    .map((paragraph) => {
-      const replacements: Array<{ index: number; length: number; image: string }> = [];
-      for (const match of paragraph.matchAll(IMAGE_TAG)) {
-        const blockId = match[1];
-        const fileId = match[2];
-        if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
-        // Caption text inside <image>...</image> is ignored; only the file reference is used.
-        replacements.push({
-          index: match.index ?? 0,
-          length: match[0].length,
-          image: `${imageBaseUrl}/${pageId}/${blockId}`,
-        });
-      }
-      for (const match of paragraph.matchAll(HTML_IMG)) {
-        const href = externalUrl(match[1] || match[2]);
-        if (!href) continue;
-        replacements.push({
-          index: match.index ?? 0,
-          length: match[0].length,
-          image: href,
-        });
-      }
-      replacements.sort((a, b) => a.index - b.index);
+  return einkParagraphTexts(translation, pageId).map(paragraph => {
+    const replacements: Array<{ index: number; length: number; image: string }> = [];
+    for (const match of paragraph.matchAll(IMAGE_TAG)) {
+      const blockId = match[1];
+      const fileId = match[2];
+      if (!NOTION_PAGE_ID.test(pageId) || !NOTION_PAGE_ID.test(blockId) || !NOTION_PAGE_ID.test(fileId)) continue;
+      // Caption text inside <image>...</image> is ignored; only the file reference is used.
+      replacements.push({
+        index: match.index ?? 0,
+        length: match[0].length,
+        image: `${imageBaseUrl}/${pageId}/${blockId}`,
+      });
+    }
+    for (const match of paragraph.matchAll(HTML_IMG)) {
+      const href = externalUrl(match[1] || match[2]);
+      if (!href) continue;
+      replacements.push({
+        index: match.index ?? 0,
+        length: match[0].length,
+        image: href,
+      });
+    }
+    replacements.sort((a, b) => a.index - b.index);
 
-      const parts: ReaderParagraph["parts"] = [];
-      let offset = 0;
-      for (const replacement of replacements) {
-        if (replacement.index < offset) continue;
-        parts.push({ text: paragraph.slice(offset, replacement.index) }, { image: replacement.image });
-        offset = replacement.index + replacement.length;
+    const parts: ReaderParagraph["parts"] = [];
+    let offset = 0;
+    for (const replacement of replacements) {
+      if (replacement.index < offset) continue;
+      parts.push({ text: paragraph.slice(offset, replacement.index) }, { image: replacement.image });
+      offset = replacement.index + replacement.length;
+    }
+    parts.push({ text: paragraph.slice(offset) });
+    function plain(nodes: import("./reader/explanation-markdown.ts").MarkdownNode[]): string {
+      return nodes.map(node => (node.type === "text" ? node.text : node.tag === "br" ? "\n" : plain(node.children))).join("");
+    }
+    function formatNodes(nodes: import("./reader/explanation-markdown.ts").MarkdownNode[], code = false): void {
+      for (const node of nodes) {
+        if (node.type === "text") {
+          if (!code) node.text = formatText(node.text);
+        } else formatNodes(node.children, code || node.tag === "code" || node.tag === "pre");
       }
-      parts.push({ text: paragraph.slice(offset) });
-      function plain(nodes: import("./reader/explanation-markdown.ts").MarkdownNode[]): string {
-        return nodes.map(node => node.type === "text" ? node.text : node.tag === "br" ? "\n" : plain(node.children)).join("");
-      }
-      function formatNodes(nodes: import("./reader/explanation-markdown.ts").MarkdownNode[], code = false): void {
-        for (const node of nodes) {
-          if (node.type === "text") { if (!code) node.text = formatText(node.text); }
-          else formatNodes(node.children, code || node.tag === "code" || node.tag === "pre");
-        }
-      }
-      for (const part of parts) if ("text" in part) {
+    }
+    for (const part of parts)
+      if ("text" in part) {
         part.markdown = explanationMarkdown(part.text, true);
         formatNodes(part.markdown);
         part.text = plain(part.markdown);
       }
-      const quote = parts.map(part => "text" in part ? part.text : "").join("");
-      const end = start + canonicalText(quote).length;
-      const result = { parts, quote, start, end };
-      start = end;
-      return result;
-    });
+    const quote = parts.map(part => ("text" in part ? part.text : "")).join("");
+    const end = start + canonicalText(quote).length;
+    const result = { parts, quote, start, end };
+    start = end;
+    return result;
+  });
 }
 
 async function appendNotionPage(response: Response, pages: NotionPage[]): Promise<string | null | undefined> {
   if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
-  const data = await response.json() as NotionQuery;
+  const data = (await response.json()) as NotionQuery;
   if (data.request_status?.type === "incomplete") throw new Error("Notion query result is incomplete");
-  pages.push(...data.results ?? []);
+  pages.push(...(data.results ?? []));
   const cursor = data.has_more ? data.next_cursor : null;
   if (data.has_more && !cursor) throw new Error("Notion returned an incomplete page without a cursor");
   return cursor;
@@ -689,7 +714,7 @@ async function fetchNotionJson(url: string, init: RequestInit): Promise<Response
     if (response.status !== 429 || attempt >= 4) return response;
     const retryAfter = Number(response.headers.get("Retry-After") ?? "");
     const delayMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** attempt;
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    await new Promise(resolve => setTimeout(resolve, delayMs));
     attempt += 1;
   }
 }
@@ -715,7 +740,7 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string, catego
   };
   const viewResponse = await fetchNotionJson(`https://api.notion.com/v1/views/${encodeURIComponent(viewId)}`, { headers });
   if (!viewResponse.ok) throw new Error(`Notion API returned ${viewResponse.status}`);
-  const view = await viewResponse.json() as NotionView;
+  const view = (await viewResponse.json()) as NotionView;
   const dataSourceId = view.data_source_id ?? env.NOTION_DATA_SOURCE_ID;
   if (!dataSourceId) throw new Error("Notion view is missing a data source");
 
@@ -723,9 +748,7 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string, catego
   // The read-later category includes entries outside the RSS view's filters.
   const viewFilter = category === "later" ? undefined : viewQueryFilter(view);
   const selectedFilter = categoryFilter(category);
-  const filter = viewFilter && selectedFilter
-    ? { and: [...("and" in viewFilter && Array.isArray(viewFilter.and) ? viewFilter.and : [viewFilter]), selectedFilter] }
-    : viewFilter ?? selectedFilter;
+  const filter = viewFilter && selectedFilter ? { and: [...("and" in viewFilter && Array.isArray(viewFilter.and) ? viewFilter.and : [viewFilter]), selectedFilter] } : (viewFilter ?? selectedFilter);
   let cursor: string | null | undefined;
   do {
     const response = await fetchNotionJson(`https://api.notion.com/v1/data_sources/${encodeURIComponent(dataSourceId)}/query`, {
@@ -734,9 +757,7 @@ async function fetchExcerptPages(env: ConfiguredBindings, viewId: string, catego
       body: JSON.stringify({
         page_size: Math.min(100, limit - pages.length),
         // Favorites are ordered by the most recently edited page, regardless of the view's saved sort.
-        ...(category === "favorites"
-          ? { sorts: [{ timestamp: "last_edited_time", direction: "descending" }] }
-          : view.sorts?.length ? { sorts: view.sorts } : {}),
+        ...(category === "favorites" ? { sorts: [{ timestamp: "last_edited_time", direction: "descending" }] } : view.sorts?.length ? { sorts: view.sorts } : {}),
         ...(filter ? { filter } : {}),
         ...(cursor ? { start_cursor: cursor } : {}),
       }),
@@ -762,7 +783,7 @@ async function fetchCover(env: ConfiguredBindings, pageId: string): Promise<Resp
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Notion API returned ${response.status}`);
 
-  const imageUrl = coverFileUrl(await response.json() as NotionPage);
+  const imageUrl = coverFileUrl((await response.json()) as NotionPage);
   if (!imageUrl) return null;
   return fetchImage(imageUrl);
 }
@@ -790,19 +811,19 @@ async function fetchExcerptImage(env: ConfiguredBindings, pageId: string, blockI
   const pageResponse = await fetch(`https://api.notion.com/v1/pages/${pageId}`, { headers });
   if (pageResponse.status === 404) return null;
   if (!pageResponse.ok) throw new Error(`Notion API returned ${pageResponse.status}`);
-  const page = await pageResponse.json() as NotionPage;
+  const page = (await pageResponse.json()) as NotionPage;
   if (page.parent?.type !== "data_source_id" || page.parent.data_source_id !== env.NOTION_DATA_SOURCE_ID) return null;
   const original = textProperty(page.properties, "正文");
   const translation = textProperty(page.properties, "正文翻译");
   const bodies = usesOriginalContent(page.properties) ? [original] : translation ? [translation, original] : [];
-  const referenced = bodies.some((body) => Array.from(body.matchAll(IMAGE_TAG)).some((match) =>
-    match[1]?.toLowerCase() === blockId.toLowerCase() && NOTION_PAGE_ID.test(match[2] ?? "")));
+  const referenced = bodies.some(body => Array.from(body.matchAll(IMAGE_TAG)).some(match => match[1]?.toLowerCase() === blockId.toLowerCase() && NOTION_PAGE_ID.test(match[2] ?? "")));
   if (!referenced) return null;
   const blockResponse = await fetch(`https://api.notion.com/v1/blocks/${blockId}`, { headers });
   if (blockResponse.status === 404) return null;
   if (!blockResponse.ok) throw new Error(`Notion API returned ${blockResponse.status}`);
-  const block = await blockResponse.json() as {
-    type?: string; parent?: { type?: string; page_id?: string };
+  const block = (await blockResponse.json()) as {
+    type?: string;
+    parent?: { type?: string; page_id?: string };
     image?: { type?: string; file?: { url?: string } };
   };
   if (block.type !== "image" || block.parent?.type !== "page_id" || block.parent.page_id !== pageId || block.image?.type !== "file") return null;
@@ -834,7 +855,11 @@ function highlightRanges(data: URLSearchParams): Array<{ start: number; end: num
   const rangesJson = data.get("ranges");
   let ranges: Array<{ start: number; end: number; quote: string }>;
   if (rangesJson !== null) {
-    try { ranges = JSON.parse(rangesJson); } catch { throw highlightError("选区无效。", 400); }
+    try {
+      ranges = JSON.parse(rangesJson);
+    } catch {
+      throw highlightError("选区无效。", 400);
+    }
     if (!Array.isArray(ranges) || !ranges.length || ranges.length > 1500) throw highlightError("选区无效。", 400);
   } else {
     const start = data.get("start") || "";
@@ -842,7 +867,8 @@ function highlightRanges(data: URLSearchParams): Array<{ start: number; end: num
     if (!/^(0|[1-9]\d{0,8})$/.test(start) || !/^(0|[1-9]\d{0,8})$/.test(end)) throw highlightError("选区无效。", 400);
     ranges = [{ start: Number(start), end: Number(end), quote: data.get("quote") || "" }];
   }
-  let previousEnd = 0, selectedLength = 0;
+  let previousEnd = 0,
+    selectedLength = 0;
   for (const [index, range] of ranges.entries()) {
     if (!range || !Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || typeof range.quote !== "string" || range.end <= range.start || range.end > 999999999 || (index === 0 ? range.start < previousEnd : range.start <= previousEnd)) throw highlightError("选区无效。", 400);
     const clean = canonicalText(range.quote);
@@ -857,15 +883,18 @@ function highlightRanges(data: URLSearchParams): Array<{ start: number; end: num
 async function saveHighlights(db: D1Database, excerptNumber: number, pageId: string, field: string, text: string, ranges: Array<{ start: number; end: number; quote: string }>): Promise<ResolvedHighlight[]> {
   const hash = await hashText(text);
   const createdAt = new Date().toISOString();
-  const json = JSON.stringify(ranges.map(range => ({
-    id: crypto.randomUUID(),
-    start: range.start,
-    end: range.end,
-    quote: Array.from(range.quote).length <= 1500 ? range.quote : canonicalText(range.quote),
-    prefix: text.slice(Math.max(0, range.start - 32), range.start),
-    suffix: text.slice(range.end, range.end + 32),
-  })));
-  await db.prepare(`INSERT OR IGNORE INTO highlights (id,excerpt_number,excerpt_page_id,field,start,"end",quote,prefix,suffix,body_hash,created_at)
+  const json = JSON.stringify(
+    ranges.map(range => ({
+      id: crypto.randomUUID(),
+      start: range.start,
+      end: range.end,
+      quote: Array.from(range.quote).length <= 1500 ? range.quote : canonicalText(range.quote),
+      prefix: text.slice(Math.max(0, range.start - 32), range.start),
+      suffix: text.slice(range.end, range.end + 32),
+    })),
+  );
+  await db
+    .prepare(`INSERT OR IGNORE INTO highlights (id,excerpt_number,excerpt_page_id,field,start,"end",quote,prefix,suffix,body_hash,created_at)
     SELECT json_extract(r.value,'$.id'), ?1, ?2, ?3, json_extract(r.value,'$.start'), json_extract(r.value,'$.end'),
       json_extract(r.value,'$.quote'), json_extract(r.value,'$.prefix'), json_extract(r.value,'$.suffix'), ?4, ?5
     FROM json_each(?6) r
@@ -873,11 +902,15 @@ async function saveHighlights(db: D1Database, excerptNumber: number, pageId: str
       + (SELECT count(*) FROM json_each(?6) n WHERE NOT EXISTS (
         SELECT 1 FROM highlights h WHERE h.excerpt_number=?1 AND h.excerpt_page_id=?2 AND h.field=?3
           AND h.start=json_extract(n.value,'$.start') AND h."end"=json_extract(n.value,'$.end') AND h.body_hash=?4)) <= 200`)
-    .bind(excerptNumber, pageId, field, hash, createdAt, json).run();
-  const selected = await db.prepare(`SELECT id,field,start,"end" FROM highlights
+    .bind(excerptNumber, pageId, field, hash, createdAt, json)
+    .run();
+  const selected = await db
+    .prepare(`SELECT id,field,start,"end" FROM highlights
     WHERE excerpt_number=?1 AND excerpt_page_id=?2 AND field=?3 AND body_hash=?4
       AND (start,"end") IN (SELECT json_extract(value,'$.start'), json_extract(value,'$.end') FROM json_each(?5))
-    ORDER BY start`).bind(excerptNumber, pageId, field, hash, json).all<ResolvedHighlight>();
+    ORDER BY start`)
+    .bind(excerptNumber, pageId, field, hash, json)
+    .all<ResolvedHighlight>();
   if (selected.results.length < ranges.length) throw highlightError("每篇文章最多保存 200 条划线。", 429);
   return selected.results;
 }
@@ -893,119 +926,143 @@ const worker = {
       if (id === null) return highlightError("未找到文章。", 404);
       if (!env.HIGHLIGHTS_DB) return highlightError("划线数据库未配置。", 503);
       const db = env.HIGHLIGHTS_DB;
-      return favoriteRequest(request, env, code, async (_desired, data) => {
-        if (data.get("action") === "verify") return { verified: true };
-        if (data.get("action") === "delete") {
-          const highlightId = data.get("id") || "";
-          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(highlightId)) throw highlightError("划线无效。", 400);
-          try {
-            const result = await db.prepare("DELETE FROM highlights WHERE id=? AND excerpt_number=?").bind(highlightId, id).run();
-            return { id: highlightId, deleted: (result.meta?.changes ?? 0) > 0 };
-          } catch (error) {
-            if (error instanceof Response) throw error;
-            throw highlightError("取消划线失败，请稍后再试。", 502);
+      return favoriteRequest(
+        request,
+        env,
+        code,
+        async (_desired, data) => {
+          if (data.get("action") === "verify") return { verified: true };
+          if (data.get("action") === "delete") {
+            const highlightId = data.get("id") || "";
+            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(highlightId)) throw highlightError("划线无效。", 400);
+            try {
+              const result = await db.prepare("DELETE FROM highlights WHERE id=? AND excerpt_number=?").bind(highlightId, id).run();
+              return { id: highlightId, deleted: (result.meta?.changes ?? 0) > 0 };
+            } catch (error) {
+              if (error instanceof Response) throw error;
+              throw highlightError("取消划线失败，请稍后再试。", 502);
+            }
           }
-        }
-        const field = data.get("field") || "";
-        const explaining = data.get("action") === "explain";
-        const matchingOriginal = data.get("action") === "original";
-        if (!/^(original|translation|terms)$/.test(field)) throw highlightError("选区无效。", 400);
-        const ranges = highlightRanges(data);
-        const { start } = ranges[0]!;
-        if (!env.NOTION_TOKEN || !env.NOTION_EXCERPTS_DATA_SOURCE_ID) throw highlightError("文章服务未配置。", 503);
-        const excerpt = await fetchExcerptByShortId({ NOTION_TOKEN: env.NOTION_TOKEN, NOTION_DATA_SOURCE_ID: env.NOTION_EXCERPTS_DATA_SOURCE_ID }, id);
-        if (!excerpt) throw highlightError("未找到文章。", 404);
-        const text = bodyText(excerpt, field);
-        if (text === null) throw highlightError("划线内容不存在。", 400);
-        if (ranges.some(range => text.slice(range.start, range.end) !== canonicalText(range.quote))) throw highlightError("正文已更新，请刷新后重试。", 409);
-        if (explaining) {
-          if (!env.AI302_API_KEY) throw highlightError("解释服务未配置，请设置 AI302_API_KEY。", 503);
-          const highlights = data.get("save") === "1" ? await saveHighlights(db, id, excerpt.id, field, text, ranges) : undefined;
-          const contextMode = data.get("context") === "paragraph" ? "paragraph" : data.get("context") === "around" ? "around" : "";
-          const context = contextMode ? explainContext(excerpt, field, ranges, contextMode) : "";
-          const response = await fetch("https://api.302.ai/v1/responses", {
-            method: "POST",
-            headers: { Authorization: `Bearer ${env.AI302_API_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ model: "gpt-6-luna", store: false, reasoning: { effort: "low" }, max_output_tokens: 1500,
-              input: `文章标题：${excerpt.title}${context ? `\n上下文：\n${context}` : ""}\n\n解释一下：${ranges.map(range => range.quote).join("\n")}` }),
-            signal: AbortSignal.any([request.signal, AbortSignal.timeout(60000)]),
-          });
-          if (!response.ok) {
-            const failure = await response.json().catch(() => null) as { error?: { type?: unknown; code?: unknown } } | null;
-            console.error("Explanation API request failed", { status: response.status, type: typeof failure?.error?.type === "string" ? failure.error.type : undefined, code: typeof failure?.error?.code === "string" ? failure.error.code : undefined });
-            throw highlightError("解释服务暂不可用，请稍后再试。", 502);
+          const field = data.get("field") || "";
+          const explaining = data.get("action") === "explain";
+          const matchingOriginal = data.get("action") === "original";
+          if (!/^(original|translation|terms)$/.test(field)) throw highlightError("选区无效。", 400);
+          const ranges = highlightRanges(data);
+          const { start } = ranges[0]!;
+          if (!env.NOTION_TOKEN || !env.NOTION_EXCERPTS_DATA_SOURCE_ID) throw highlightError("文章服务未配置。", 503);
+          const excerpt = await fetchExcerptByShortId({ NOTION_TOKEN: env.NOTION_TOKEN, NOTION_DATA_SOURCE_ID: env.NOTION_EXCERPTS_DATA_SOURCE_ID }, id);
+          if (!excerpt) throw highlightError("未找到文章。", 404);
+          const text = bodyText(excerpt, field);
+          if (text === null) throw highlightError("划线内容不存在。", 400);
+          if (ranges.some(range => text.slice(range.start, range.end) !== canonicalText(range.quote))) throw highlightError("正文已更新，请刷新后重试。", 409);
+          if (explaining) {
+            if (!env.AI302_API_KEY) throw highlightError("解释服务未配置，请设置 AI302_API_KEY。", 503);
+            const highlights = data.get("save") === "1" ? await saveHighlights(db, id, excerpt.id, field, text, ranges) : undefined;
+            const contextMode = data.get("context") === "paragraph" ? "paragraph" : data.get("context") === "around" ? "around" : "";
+            const context = contextMode ? explainContext(excerpt, field, ranges, contextMode) : "";
+            const response = await fetch("https://api.302.ai/v1/responses", {
+              method: "POST",
+              headers: { Authorization: `Bearer ${env.AI302_API_KEY}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ model: "gpt-6-luna", store: false, reasoning: { effort: "low" }, max_output_tokens: 1500, input: `文章标题：${excerpt.title}${context ? `\n上下文：\n${context}` : ""}\n\n解释一下：${ranges.map(range => range.quote).join("\n")}` }),
+              signal: AbortSignal.any([request.signal, AbortSignal.timeout(60000)]),
+            });
+            if (!response.ok) {
+              const failure = (await response.json().catch(() => null)) as { error?: { type?: unknown; code?: unknown } } | null;
+              console.error("Explanation API request failed", { status: response.status, type: typeof failure?.error?.type === "string" ? failure.error.type : undefined, code: typeof failure?.error?.code === "string" ? failure.error.code : undefined });
+              throw highlightError("解释服务暂不可用，请稍后再试。", 502);
+            }
+            const result = (await response.json()) as { status?: string; output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }> };
+            const explanation = result.output
+              ?.flatMap(item => (item.type === "message" ? item.content || [] : []))
+              .filter(part => part.type === "output_text" && typeof part.text === "string")
+              .map(part => part.text)
+              .join("\n")
+              .trim();
+            if (!explanation || result.status === "incomplete") throw highlightError("未能生成完整解释，请稍后再试。", 502);
+            return { explanation, markdown: explanationMarkdown(explanation), ...(highlights ? { highlights } : {}) };
           }
-          const result = await response.json() as { status?: string; output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }> };
-          const explanation = result.output?.flatMap(item => item.type === "message" ? item.content || [] : []).filter(part => part.type === "output_text" && typeof part.text === "string").map(part => part.text).join("\n").trim();
-          if (!explanation || result.status === "incomplete") throw highlightError("未能生成完整解释，请稍后再试。", 502);
-          return { explanation, markdown: explanationMarkdown(explanation), ...(highlights ? { highlights } : {}) };
-        }
-        if (matchingOriginal) {
-          if (!env.AI302_API_KEY) throw highlightError("原文匹配服务未配置，请设置 AI302_API_KEY。", 503);
-          if (excerpt.chinese || !excerpt.originalBody) throw highlightError("这篇文章没有可匹配的原文。", 400);
-          const allCandidates = einkParagraphTexts(excerpt.originalBody, excerpt.id)
-            .map((paragraph) => paragraph.replace(IMAGE_TAG, " ").replace(HTML_IMG, " ").trim())
-            .filter((paragraph) => canonicalText(paragraph).length > 0);
-          if (!allCandidates.length) throw highlightError("这篇文章没有可匹配的原文。", 400);
-          const estimatedIndex = Math.min(allCandidates.length - 1, Math.floor((start / Math.max(text.length, 1)) * allCandidates.length));
-          const firstCandidate = Math.max(0, estimatedIndex - JEV_CANDIDATE_RADIUS);
-          const lastCandidate = Math.min(allCandidates.length, estimatedIndex + JEV_CANDIDATE_RADIUS + 1);
-          const candidates = allCandidates.slice(firstCandidate, lastCandidate);
-          const criteria = Object.fromEntries(candidates.map((paragraph, index) => [`p${index}`, Array.from(paragraph).slice(0, JEV_CANDIDATE_TEXT_LIMIT).join("")]));
-          const response = await fetch("https://api.302.ai/typesafeai/v1/systemone", {
-            method: "POST",
-            headers: { Authorization: `Bearer ${env.AI302_API_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              model: "jev-latest",
-              state: JSON.stringify({ title: excerpt.originalTitle || excerpt.title, selected_paragraph: ranges.map((range) => range.quote).join("\n"), estimated_source_position: `${estimatedIndex + 1} / ${allCandidates.length}` }),
-              questions: { match: { type: "choice", instructions: "从原文候选段落中，选择与所选译文段落内容最对应的原文。依据语义、实体、细节和段落主旨匹配，不要只按关键词匹配。若都不匹配，也选择最可能的一段。", criteria } },
-            }),
-            signal: AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
-          });
-          if (!response.ok) {
-            console.error("302.AI Jev request failed", { status: response.status });
-            throw highlightError("原文匹配服务暂不可用，请稍后再试。", 502);
+          if (matchingOriginal) {
+            if (!env.AI302_API_KEY) throw highlightError("原文匹配服务未配置，请设置 AI302_API_KEY。", 503);
+            if (excerpt.chinese || !excerpt.originalBody) throw highlightError("这篇文章没有可匹配的原文。", 400);
+            const allCandidates = einkParagraphTexts(excerpt.originalBody, excerpt.id)
+              .map(paragraph => paragraph.replace(IMAGE_TAG, " ").replace(HTML_IMG, " ").trim())
+              .filter(paragraph => canonicalText(paragraph).length > 0);
+            if (!allCandidates.length) throw highlightError("这篇文章没有可匹配的原文。", 400);
+            const estimatedIndex = Math.min(allCandidates.length - 1, Math.floor((start / Math.max(text.length, 1)) * allCandidates.length));
+            const firstCandidate = Math.max(0, estimatedIndex - JEV_CANDIDATE_RADIUS);
+            const lastCandidate = Math.min(allCandidates.length, estimatedIndex + JEV_CANDIDATE_RADIUS + 1);
+            const candidates = allCandidates.slice(firstCandidate, lastCandidate);
+            const criteria = Object.fromEntries(candidates.map((paragraph, index) => [`p${index}`, Array.from(paragraph).slice(0, JEV_CANDIDATE_TEXT_LIMIT).join("")]));
+            const response = await fetch("https://api.302.ai/typesafeai/v1/systemone", {
+              method: "POST",
+              headers: { Authorization: `Bearer ${env.AI302_API_KEY}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model: "jev-latest",
+                state: JSON.stringify({ title: excerpt.originalTitle || excerpt.title, selected_paragraph: ranges.map(range => range.quote).join("\n"), estimated_source_position: `${estimatedIndex + 1} / ${allCandidates.length}` }),
+                questions: { match: { type: "choice", instructions: "从原文候选段落中，选择与所选译文段落内容最对应的原文。依据语义、实体、细节和段落主旨匹配，不要只按关键词匹配。若都不匹配，也选择最可能的一段。", criteria } },
+              }),
+              signal: AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
+            });
+            if (!response.ok) {
+              console.error("302.AI Jev request failed", { status: response.status });
+              throw highlightError("原文匹配服务暂不可用，请稍后再试。", 502);
+            }
+            const result = (await response.json()) as { answers?: { match?: { type?: string; choice?: string; confidence?: number } } };
+            const answer = result.answers?.match;
+            const choice = answer?.type === "choice" ? answer.choice || "" : "";
+            const confidence = answer?.confidence;
+            const index = /^p(?:0|[1-9]\d{0,2})$/.test(choice) ? Number(choice.slice(1)) : -1;
+            if (index < 0 || index >= candidates.length || typeof confidence !== "number") throw highlightError("未能匹配原文段落，请稍后再试。", 502);
+            return { paragraph: candidates[index], confidence };
           }
-          const result = await response.json() as { answers?: { match?: { type?: string; choice?: string; confidence?: number } } };
-          const answer = result.answers?.match;
-          const choice = answer?.type === "choice" ? answer.choice || "" : "";
-          const confidence = answer?.confidence;
-          const index = /^p(?:0|[1-9]\d{0,2})$/.test(choice) ? Number(choice.slice(1)) : -1;
-          if (index < 0 || index >= candidates.length || typeof confidence !== "number") throw highlightError("未能匹配原文段落，请稍后再试。", 502);
-          return { paragraph: candidates[index], confidence };
-        }
-        const highlights = await saveHighlights(db, id, excerpt.id, field, text, ranges);
-        return data.get("ranges") === null ? { highlight: highlights[0], highlights } : { highlights };
-      }, einkDocument, { maxBytes: 65536, errorMessage: "请求失败，请稍后再试。" });
+          const highlights = await saveHighlights(db, id, excerpt.id, field, text, ranges);
+          return data.get("ranges") === null ? { highlight: highlights[0], highlights } : { highlights };
+        },
+        einkDocument,
+        { maxBytes: 65536, errorMessage: "请求失败，请稍后再试。" },
+      );
     }
     if (url.pathname.startsWith("/read/add-later/")) {
       const code = url.pathname.slice("/read/add-later/".length);
       const shortId = shareCodeId(code);
       if (shortId === null) return new Response("Not found", { status: 404 });
-      return favoriteRequest(request, env, code, async () => {
-        if (!env.NOTION_TOKEN || !env.NOTION_EXCERPTS_DATA_SOURCE_ID) throw new Error("Notion is not configured");
-        const excerpt = await fetchExcerptByShortId({ NOTION_TOKEN: env.NOTION_TOKEN, NOTION_DATA_SOURCE_ID: env.NOTION_EXCERPTS_DATA_SOURCE_ID }, shortId);
-        if (!excerpt) return false;
-        await addInstapaper(env, excerpt.originalUrl || new URL(`/s/${code}`, url.origin).toString(), excerpt.originalTitle || excerpt.title);
-        return { added: true };
-      }, einkDocument, { errorMessage: "加入待读失败，请稍后再试。" });
+      return favoriteRequest(
+        request,
+        env,
+        code,
+        async () => {
+          if (!env.NOTION_TOKEN || !env.NOTION_EXCERPTS_DATA_SOURCE_ID) throw new Error("Notion is not configured");
+          const excerpt = await fetchExcerptByShortId({ NOTION_TOKEN: env.NOTION_TOKEN, NOTION_DATA_SOURCE_ID: env.NOTION_EXCERPTS_DATA_SOURCE_ID }, shortId);
+          if (!excerpt) return false;
+          await addInstapaper(env, excerpt.originalUrl || new URL(`/s/${code}`, url.origin).toString(), excerpt.originalTitle || excerpt.title);
+          return { added: true };
+        },
+        einkDocument,
+        { errorMessage: "加入待读失败，请稍后再试。" },
+      );
     }
     if (url.pathname.startsWith("/read/favorite/")) {
       const code = url.pathname.slice("/read/favorite/".length);
       const shortId = shareCodeId(code);
       if (shortId === null) return new Response("Not found", { status: 404 });
-      return favoriteRequest(request, env, code, async (desired) => {
-        if (!env.NOTION_TOKEN || !env.NOTION_EXCERPTS_DATA_SOURCE_ID) throw new Error("Notion is not configured");
-        const excerpt = await fetchExcerptByShortId({ NOTION_TOKEN: env.NOTION_TOKEN, NOTION_DATA_SOURCE_ID: env.NOTION_EXCERPTS_DATA_SOURCE_ID }, shortId);
-        if (!excerpt || !NOTION_PAGE_ID.test(excerpt.id)) return false;
-        const response = await fetchNotionJson(`https://api.notion.com/v1/pages/${encodeURIComponent(excerpt.id)}`, {
-          method: "PATCH",
-          headers: { Authorization: `Bearer ${env.NOTION_TOKEN}`, "Notion-Version": NOTION_VERSION, "Content-Type": "application/json" },
-          body: JSON.stringify({ properties: { "已收藏": { checkbox: desired } } }),
-        });
-        if (!response.ok) throw new Error(`Notion returned ${response.status}`);
-        return true;
-      }, einkDocument);
+      return favoriteRequest(
+        request,
+        env,
+        code,
+        async desired => {
+          if (!env.NOTION_TOKEN || !env.NOTION_EXCERPTS_DATA_SOURCE_ID) throw new Error("Notion is not configured");
+          const excerpt = await fetchExcerptByShortId({ NOTION_TOKEN: env.NOTION_TOKEN, NOTION_DATA_SOURCE_ID: env.NOTION_EXCERPTS_DATA_SOURCE_ID }, shortId);
+          if (!excerpt || !NOTION_PAGE_ID.test(excerpt.id)) return false;
+          const response = await fetchNotionJson(`https://api.notion.com/v1/pages/${encodeURIComponent(excerpt.id)}`, {
+            method: "PATCH",
+            headers: { Authorization: `Bearer ${env.NOTION_TOKEN}`, "Notion-Version": NOTION_VERSION, "Content-Type": "application/json" },
+            body: JSON.stringify({ properties: { 已收藏: { checkbox: desired } } }),
+          });
+          if (!response.ok) throw new Error(`Notion returned ${response.status}`);
+          return true;
+        },
+        einkDocument,
+      );
     }
     if (url.pathname === "/read/later.xml") {
       if (request.method !== "GET" && request.method !== "HEAD") {
@@ -1056,81 +1113,124 @@ const worker = {
         const showNavigation = detailShortId !== null;
         // Load the selected list in parallel so prev/next follow the same order as /read.
         const excerptPromise = fetchExcerptByShortId(configured, shortId);
-        const highlightPromise = env.HIGHLIGHTS_DB && showNavigation ? Promise.resolve().then(() => env.HIGHLIGHTS_DB!.prepare('SELECT * FROM highlights WHERE excerpt_number=? ORDER BY created_at, id').bind(shortId).all<HighlightRow>()).then(r => r.results).catch(error => { captureException(error); console.error("Failed to load highlights", error); return [] as HighlightRow[]; }) : Promise.resolve([] as HighlightRow[]);
-        const listPromise = env.HIGHLIGHTS_DB && showNavigation && category === "highlights"
-          ? Promise.resolve().then(() => env.HIGHLIGHTS_DB!.prepare('SELECT excerpt_number FROM highlights ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?').bind(FEED_ITEM_LIMIT, (page - 1) * FEED_ITEM_LIMIT).all<{ excerpt_number: number }>()).then(async result => {
-              const ids = [...new Set(result.results.map(row => row.excerpt_number))];
-              const excerpts = await fetchHighlightExcerpts(configured, ids);
-              return ids.flatMap(id => excerpts.has(id) ? [excerpts.get(id)!] : []);
-            }).catch(error => { captureException(error); console.error("Failed to load highlight navigation", error); return [] as Excerpt[]; })
-          : excerptsViewId && showNavigation && category !== "highlights"
-          ? fetchExcerptPages(configured, excerptsViewId, category, page * FEED_ITEM_LIMIT).then((pages) =>
-            pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null)).catch((error) => {
-              captureException(error);
-              console.error("Failed to load article navigation", error);
-              return [] as Excerpt[];
-            })
-          : Promise.resolve([] as Excerpt[]);
+        const highlightPromise =
+          env.HIGHLIGHTS_DB && showNavigation
+            ? Promise.resolve()
+                .then(() => env.HIGHLIGHTS_DB!.prepare("SELECT * FROM highlights WHERE excerpt_number=? ORDER BY created_at, id").bind(shortId).all<HighlightRow>())
+                .then(r => r.results)
+                .catch(error => {
+                  captureException(error);
+                  console.error("Failed to load highlights", error);
+                  return [] as HighlightRow[];
+                })
+            : Promise.resolve([] as HighlightRow[]);
+        const listPromise =
+          env.HIGHLIGHTS_DB && showNavigation && category === "highlights"
+            ? Promise.resolve()
+                .then(() =>
+                  env
+                    .HIGHLIGHTS_DB!.prepare("SELECT excerpt_number FROM highlights ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?")
+                    .bind(FEED_ITEM_LIMIT, (page - 1) * FEED_ITEM_LIMIT)
+                    .all<{ excerpt_number: number }>(),
+                )
+                .then(async result => {
+                  const ids = [...new Set(result.results.map(row => row.excerpt_number))];
+                  const excerpts = await fetchHighlightExcerpts(configured, ids);
+                  return ids.flatMap(id => (excerpts.has(id) ? [excerpts.get(id)!] : []));
+                })
+                .catch(error => {
+                  captureException(error);
+                  console.error("Failed to load highlight navigation", error);
+                  return [] as Excerpt[];
+                })
+            : excerptsViewId && showNavigation && category !== "highlights"
+              ? fetchExcerptPages(configured, excerptsViewId, category, page * FEED_ITEM_LIMIT)
+                  .then(pages => pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null))
+                  .catch(error => {
+                    captureException(error);
+                    console.error("Failed to load article navigation", error);
+                    return [] as Excerpt[];
+                  })
+              : Promise.resolve([] as Excerpt[]);
         const [excerpt, list, highlightRows] = await Promise.all([excerptPromise, listPromise, highlightPromise]);
         // Cache misses too, so probing unused codes does not reach Notion on every request.
         if (!excerpt) return readerApi ? highlightError("未找到文章。", 404) : new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=300" } });
         const neighbors = neighborsFor(list, excerpt.code) ?? { prevCode: null, nextCode: null };
         const highlights = showNavigation ? await resolveHighlights(excerpt, highlightRows) : [];
         const paragraphs = (text: string) => readerParagraphs(text, excerpt.id, READ_ASSET_PREFIX);
-        return readerResponse({
-          item: readerItem(excerpt),
-          lang: excerpt.lang,
-          originalLang: excerpt.originalLang,
-          originalTitle: formatText(excerpt.originalTitle),
-          originalUrl: excerpt.originalUrl,
-          publisher: formatText(excerpt.publisher),
-          chapter: formatText(excerpt.chapter),
-          date: excerpt.publishedDate,
-          field: excerpt.chinese ? "original" : "translation",
-          body: paragraphs(excerpt.body),
-          original: showNavigation && !excerpt.chinese ? paragraphs(excerpt.originalBody ?? "") : [],
-          terms: showNavigation ? paragraphs(excerpt.terms) : [],
-          actions: showNavigation ? {
-            favorite: Boolean(excerpt.favorite),
-            notionUrl: excerpt.link,
-            highlightsEnabled: Boolean(env.HIGHLIGHTS_DB),
-            highlights,
-            ...neighbors,
-          } : null,
-        }, request.method, !showNavigation);
+        return readerResponse(
+          {
+            item: readerItem(excerpt),
+            lang: excerpt.lang,
+            originalLang: excerpt.originalLang,
+            originalTitle: formatText(excerpt.originalTitle),
+            originalUrl: excerpt.originalUrl,
+            publisher: formatText(excerpt.publisher),
+            chapter: formatText(excerpt.chapter),
+            date: excerpt.publishedDate,
+            field: excerpt.chinese ? "original" : "translation",
+            body: paragraphs(excerpt.body),
+            original: showNavigation && !excerpt.chinese ? paragraphs(excerpt.originalBody ?? "") : [],
+            terms: showNavigation ? paragraphs(excerpt.terms) : [],
+            actions: showNavigation
+              ? {
+                  favorite: Boolean(excerpt.favorite),
+                  notionUrl: excerpt.link,
+                  highlightsEnabled: Boolean(env.HIGHLIGHTS_DB),
+                  highlights,
+                  ...neighbors,
+                }
+              : null,
+          },
+          request.method,
+          !showNavigation,
+        );
       }
 
       if (isEinkList && category === "highlights") {
         const { rows, excerpts, resolved, hasMore } = await loadHighlightList(env.HIGHLIGHTS_DB, configured, page);
-        return readerResponse({
-          kind: "highlights", hasMore, available: Boolean(env.HIGHLIGHTS_DB),
-          items: rows.map(row => {
-            const excerpt = excerpts.get(row.excerpt_number);
-            return { id: row.id, quote: row.quote, located: resolved.has(row.id), article: excerpt ? readerItem(excerpt) : null };
-          }),
-        }, request.method, false);
+        return readerResponse(
+          {
+            kind: "highlights",
+            hasMore,
+            available: Boolean(env.HIGHLIGHTS_DB),
+            items: rows.map(row => {
+              const excerpt = excerpts.get(row.excerpt_number);
+              return { id: row.id, quote: row.quote, located: resolved.has(row.id), article: excerpt ? readerItem(excerpt) : null };
+            }),
+          },
+          request.method,
+          false,
+        );
       }
       if (isEinkList) {
         const limit = page * FEED_ITEM_LIMIT;
         const pages = await fetchExcerptPages(configured, excerptsViewId!, category, limit + 1);
-        const excerpts = pages.slice(0, limit)
+        const excerpts = pages
+          .slice(0, limit)
           .map(excerptFromPage)
           .filter((item): item is Excerpt => item !== null);
-        return readerResponse({
-          kind: "articles", items: excerpts.map(readerItem), hasMore: pages.length > limit && page < 999,
-        }, request.method, category !== "favorites");
+        return readerResponse(
+          {
+            kind: "articles",
+            items: excerpts.map(readerItem),
+            hasMore: pages.length > limit && page < 999,
+          },
+          request.method,
+          category !== "favorites",
+        );
       }
 
       const feedUrl = `${url.origin}${url.pathname}`;
       const feed = isExcerptFeed
         ? renderExcerptFeed(
-          (await fetchExcerptPages(configured, excerptsViewId!)).map(excerptFromPage).filter((item): item is Excerpt => item !== null),
-          feedUrl,
-        )
+            (await fetchExcerptPages(configured, excerptsViewId!)).map(excerptFromPage).filter((item): item is Excerpt => item !== null),
+            feedUrl,
+          )
         : renderFeed(
-          (await fetchPages(configured)).map(bookFromPage).filter((item): item is Book => item !== null),
-          feedUrl,
-        );
+            (await fetchPages(configured)).map(bookFromPage).filter((item): item is Book => item !== null),
+            feedUrl,
+          );
       return new Response(request.method === "HEAD" ? null : feed, {
         headers: {
           "Content-Type": "application/rss+xml; charset=utf-8",
@@ -1144,10 +1244,7 @@ const worker = {
       captureException(error);
       console.error(coverId || imageIds ? "Failed to load image" : isEinkList || shortId !== null ? "Failed to build e-ink page" : "Failed to build book RSS", error);
       if (readerApi) return highlightError("暂时无法读取，请稍后重试。", 502);
-      return new Response(
-        coverId || imageIds ? "Image temporarily unavailable" : isEinkList || shortId !== null ? "Page temporarily unavailable" : "Feed temporarily unavailable",
-        { status: 502, headers: { "Cache-Control": "no-store" } },
-      );
+      return new Response(coverId || imageIds ? "Image temporarily unavailable" : isEinkList || shortId !== null ? "Page temporarily unavailable" : "Feed temporarily unavailable", { status: 502, headers: { "Cache-Control": "no-store" } });
     }
   },
 };

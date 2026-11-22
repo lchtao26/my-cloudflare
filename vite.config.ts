@@ -14,7 +14,9 @@ export default defineConfig(({ mode }) => {
       react(),
       sentryTanstackStart({
         org: env.SENTRY_ORG,
-        project: env.SENTRY_PROJECT?.split(",").map(project => project.trim()).filter(Boolean),
+        project: env.SENTRY_PROJECT?.split(",")
+          .map(project => project.trim())
+          .filter(Boolean),
         authToken: env.SENTRY_AUTH_TOKEN,
         sentryUrl: env.SENTRY_URL || "https://sentry.io/",
         telemetry: false,

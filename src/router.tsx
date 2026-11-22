@@ -13,7 +13,7 @@ export function getRouter() {
   if (!router.isServer && !Sentry.isInitialized() && import.meta.env.VITE_SENTRY_DSN) {
     Sentry.init({
       dsn: import.meta.env.VITE_SENTRY_DSN,
-        tunnel: true,
+      tunnel: true,
       environment: import.meta.env.MODE,
       integrations: [Sentry.tanstackRouterBrowserTracingIntegration(router)],
       tracesSampleRate: import.meta.env.DEV ? 1 : tracesSampleRate(import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE),

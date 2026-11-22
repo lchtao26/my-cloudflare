@@ -31,7 +31,6 @@ test("deleting the selected occurrence does not attach it to a different remaini
   assert.equal(resolveAnchor("新文字甲", "changed", { start: 0, end: 1, quote: "甲", prefix: "", suffix: "", bodyHash: "old" }), null);
 });
 
-
 test("distant duplicate with similar context never replaces the deleted selection", async () => {
   const unit = "甲乙丙丁首次观点戊己庚辛";
   const original = "前文" + unit + "隔".repeat(80) + unit + "后文";

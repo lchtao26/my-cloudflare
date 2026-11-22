@@ -1,12 +1,6 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 
-export function ReaderDialog({ id, label, mode, dismiss, children }: {
-  id: string;
-  label: string;
-  mode?: "body" | "mark" | "token";
-  dismiss: () => void;
-  children: ReactNode;
-}) {
+export function ReaderDialog({ id, label, mode, dismiss, children }: { id: string; label: string; mode?: "body" | "mark" | "token"; dismiss: () => void; children: ReactNode }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const pressedOutside = useRef(false);
   useLayoutEffect(() => {
@@ -20,18 +14,26 @@ export function ReaderDialog({ id, label, mode, dismiss, children }: {
   }
 
   return (
-    <dialog id={id} ref={dialog} aria-label={label} closedby="any" data-mode={mode} onClose={dismiss}
+    <dialog
+      id={id}
+      ref={dialog}
+      aria-label={label}
+      closedby="any"
+      data-mode={mode}
+      onClose={dismiss}
       onPointerDown={event => {
-        pressedOutside.current = !("closedBy" in event.currentTarget)
-          && outside(event.currentTarget, event.clientX, event.clientY);
+        pressedOutside.current = !("closedBy" in event.currentTarget) && outside(event.currentTarget, event.clientX, event.clientY);
       }}
-      onPointerCancel={() => { pressedOutside.current = false; }}
+      onPointerCancel={() => {
+        pressedOutside.current = false;
+      }}
       onClick={event => {
         if (pressedOutside.current && outside(event.currentTarget, event.clientX, event.clientY)) {
           event.currentTarget.close();
         }
         pressedOutside.current = false;
-      }}>
+      }}
+    >
       {children}
     </dialog>
   );

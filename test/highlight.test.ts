@@ -4,27 +4,47 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import test from "node:test";
 import worker, { shareCode } from "../src/index.ts";
 
-const origin = "https://example.com", code = shareCode(42), pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
+const origin = "https://example.com",
+  code = shareCode(42),
+  pageId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
 const url = `${origin}/read/highlight/${code}`;
 const page = {
-  id: pageId, url: `https://notion.so/${pageId}`,
-  properties: { ID: { type: "unique_id", unique_id: { number: 42 } },
-    "标题": { type: "rich_text", rich_text: [{ plain_text: "测试" }] },
-    "原文语言": { type: "select", select: { name: "英文" } },
-    "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "甲 重复乙<br>丙重复丁<script>" }] },
-    "正文": { type: "rich_text", rich_text: [{ plain_text: "Original text" }] },
-    "专有名词与术语": { type: "rich_text", rich_text: [{ plain_text: "API。释义。" }] } },
+  id: pageId,
+  url: `https://notion.so/${pageId}`,
+  properties: {
+    ID: { type: "unique_id", unique_id: { number: 42 } },
+    标题: { type: "rich_text", rich_text: [{ plain_text: "测试" }] },
+    原文语言: { type: "select", select: { name: "英文" } },
+    正文翻译: { type: "rich_text", rich_text: [{ plain_text: "甲 重复乙<br>丙重复丁<script>" }] },
+    正文: { type: "rich_text", rich_text: [{ plain_text: "Original text" }] },
+    专有名词与术语: { type: "rich_text", rich_text: [{ plain_text: "API。释义。" }] },
+  },
 };
 function database() {
   const sql = new DatabaseSync(":memory:");
   sql.exec(readFileSync("migrations/0001_highlights.sql", "utf8"));
   sql.exec(readFileSync("migrations/0002_highlight_terms.sql", "utf8"));
   sql.exec(readFileSync("migrations/0003_highlight_length.sql", "utf8"));
-  const db = { prepare(query: string) { return { bind(...args: SQLInputValue[]) { return {
-    async run() { const outcome = sql.prepare(query).run(...args); return { meta: { changes: Number(outcome.changes) } }; },
-    async first() { return sql.prepare(query).get(...args) ?? null; },
-    async all() { return { results: sql.prepare(query).all(...args) }; },
-  }; } }; } } as unknown as D1Database;
+  const db = {
+    prepare(query: string) {
+      return {
+        bind(...args: SQLInputValue[]) {
+          return {
+            async run() {
+              const outcome = sql.prepare(query).run(...args);
+              return { meta: { changes: Number(outcome.changes) } };
+            },
+            async first() {
+              return sql.prepare(query).get(...args) ?? null;
+            },
+            async all() {
+              return { results: sql.prepare(query).all(...args) };
+            },
+          };
+        },
+      };
+    },
+  } as unknown as D1Database;
   return { db, sql };
 }
 
@@ -50,14 +70,23 @@ test("highlight writes reuse PIN and CSRF, validate text and expose private data
     if (String(input).includes("/views/")) return Response.json({ data_source_id: "source" });
     throw new Error(`unexpected fetch ${input}`);
   }) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   const env = { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
   const get = await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), env);
   assert.equal(get.status, 200);
-  const token = (await get.json() as { csrf: string }).csrf;
+  const token = ((await get.json()) as { csrf: string }).csrf;
   const cookie = get.headers.get("set-cookie")!.split(";")[0]!;
   function post(changes: Record<string, string> = {}, requestOrigin = origin, session = "") {
-    return worker.fetch(new Request(url, { method: "POST", headers: { Origin: requestOrigin, Cookie: [cookie, session].filter(Boolean).join("; "), Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf: token, field: "translation", start: "5", end: "7", quote: "重复", ...changes }) }), env);
+    return worker.fetch(
+      new Request(url, {
+        method: "POST",
+        headers: { Origin: requestOrigin, Cookie: [cookie, session].filter(Boolean).join("; "), Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ csrf: token, field: "translation", start: "5", end: "7", quote: "重复", ...changes }),
+      }),
+      env,
+    );
   }
   assert.equal((await post({}, "https://evil.example")).status, 403);
   assert.equal((await post({ csrf: "0".repeat(64) })).status, 403);
@@ -70,11 +99,11 @@ test("highlight writes reuse PIN and CSRF, validate text and expose private data
   assert.equal(saved.status, 200);
   assert.match(saved.headers.get("set-cookie") || "", /__Host-read-session=/);
   const session = saved.headers.get("set-cookie")!.split(";")[0]!;
-  const value = await saved.json() as { highlight: { id: string }; highlights: Array<{ id: string }> };
+  const value = (await saved.json()) as { highlight: { id: string }; highlights: Array<{ id: string }> };
   assert.ok(value.highlight.id);
   assert.equal(value.highlights[0]?.id, value.highlight.id);
   const duplicate = await post({ pin: "012345" });
-  assert.equal((await duplicate.json() as { highlight: { id: string } }).highlight.id, value.highlight.id);
+  assert.equal(((await duplicate.json()) as { highlight: { id: string } }).highlight.id, value.highlight.id);
   assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights").get() as { n: number }).n, 1);
   const terms = await post({ field: "terms", start: "0", end: "4", quote: "API。", pin: "012345" }, origin, session);
   assert.equal(terms.status, 200, "the glossary can be highlighted");
@@ -107,12 +136,33 @@ test("highlight writes reuse PIN and CSRF, validate text and expose private data
   const formatted = markdownArticle.body[1]!;
   const savedFormatted = await post({ start: String(formatted.start), end: String(formatted.end), quote: formatted.quote }, origin, session);
   assert.equal(savedFormatted.status, 200, "formatted paragraph uses rendered text for highlight offsets");
-  const failedDb = { prepare() { throw new Error("D1 unavailable"); } } as unknown as D1Database;
+  const failedDb = {
+    prepare() {
+      throw new Error("D1 unavailable");
+    },
+  } as unknown as D1Database;
   // A database read failure must not take down the article.
   // The Promise chain below expects a prepared statement; use an asynchronous failure.
-  const rejectedDb = { prepare() { return { bind() { return { all: async () => { throw new Error("D1 unavailable"); } }; } }; } } as unknown as D1Database;
-  const oldError = console.error; console.error = () => {};
-  try { for (const badDb of [failedDb, rejectedDb]) assert.equal((await worker.fetch(new Request(`${origin}/api/r/${code}`), { ...env, HIGHLIGHTS_DB: badDb })).status, 200); } finally { console.error = oldError; }
+  const rejectedDb = {
+    prepare() {
+      return {
+        bind() {
+          return {
+            all: async () => {
+              throw new Error("D1 unavailable");
+            },
+          };
+        },
+      };
+    },
+  } as unknown as D1Database;
+  const oldError = console.error;
+  console.error = () => {};
+  try {
+    for (const badDb of [failedDb, rejectedDb]) assert.equal((await worker.fetch(new Request(`${origin}/api/r/${code}`), { ...env, HIGHLIGHTS_DB: badDb })).status, 200);
+  } finally {
+    console.error = oldError;
+  }
   assert.equal((await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), { ...env, HIGHLIGHTS_DB: undefined })).status, 503);
 });
 
@@ -129,13 +179,22 @@ test("explanations require authentication, verify the selection, and send the se
     }
     throw new Error(`unexpected fetch ${input}`);
   }) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   const env = { HIGHLIGHTS_DB: db, AI302_API_KEY: "test-key", NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
   const opened = await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), env);
-  const { csrf } = await opened.json() as { csrf: string };
+  const { csrf } = (await opened.json()) as { csrf: string };
   const cookie = opened.headers.get("set-cookie")!.split(";")[0]!;
   function post(changes: Record<string, string> = {}, requestOrigin = origin, bindings = env, session = "") {
-    return worker.fetch(new Request(url, { method: "POST", headers: { Origin: requestOrigin, Cookie: [cookie, session].filter(Boolean).join("; "), Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, action: "explain", field: "translation", start: "5", end: "7", quote: "重复", ...changes }) }), bindings);
+    return worker.fetch(
+      new Request(url, {
+        method: "POST",
+        headers: { Origin: requestOrigin, Cookie: [cookie, session].filter(Boolean).join("; "), Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ csrf, action: "explain", field: "translation", start: "5", end: "7", quote: "重复", ...changes }),
+      }),
+      bindings,
+    );
   }
   assert.equal((await post()).status, 401);
   assert.equal((await post({ pin: "012345" }, "https://evil.example")).status, 403);
@@ -150,7 +209,7 @@ test("explanations require authentication, verify the selection, and send the se
   assert.equal(requests.length, 0, "PIN verification does not start an explanation");
   const response = await post({}, origin, env, session);
   assert.equal(response.status, 200);
-  assert.equal((await response.json() as { explanation: string }).explanation, "这段话的意思。");
+  assert.equal(((await response.json()) as { explanation: string }).explanation, "这段话的意思。");
   assert.equal(requests[0]!.headers.get("authorization"), "Bearer test-key");
   assert.equal(requests[0]!.body.model, "gpt-6-luna");
   assert.deepEqual(requests[0]!.body.reasoning, { effort: "low" });
@@ -158,7 +217,10 @@ test("explanations require authentication, verify the selection, and send the se
   assert.equal(requests[0]!.body.instructions, undefined);
   assert.match(String(requests[0]!.body.input), /文章标题：测试\n\n解释一下：重复/);
   assert.doesNotMatch(String(requests[0]!.body.input), /文章上下文|原文地址|甲 重复乙/);
-  const disjointRanges = [{ start: 0, end: 1, quote: "甲" }, { start: 5, end: 7, quote: "重复" }];
+  const disjointRanges = [
+    { start: 0, end: 1, quote: "甲" },
+    { start: 5, end: 7, quote: "重复" },
+  ];
   const disjoint = await post({ pin: "012345", ranges: JSON.stringify(disjointRanges) });
   assert.equal(disjoint.status, 200);
   assert.match(String(requests[1]!.body.input), /解释一下：甲\n重复/);
@@ -181,14 +243,19 @@ test("original paragraph matching uses the 302.AI System One API", async t => {
     }
     throw new Error(`unexpected fetch ${input}`);
   }) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   const env = { HIGHLIGHTS_DB: db, AI302_API_KEY: "test-key", NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
   const opened = await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), env);
-  const { csrf } = await opened.json() as { csrf: string };
+  const { csrf } = (await opened.json()) as { csrf: string };
   const cookie = opened.headers.get("set-cookie")!.split(";")[0]!;
-  const response = await worker.fetch(new Request(url, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, pin: "012345", action: "original", field: "translation", start: "0", end: "1", quote: "甲" }) }), env);
+  const response = await worker.fetch(
+    new Request(url, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, pin: "012345", action: "original", field: "translation", start: "0", end: "1", quote: "甲" }) }),
+    env,
+  );
   assert.equal(response.status, 200);
-  assert.equal((await response.json() as { paragraph: string }).paragraph, "Original text");
+  assert.equal(((await response.json()) as { paragraph: string }).paragraph, "Original text");
   assert.equal(requests.length, 1);
   assert.equal(requests[0]!.headers.get("authorization"), "Bearer test-key");
   assert.equal(requests[0]!.body.model, "jev-latest");
@@ -207,16 +274,21 @@ test("distant duplicate deletion leaves the saved highlight orphaned until the b
   fixture.properties["正文翻译"].rich_text[0]!.plain_text = original;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => Response.json({ results: [fixture] })) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   const env = { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
   const fixtureCode = shareCode(44);
   const endpoint = `${origin}/read/highlight/${fixtureCode}`;
   const opened = await worker.fetch(new Request(endpoint, { headers: { Accept: "application/json" } }), env);
   const cookie = opened.headers.get("set-cookie")!.split(";")[0]!;
-  const { csrf } = await opened.json() as { csrf: string };
-  const saved = await worker.fetch(new Request(endpoint, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, pin: "012345", field: "translation", start: "6", end: "10", quote: "首次观点" }) }), env);
+  const { csrf } = (await opened.json()) as { csrf: string };
+  const saved = await worker.fetch(
+    new Request(endpoint, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, pin: "012345", field: "translation", start: "6", end: "10", quote: "首次观点" }) }),
+    env,
+  );
   assert.equal(saved.status, 200);
-  const { highlight } = await saved.json() as { highlight: { id: string } };
+  const { highlight } = (await saved.json()) as { highlight: { id: string } };
   const stored = sql.prepare("SELECT prefix, suffix, body_hash FROM highlights WHERE id = ?").get(highlight.id) as { prefix: string; suffix: string; body_hash: string };
   assert.equal(stored.prefix, "前文甲乙丙丁");
   assert.equal(stored.suffix, "戊己庚辛" + "隔".repeat(28));
@@ -237,15 +309,17 @@ test("deleting a highlight reuses PIN and CSRF and cannot cross articles", async
   t.after(() => sql.close());
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => Response.json({ results: [page] })) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   const env = { HIGHLIGHTS_DB: db, NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
   const opened = await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), env);
   const cookie = opened.headers.get("set-cookie")!.split(";")[0]!;
-  const { csrf } = await opened.json() as { csrf: string };
+  const { csrf } = (await opened.json()) as { csrf: string };
   const saved = await worker.fetch(new Request(url, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, pin: "012345", field: "translation", start: "5", end: "7", quote: "重复" }) }), env);
   assert.equal(saved.status, 200);
   const session = saved.headers.get("set-cookie")!.split(";")[0]!;
-  const { highlight } = await saved.json() as { highlight: { id: string } };
+  const { highlight } = (await saved.json()) as { highlight: { id: string } };
   const otherId = "22222222-2222-4222-8222-222222222222";
   sql.prepare('INSERT INTO highlights (id, excerpt_number, excerpt_page_id, field, start, "end", quote, prefix, suffix, body_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(otherId, 43, pageId, "translation", 0, 1, "甲", "", "", "hash", "2026-01-01");
   function remove(id: string, changes: Record<string, string> = {}, requestOrigin = origin, cookieHeader = session) {
@@ -258,21 +332,23 @@ test("deleting a highlight reuses PIN and CSRF and cannot cross articles", async
   assert.equal((await remove("not-a-uuid")).status, 400);
   const foreign = await remove(otherId);
   assert.equal(foreign.status, 200);
-  assert.equal((await foreign.json() as { deleted: boolean }).deleted, false);
+  assert.equal(((await foreign.json()) as { deleted: boolean }).deleted, false);
   assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights WHERE id=?").get(otherId) as { n: number }).n, 1);
   const removed = await remove(highlight.id, { pin: "012345" }, origin, "");
   assert.equal(removed.status, 200);
   assert.match(removed.headers.get("set-cookie") || "", /__Host-read-session=/);
-  assert.equal((await removed.json() as { deleted: boolean }).deleted, true);
+  assert.equal(((await removed.json()) as { deleted: boolean }).deleted, true);
   assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights WHERE id=?").get(highlight.id) as { n: number }).n, 0);
   const again = await remove(highlight.id);
   assert.equal(again.status, 200);
-  assert.equal((await again.json() as { deleted: boolean }).deleted, false);
-
+  assert.equal(((await again.json()) as { deleted: boolean }).deleted, false);
 });
 
 const sessionEnv = { NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
-const disjointRanges = [{ start: 0, end: 1, quote: "甲" }, { start: 5, end: 7, quote: "重复" }];
+const disjointRanges = [
+  { start: 0, end: 1, quote: "甲" },
+  { start: 5, end: 7, quote: "重复" },
+];
 
 function seededRows(sql: DatabaseSync, count: number) {
   const insert = sql.prepare('INSERT INTO highlights (id,excerpt_number,excerpt_page_id,field,start,"end",quote,prefix,suffix,body_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
@@ -282,7 +358,7 @@ function seededRows(sql: DatabaseSync, count: number) {
 async function highlightSession(env: Parameters<typeof worker.fetch>[1]) {
   const opened = await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), env);
   const cookie = opened.headers.get("set-cookie")!.split(";")[0]!;
-  const { csrf } = await opened.json() as { csrf: string };
+  const { csrf } = (await opened.json()) as { csrf: string };
   const verified = await worker.fetch(new Request(url, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, action: "verify", pin: "012345" }) }), env);
   const session = verified.headers.get("set-cookie")!.split(";")[0]!;
   return { csrf, cookie: [cookie, session].filter(Boolean).join("; ") };
@@ -293,7 +369,9 @@ test("token selections save one row per range and reject ranges that touch", asy
   t.after(() => sql.close());
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => Response.json({ results: [page] })) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   const env = { ...sessionEnv, HIGHLIGHTS_DB: db };
   const { csrf, cookie } = await highlightSession(env);
   function post(body: Record<string, string>) {
@@ -301,15 +379,25 @@ test("token selections save one row per range and reject ranges that touch", asy
   }
   const saved = await post({ ranges: JSON.stringify(disjointRanges) });
   assert.equal(saved.status, 200);
-  const first = await saved.json() as { highlights: Array<{ id: string }> };
+  const first = (await saved.json()) as { highlights: Array<{ id: string }> };
   assert.equal(first.highlights.length, 2);
   assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights").get() as { n: number }).n, 2);
   const again = await post({ ranges: JSON.stringify(disjointRanges) });
   assert.equal(again.status, 200);
-  const second = await again.json() as { highlights: Array<{ id: string }> };
+  const second = (await again.json()) as { highlights: Array<{ id: string }> };
   assert.deepEqual(second.highlights.map(mark => mark.id).sort(), first.highlights.map(mark => mark.id).sort());
   assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights").get() as { n: number }).n, 2);
-  assert.equal((await post({ ranges: JSON.stringify([{ start: 0, end: 1, quote: "甲" }, { start: 1, end: 3, quote: "重复" }]) })).status, 400);
+  assert.equal(
+    (
+      await post({
+        ranges: JSON.stringify([
+          { start: 0, end: 1, quote: "甲" },
+          { start: 1, end: 3, quote: "重复" },
+        ]),
+      })
+    ).status,
+    400,
+  );
   assert.equal((await post({ ranges: JSON.stringify([...disjointRanges].reverse()) })).status, 400);
   sql.exec("DELETE FROM highlights");
   assert.equal((await post({ ranges: JSON.stringify([disjointRanges[0]!]) })).status, 200);
@@ -329,7 +417,9 @@ test("a multi-range highlight larger than 16KB is still accepted", async t => {
   fixture.properties["正文翻译"].rich_text[0]!.plain_text = "字".repeat(400);
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => Response.json({ results: [fixture] })) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   const env = { ...sessionEnv, HIGHLIGHTS_DB: db };
   const { csrf, cookie } = await highlightSession(env);
   const ranges = Array.from({ length: 150 }, (_, index) => ({ start: index * 2, end: index * 2 + 1, quote: `字${" ".repeat(100)}` }));
@@ -356,15 +446,22 @@ test("saving an explanation writes one highlight per range before calling the mo
     }
     throw new Error(`unexpected fetch ${input}`);
   }) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   const env = { ...sessionEnv, HIGHLIGHTS_DB: db, AI302_API_KEY: "test-key" };
   const { csrf, cookie } = await highlightSession(env);
   function post(changes: Record<string, string> = {}) {
-    return worker.fetch(new Request(url, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, action: "explain", field: "translation", ranges: JSON.stringify(disjointRanges), save: "1", ...changes }) }), env);
+    return worker.fetch(
+      new Request(url, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, action: "explain", field: "translation", ranges: JSON.stringify(disjointRanges), save: "1", ...changes }) }),
+      env,
+    );
   }
   const oldError = console.error;
   console.error = () => {};
-  t.after(() => { console.error = oldError; });
+  t.after(() => {
+    console.error = oldError;
+  });
   fail = true;
   assert.equal((await post()).status, 502);
   assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights").get() as { n: number }).n, 2);
@@ -372,7 +469,7 @@ test("saving an explanation writes one highlight per range before calling the mo
   fail = false;
   const saved = await post();
   assert.equal(saved.status, 200);
-  const value = await saved.json() as { explanation: string; highlights: unknown[] };
+  const value = (await saved.json()) as { explanation: string; highlights: unknown[] };
   assert.equal(value.explanation, "这段话的意思。");
   assert.equal(value.highlights.length, 2);
   assert.match(requests[1]!, /解释一下：甲\n重复/);
@@ -395,10 +492,15 @@ test("original matching ignores a request to save highlights", async t => {
     if (String(input) === "https://api.302.ai/typesafeai/v1/systemone") return Response.json({ answers: { match: { type: "choice", choice: "p0", confidence: 0.9 } } });
     throw new Error(`unexpected fetch ${input}`);
   }) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   const env = { ...sessionEnv, HIGHLIGHTS_DB: db, AI302_API_KEY: "test-key" };
   const { csrf, cookie } = await highlightSession(env);
-  const response = await worker.fetch(new Request(url, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, action: "original", field: "translation", start: "0", end: "1", quote: "甲", save: "1" }) }), env);
+  const response = await worker.fetch(
+    new Request(url, { method: "POST", headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, action: "original", field: "translation", start: "0", end: "1", quote: "甲", save: "1" }) }),
+    env,
+  );
   assert.equal(response.status, 200);
   assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights").get() as { n: number }).n, 0);
 });
@@ -409,7 +511,9 @@ test("aborting the client stops an explanation before the 60s upstream timeout",
   const originalFetch = globalThis.fetch;
   let upstream: AbortSignal | undefined;
   let started = () => {};
-  const upstreamStarted = new Promise<void>(resolve => { started = resolve; });
+  const upstreamStarted = new Promise<void>(resolve => {
+    started = resolve;
+  });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input).includes("/data_sources/source/query")) return Response.json({ results: [page] });
     if (String(input) === "https://api.302.ai/v1/responses") {
@@ -434,10 +538,12 @@ test("aborting the client stops an explanation before the 60s upstream timeout",
     }
     throw new Error(`unexpected fetch ${input}`);
   }) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   const env = { HIGHLIGHTS_DB: db, AI302_API_KEY: "test-key", NOTION_TOKEN: "token", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", FAVORITE_PIN: "012345", FAVORITE_SESSION_SECRET: "1234567890abcdef1234567890abcdef", FAVORITE_LOGIN_LIMIT: { getByName: () => ({ attempt: async () => true }) } };
   const opened = await worker.fetch(new Request(url, { headers: { Accept: "application/json" } }), env);
-  const { csrf } = await opened.json() as { csrf: string };
+  const { csrf } = (await opened.json()) as { csrf: string };
   const cookie = opened.headers.get("set-cookie")!.split(";")[0]!;
   const headers = { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" };
   const saved = await worker.fetch(new Request(url, { method: "POST", headers, body: new URLSearchParams({ csrf, pin: "012345", field: "translation", start: "5", end: "7", quote: "重复" }) }), env);
@@ -473,7 +579,9 @@ test("explanation context is the current paragraph with its neighbors, or only t
     }
     throw new Error(`unexpected fetch ${input}`);
   }) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   const env = { ...sessionEnv, HIGHLIGHTS_DB: db, AI302_API_KEY: "test-key" };
   const { csrf, cookie } = await highlightSession(env);
   function post(body: Record<string, string>) {

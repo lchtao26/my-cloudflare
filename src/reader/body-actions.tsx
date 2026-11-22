@@ -6,14 +6,7 @@ import { tokenRanges, tokenize, type TokenRange } from "./tokenize.ts";
 const HOLD_MS = 500;
 const RELEASE_GUARD_MS = 400;
 
-export function BodyActionSheet({ selected, preview, showOriginalButton, pending, dismiss, act }: {
-  selected: ParagraphSelection;
-  preview: string;
-  showOriginalButton: boolean;
-  pending: boolean;
-  dismiss: () => void;
-  act: (type: "highlight" | "delete" | "explain" | "original", ranges?: TokenRange[]) => void;
-}) {
+export function BodyActionSheet({ selected, preview, showOriginalButton, pending, dismiss, act }: { selected: ParagraphSelection; preview: string; showOriginalButton: boolean; pending: boolean; dismiss: () => void; act: (type: "highlight" | "delete" | "explain" | "original", ranges?: TokenRange[]) => void }) {
   const [tokenMode, setTokenMode] = useState(false);
   const [chosen, setChosen] = useState<Set<number>>(() => new Set());
   const releaseGuard = useRef(0);
@@ -28,10 +21,7 @@ export function BodyActionSheet({ selected, preview, showOriginalButton, pending
     press.current = null;
     stopLift.current?.();
   }).current;
-  const tokens = useMemo(
-    () => tokenize(selected.paragraph.quote, selected.paragraph.start),
-    [selected.paragraph.quote, selected.paragraph.start],
-  );
+  const tokens = useMemo(() => tokenize(selected.paragraph.quote, selected.paragraph.start), [selected.paragraph.quote, selected.paragraph.start]);
   const marking = selected.highlightId !== null;
 
   function scrollOffset() {
@@ -97,7 +87,10 @@ export function BodyActionSheet({ selected, preview, showOriginalButton, pending
     <ReaderDialog id="body-actions" label="正文操作" mode={marking ? "mark" : tokenMode ? "token" : "body"} dismiss={dismiss}>
       <span ref={releaseOnUnmount} hidden />
       <div id="body-preview-scroll" onScroll={() => moved(press.current?.x ?? 0, press.current?.y ?? 0)}>
-        <p id="body-preview" role={tokenMode ? "group" : undefined} aria-label={tokenMode ? "选择文字" : undefined}
+        <p
+          id="body-preview"
+          role={tokenMode ? "group" : undefined}
+          aria-label={tokenMode ? "选择文字" : undefined}
           onContextMenu={event => event.preventDefault()}
           onPointerDown={pointerDown}
           onPointerMove={event => moved(event.clientX, event.clientY)}
@@ -126,40 +119,85 @@ export function BodyActionSheet({ selected, preview, showOriginalButton, pending
           }}
           onMouseUp={() => {
             if (!window.PointerEvent) clearPress();
-          }}>
-          {tokenMode ? tokens.map((token, index) => {
-            if (token.kind === "space") return token.text.includes("\n") ? <span key={index} className="token-break" /> : null;
-            if (token.kind === "mark") return <span key={index} className="token-mark">{token.text}</span>;
-            const ordinal = tokenIndex++;
-            return <button key={index} type="button" className={token.text.length > 24 ? "token token-long" : "token"} aria-pressed={chosen.has(ordinal)} onClick={() => {
-              if (performance.now() < releaseGuard.current) return;
-              setChosen(current => {
-                const next = new Set(current);
-                if (next.has(ordinal)) next.delete(ordinal);
-                else next.add(ordinal);
-                return next;
-              });
-            }}>{token.text}</button>;
-          }) : preview}
+          }}
+        >
+          {tokenMode
+            ? tokens.map((token, index) => {
+                if (token.kind === "space") return token.text.includes("\n") ? <span key={index} className="token-break" /> : null;
+                if (token.kind === "mark")
+                  return (
+                    <span key={index} className="token-mark">
+                      {token.text}
+                    </span>
+                  );
+                const ordinal = tokenIndex++;
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    className={token.text.length > 24 ? "token token-long" : "token"}
+                    aria-pressed={chosen.has(ordinal)}
+                    onClick={() => {
+                      if (performance.now() < releaseGuard.current) return;
+                      setChosen(current => {
+                        const next = new Set(current);
+                        if (next.has(ordinal)) next.delete(ordinal);
+                        else next.add(ordinal);
+                        return next;
+                      });
+                    }}
+                  >
+                    {token.text}
+                  </button>
+                );
+              })
+            : preview}
         </p>
       </div>
       <div id="body-actions-buttons">
-        {marking ? <>
-            <button id="body-explain" type="button" disabled={pending} onClick={() => act("explain")}>解释</button>
-            <button id="body-unhighlight" type="button" disabled={pending} onClick={() => act("delete")}>取消划线</button>
+        {marking ? (
+          <>
+            <button id="body-explain" type="button" disabled={pending} onClick={() => act("explain")}>
+              解释
+            </button>
+            <button id="body-unhighlight" type="button" disabled={pending} onClick={() => act("delete")}>
+              取消划线
+            </button>
           </>
-          : tokenMode ? <>
-            <button id="body-back" type="button" onClick={() => {
-              setTokenMode(false);
-              setChosen(new Set());
-            }}>返回</button>
-            <button id="body-explain" type="button" disabled={pending || empty} onClick={() => act("explain", tokenRanges(selected.paragraph.quote, tokens, chosen))}>解释</button>
-            <button id="body-highlight" type="button" disabled={pending || empty} onClick={() => act("highlight", tokenRanges(selected.paragraph.quote, tokens, chosen))}>划线</button>
-          </> : <>
-            {showOriginalButton && <button id="body-toggle" type="button" disabled={pending} onClick={() => act("original")}>显示原文</button>}
-            <button id="body-explain" type="button" disabled={pending} onClick={() => act("explain")}>解释</button>
-            <button id="body-highlight" type="button" disabled={pending} onClick={() => act("highlight")}>划线</button>
-          </>}
+        ) : tokenMode ? (
+          <>
+            <button
+              id="body-back"
+              type="button"
+              onClick={() => {
+                setTokenMode(false);
+                setChosen(new Set());
+              }}
+            >
+              返回
+            </button>
+            <button id="body-explain" type="button" disabled={pending || empty} onClick={() => act("explain", tokenRanges(selected.paragraph.quote, tokens, chosen))}>
+              解释
+            </button>
+            <button id="body-highlight" type="button" disabled={pending || empty} onClick={() => act("highlight", tokenRanges(selected.paragraph.quote, tokens, chosen))}>
+              划线
+            </button>
+          </>
+        ) : (
+          <>
+            {showOriginalButton && (
+              <button id="body-toggle" type="button" disabled={pending} onClick={() => act("original")}>
+                显示原文
+              </button>
+            )}
+            <button id="body-explain" type="button" disabled={pending} onClick={() => act("explain")}>
+              解释
+            </button>
+            <button id="body-highlight" type="button" disabled={pending} onClick={() => act("highlight")}>
+              划线
+            </button>
+          </>
+        )}
       </div>
     </ReaderDialog>
   );

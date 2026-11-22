@@ -14,7 +14,10 @@ test("handled upstream failures reach Sentry while ordinary 4xx responses do not
     stackParser: () => [],
     dataCollection: sentryDataCollection,
     transport: () => ({ send: async () => ({ statusCode: 200 }), flush: async () => true }),
-    beforeSend: event => { events.push(event); return event; },
+    beforeSend: event => {
+      events.push(event);
+      return event;
+    },
   });
   client.init();
   t.after(() => client.close());
@@ -24,18 +27,22 @@ test("handled upstream failures reach Sentry while ordinary 4xx responses do not
   await withScope(async scope => {
     scope.setClient(client);
     const feed = await worker.fetch(new Request("https://example.com/book.xml"), {
-      NOTION_TOKEN: "test-token", NOTION_DATA_SOURCE_ID: "source",
+      NOTION_TOKEN: "test-token",
+      NOTION_DATA_SOURCE_ID: "source",
     });
     assert.equal(feed.status, 502);
     const later = await instapaperFeed(new Request("https://example.com/read/later.xml"), {
-      INSTAPAPER_CONSUMER_ID: "id", INSTAPAPER_CONSUMER_SECRET: "secret",
-      INSTAPAPER_OAUTH_TOKEN: "token", INSTAPAPER_OAUTH_TOKEN_SECRET: "secret",
+      INSTAPAPER_CONSUMER_ID: "id",
+      INSTAPAPER_CONSUMER_SECRET: "secret",
+      INSTAPAPER_OAUTH_TOKEN: "token",
+      INSTAPAPER_OAUTH_TOKEN_SECRET: "secret",
     });
     assert.equal(later.status, 502);
     await client.flush();
-    assert.deepEqual(events.map(event => event.exception?.values?.[0]?.value), [
-      "Notion API returned 503", "Instapaper returned 503",
-    ]);
+    assert.deepEqual(
+      events.map(event => event.exception?.values?.[0]?.value),
+      ["Notion API returned 503", "Instapaper returned 503"],
+    );
     assert.ok(!JSON.stringify(events).includes("test-token"));
 
     const missing = await worker.fetch(new Request("https://example.com/missing"), {});

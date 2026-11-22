@@ -43,23 +43,29 @@ function submit(csrf: string, token: string, pin?: string, session = "", request
   });
 }
 
-test("favorites require a valid PIN and CSRF token, then reuse a secure session", async (t) => {
+test("favorites require a valid PIN and CSRF token, then reuse a secure session", async t => {
   const env = configuration();
   const oldFetch = globalThis.fetch;
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), init });
     if (String(input).endsWith("/data_sources/source/query")) {
-      return Response.json({ results: [{
-        id: pageId,
-        url: `https://www.notion.so/${pageId}`,
-        properties: { ID: { type: "unique_id", unique_id: { number: 42 } }, "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] } },
-      }] });
+      return Response.json({
+        results: [
+          {
+            id: pageId,
+            url: `https://www.notion.so/${pageId}`,
+            properties: { ID: { type: "unique_id", unique_id: { number: 42 } }, 正文翻译: { type: "rich_text", rich_text: [{ plain_text: "正文" }] } },
+          },
+        ],
+      });
     }
     if (String(input).endsWith(`/pages/${pageId}`)) return Response.json({ id: pageId });
     throw new Error("unexpected Notion request");
   }) as typeof fetch;
-  t.after(() => { globalThis.fetch = oldFetch; });
+  t.after(() => {
+    globalThis.fetch = oldFetch;
+  });
 
   const page = await open(env);
   assert.equal(page.response.headers.get("Cache-Control"), "no-store");
@@ -92,7 +98,7 @@ test("favorites require a valid PIN and CSRF token, then reuse a secure session"
   assert.ok(successHtml.includes(`href="/r/${code}?tab=weekly&amp;page=2"`));
   assert.equal(calls.length, 2);
   assert.equal(calls[1]?.init?.method, "PATCH");
-  assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), { properties: { "已收藏": { checkbox: true } } });
+  assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), { properties: { 已收藏: { checkbox: true } } });
   const sessionHeader = success.headers.get("set-cookie")!;
   assert.match(sessionHeader, /Secure; HttpOnly; SameSite=Strict/);
   const session = sessionHeader.split(";")[0]!;
@@ -117,14 +123,27 @@ test("PIN input submits once after six digits, including pasted values", async (
   const activeSlots = Array(6).fill(false);
   const filledSlots = Array(6).fill(false);
   const pin = {
-    value: "", selectionStart: 0,
+    value: "",
+    selectionStart: 0,
     parentElement: { classList: { add() {} } },
-    nextElementSibling: { children: activeSlots.map((_, index) => ({ classList: { toggle: (name: string, active: boolean) => { (name === "active" ? activeSlots : filledSlots)[index] = active; } } })) },
+    nextElementSibling: {
+      children: activeSlots.map((_, index) => ({
+        classList: {
+          toggle: (name: string, active: boolean) => {
+            (name === "active" ? activeSlots : filledSlots)[index] = active;
+          },
+        },
+      })),
+    },
     addEventListener: (name: string, handler: (event: { isComposing?: boolean }) => void) => handlers.set(name, handler),
   };
   let submissions = 0;
-  const form = { submit: () => { submissions++; } };
-  runInNewContext(script, { document: { getElementById: (id: string) => id === "pin" ? pin : form } });
+  const form = {
+    submit: () => {
+      submissions++;
+    },
+  };
+  runInNewContext(script, { document: { getElementById: (id: string) => (id === "pin" ? pin : form) } });
   pin.value = "01234";
   pin.selectionStart = 5;
   handlers.get("input")?.({});
@@ -149,24 +168,32 @@ test("login attempts are limited after repeated failures", async () => {
   assert.equal((await worker.fetch(submit(page.csrf, page.token, "012345"), env)).status, 429);
 });
 
-test("favorite API verifies PINs, reuses sessions and requires a PIN without a session", async (t) => {
+test("favorite API verifies PINs, reuses sessions and requires a PIN without a session", async t => {
   const env = configuration();
   const originalFetch = globalThis.fetch;
   let notionCalls = 0;
   const savedValues: boolean[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     notionCalls++;
-    if (String(input).endsWith("/data_sources/source/query")) return Response.json({ results: [{
-      id: pageId, url: `https://www.notion.so/${pageId}`,
-      properties: { ID: { type: "unique_id", unique_id: { number: 42 } }, "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] } },
-    }] });
+    if (String(input).endsWith("/data_sources/source/query"))
+      return Response.json({
+        results: [
+          {
+            id: pageId,
+            url: `https://www.notion.so/${pageId}`,
+            properties: { ID: { type: "unique_id", unique_id: { number: 42 } }, 正文翻译: { type: "rich_text", rich_text: [{ plain_text: "正文" }] } },
+          },
+        ],
+      });
     if (String(input).endsWith(`/pages/${pageId}`)) {
       savedValues.push(JSON.parse(String(init?.body)).properties["已收藏"].checkbox);
       return Response.json({ id: pageId });
     }
     throw new Error("unexpected Notion request");
   }) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   const get = (session = "") => worker.fetch(new Request(url, { headers: { Accept: "application/json", ...(session ? { Cookie: session } : {}) } }), env);
   const post = (csrf: string, token: string, pin?: string, session = "", favorite?: string) => {
     const request = submit(csrf, token, pin, session);
@@ -178,7 +205,7 @@ test("favorite API verifies PINs, reuses sessions and requires a PIN without a s
   };
   const initial = await get();
   const csrf = initial.headers.get("set-cookie")!.split(";")[0]!;
-  const initialData = await initial.json() as { authenticated: boolean; csrf: string };
+  const initialData = (await initial.json()) as { authenticated: boolean; csrf: string };
   assert.equal(initialData.authenticated, false);
   assert.equal(initial.headers.get("cache-control"), "no-store");
   const forged = submit(csrf, initialData.csrf, "012345", "", "https://evil.example");
@@ -198,7 +225,7 @@ test("favorite API verifies PINs, reuses sessions and requires a PIN without a s
   assert.equal(notionCalls, 2);
   const returning = await get(session);
   const newCsrf = returning.headers.get("set-cookie")!.split(";")[0]!;
-  const returningData = await returning.json() as { authenticated: boolean; csrf: string };
+  const returningData = (await returning.json()) as { authenticated: boolean; csrf: string };
   assert.equal(returningData.authenticated, true);
   const saved = await post(newCsrf, returningData.csrf, undefined, session, "0");
   assert.deepEqual(await saved.json(), { ok: true, favorite: false });
@@ -215,14 +242,17 @@ test("favorite API verifies PINs, reuses sessions and requires a PIN without a s
 });
 
 test("already favorited Notion pages retain their favorite status", () => {
-  const excerpt = excerptFromPage({ id: pageId, url: `https://notion.so/${pageId}`, properties: {
-    ID: { type: "unique_id", unique_id: { number: 42 } },
-    "正文翻译": { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
-    "已收藏": { type: "checkbox", checkbox: true },
-  } });
+  const excerpt = excerptFromPage({
+    id: pageId,
+    url: `https://notion.so/${pageId}`,
+    properties: {
+      ID: { type: "unique_id", unique_id: { number: 42 } },
+      正文翻译: { type: "rich_text", rich_text: [{ plain_text: "正文" }] },
+      已收藏: { type: "checkbox", checkbox: true },
+    },
+  });
   assert.ok(excerpt);
   assert.equal(excerpt.favorite, true);
-
 });
 
 test("favorite endpoints fail closed when security configuration is missing", async () => {

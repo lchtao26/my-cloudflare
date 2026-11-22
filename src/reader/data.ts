@@ -11,10 +11,7 @@ export const READ_CATEGORIES = [
 export type ReadCategory = (typeof READ_CATEGORIES)[number]["id"];
 
 export function readCategory(value: unknown): ReadCategory {
-  return (
-    READ_CATEGORIES.find((category) => category.id === (value === "likes" ? "favorites" : value))
-      ?.id ?? "all"
-  );
+  return READ_CATEGORIES.find(category => category.id === (value === "likes" ? "favorites" : value))?.id ?? "all";
 }
 
 export type ReaderItem = {
@@ -32,9 +29,7 @@ type ReaderHighlight = {
   located: boolean;
 };
 
-export type ReaderList =
-  | { kind: "articles"; items: ReaderItem[]; hasMore: boolean }
-  | { kind: "highlights"; items: ReaderHighlight[]; hasMore: boolean; available: boolean };
+export type ReaderList = { kind: "articles"; items: ReaderItem[]; hasMore: boolean } | { kind: "highlights"; items: ReaderHighlight[]; hasMore: boolean; available: boolean };
 
 export type ReaderField = "original" | "translation" | "terms";
 import type { MarkdownNode } from "./explanation-markdown.ts";

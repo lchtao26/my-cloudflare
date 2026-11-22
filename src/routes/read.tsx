@@ -29,7 +29,9 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
   const reload = useCallback(async () => {
     try {
       await queryClient.fetchQuery({ ...listQuery(category, page, "reload"), staleTime: 0, networkMode: "always" });
-    } catch { /* React Query exposes the error alongside the existing list. */ }
+    } catch {
+      /* React Query exposes the error alongside the existing list. */
+    }
   }, [category, page, queryClient]);
   const { surfaceRef, indicatorHeight, label, refreshing, refresh } = usePullToRefresh(reload);
   const { gutter, mainRef } = useReaderScroll(undefined, Boolean(data));
@@ -44,27 +46,34 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
         </div>
         <nav className="categories" aria-label="阅读分类">
           {READ_CATEGORIES.map(item => (
-            <Link key={item.id} to="/read" search={readerSearch(item.id)}
-              activeOptions={{ exact: true }}
-              aria-current={item.id === category ? "page" : undefined}>
+            <Link key={item.id} to="/read" search={readerSearch(item.id)} activeOptions={{ exact: true }} aria-current={item.id === category ? "page" : undefined}>
               {item.label}
             </Link>
           ))}
         </nav>
         {query.isPending && <LoadingStatus />}
-        {query.isError && <p role="alert">{query.error.message} <button type="button" className="other-link" disabled={refreshing} onClick={() => void refresh()}>重试</button></p>}
-        {data && !data.items.length && (
-          <p>{data.kind === "highlights" && !data.available ? "划线数据库未配置" : "暂无条目"}</p>
+        {query.isError && (
+          <p role="alert">
+            {query.error.message}{" "}
+            <button type="button" className="other-link" disabled={refreshing} onClick={() => void refresh()}>
+              重试
+            </button>
+          </p>
         )}
+        {data && !data.items.length && <p>{data.kind === "highlights" && !data.available ? "划线数据库未配置" : "暂无条目"}</p>}
         {data?.kind === "articles" && data.items.length > 0 && (
           <ul>
             {data.items.map(item => (
               <li key={item.code} lang={item.titleLang}>
                 <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search}>
                   {item.title}
-                  {(item.source || item.author) && <p className="meta" lang="zh-CN">
-                    {item.source && <span className="source">{item.source}</span>}{item.source && item.author && " · "}{item.author}
-                  </p>}
+                  {(item.source || item.author) && (
+                    <p className="meta" lang="zh-CN">
+                      {item.source && <span className="source">{item.source}</span>}
+                      {item.source && item.author && " · "}
+                      {item.author}
+                    </p>
+                  )}
                 </Link>
               </li>
             ))}
@@ -74,25 +83,42 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
           <ul>
             {data.items.map(item => {
               const article = item.article;
-              const meta = <p className="meta">{article
-                ? [article.title, article.source, item.located ? "" : "正文已变动，未能定位"].filter(Boolean).join(" · ")
-                : "文章不可用"}</p>;
-              return <li key={item.id}>
-                {article && item.located
-                  ? <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={search}
-                      hash={`hl-${item.id}`}>{item.quote}{meta}</Link>
-                  : <>{item.quote}{meta}</>}
-              </li>;
+              const meta = <p className="meta">{article ? [article.title, article.source, item.located ? "" : "正文已变动，未能定位"].filter(Boolean).join(" · ") : "文章不可用"}</p>;
+              return (
+                <li key={item.id}>
+                  {article && item.located ? (
+                    <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={search} hash={`hl-${item.id}`}>
+                      {item.quote}
+                      {meta}
+                    </Link>
+                  ) : (
+                    <>
+                      {item.quote}
+                      {meta}
+                    </>
+                  )}
+                </li>
+              );
             })}
           </ul>
         )}
         {data && (
           <div className="list-actions" id="list-actions" aria-busy={query.isPlaceholderData}>
-            {category === "highlights" && page > 1 && <Link className="btn" to="/read" search={readerSearch(category, page - 1)}>上一页</Link>}
-            {data.hasMore && (query.isPlaceholderData
-              ? <button className="btn" type="button" disabled>加载中</button>
-              : <Link className="btn" id="load-more" to="/read" search={readerSearch(category, page + 1)}
-                  resetScroll={category === "highlights"}>{category === "highlights" ? "下一页" : "加载更多"}</Link>)}
+            {category === "highlights" && page > 1 && (
+              <Link className="btn" to="/read" search={readerSearch(category, page - 1)}>
+                上一页
+              </Link>
+            )}
+            {data.hasMore &&
+              (query.isPlaceholderData ? (
+                <button className="btn" type="button" disabled>
+                  加载中
+                </button>
+              ) : (
+                <Link className="btn" id="load-more" to="/read" search={readerSearch(category, page + 1)} resetScroll={category === "highlights"}>
+                  {category === "highlights" ? "下一页" : "加载更多"}
+                </Link>
+              ))}
           </div>
         )}
       </main>

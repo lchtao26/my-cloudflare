@@ -11,9 +11,11 @@ const env = {
   INSTAPAPER_OAUTH_TOKEN_SECRET: "token secret",
 };
 
-test("instapaper feed signs the Instapaper request and renders bookmarks", async (context) => {
+test("instapaper feed signs the Instapaper request and renders bookmarks", async context => {
   const originalFetch = globalThis.fetch;
-  context.after(() => { globalThis.fetch = originalFetch; });
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     assert.equal(String(url), "https://www.instapaper.com/api/1/bookmarks/list");
     assert.equal(init?.method, "POST");
@@ -21,11 +23,15 @@ test("instapaper feed signs the Instapaper request and renders bookmarks", async
     assert.equal(body.get("limit"), "7");
     assert.equal(body.get("folder_id"), "starred");
     const header = new Headers(init?.headers).get("authorization")!;
-    const fields = Object.fromEntries([...header.matchAll(/(oauth_\w+)="([^"]*)"/g)].map((match) => [match[1]!, decodeURIComponent(match[2]!)]));
+    const fields = Object.fromEntries([...header.matchAll(/(oauth_\w+)="([^"]*)"/g)].map(match => [match[1]!, decodeURIComponent(match[2]!)]));
     const signature = fields.oauth_signature;
     delete fields.oauth_signature;
-    const encode = (value: string) => encodeURIComponent(value).replace(/[!'()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
-    const params = [...Object.entries(fields), ...body.entries()].map(([key, value]) => [encode(key), encode(value)] as const).sort(([a, av], [b, bv]) => a.localeCompare(b, "en") || av.localeCompare(bv, "en")).map(([key, value]) => `${key}=${value}`).join("&");
+    const encode = (value: string) => encodeURIComponent(value).replace(/[!'()*]/g, ch => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
+    const params = [...Object.entries(fields), ...body.entries()]
+      .map(([key, value]) => [encode(key), encode(value)] as const)
+      .sort(([a, av], [b, bv]) => a.localeCompare(b, "en") || av.localeCompare(bv, "en"))
+      .map(([key, value]) => `${key}=${value}`)
+      .join("&");
     const base = `POST&${encode(String(url))}&${encode(params)}`;
     assert.equal(signature, createHmac("sha1", "consumer%20secret&token%20secret").update(base).digest("base64"));
     return Response.json([{ type: "meta" }, { type: "bookmark", bookmark_id: 42, title: "A & B", url: "https://example.com/?x=1&y=2", description: "<hello>", time: 1700000000 }]);

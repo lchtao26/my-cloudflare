@@ -13,23 +13,17 @@ import { LoadingStatus } from "./loading.tsx";
 import { articleKey, articleQuery, listKey, performAction, ReaderError, readerSearch, type ReaderAction } from "./queries.ts";
 import { useReaderScroll } from "./reading.ts";
 
-export type InitialArticle =
-  | { data: ReaderArticle; error?: never }
-  | { data?: never; error: { message: string; status: number } };
+export type InitialArticle = { data: ReaderArticle; error?: never } | { data?: never; error: { message: string; status: number } };
 
 function backToPreviousPage(event: MouseEvent<HTMLAnchorElement>) {
-  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey ||
-    (event.currentTarget.target && event.currentTarget.target !== "_self") || event.currentTarget.hasAttribute("download") ||
-    window.history.length <= 1) return;
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || (event.currentTarget.target && event.currentTarget.target !== "_self") || event.currentTarget.hasAttribute("download") || window.history.length <= 1) return;
   try {
     window.history.back();
     event.preventDefault();
   } catch {}
 }
 
-export function ArticleRoute({ code, category, page, shared, initial }: {
-  code: string; category: ReadCategory; page: number; shared: boolean; initial?: InitialArticle;
-}) {
+export function ArticleRoute({ code, category, page, shared, initial }: { code: string; category: ReadCategory; page: number; shared: boolean; initial?: InitialArticle }) {
   const hydrated = useHydrated();
   const query = useQuery({
     ...articleQuery(code, shared, category, page),
@@ -38,21 +32,35 @@ export function ArticleRoute({ code, category, page, shared, initial }: {
     refetchOnMount: !initial || hydrated,
   });
   const error = query.error ?? initial?.error;
-  if (query.isPending && (!error || query.isFetching)) return <main><LoadingStatus /></main>;
+  if (query.isPending && (!error || query.isFetching))
+    return (
+      <main>
+        <LoadingStatus />
+      </main>
+    );
   if (!query.data) {
     const missing = error != null && "status" in error && error.status === 404;
-    return <main>
-      <p role={missing ? undefined : "alert"}>{error?.message ?? "未找到文章。"}</p>
-      {!missing && <button type="button" className="other-link" onClick={() => void query.refetch()}>重试</button>}
-      <p><Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>返回</Link></p>
-    </main>;
+    return (
+      <main>
+        <p role={missing ? undefined : "alert"}>{error?.message ?? "未找到文章。"}</p>
+        {!missing && (
+          <button type="button" className="other-link" onClick={() => void query.refetch()}>
+            重试
+          </button>
+        )}
+        <p>
+          <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>
+            返回
+          </Link>
+        </p>
+      </main>
+    );
   }
   return <Article data={query.data} category={category} page={page} hydrated={hydrated} />;
 }
 
 function markdown(nodes: MarkdownNode[]): ReactNode[] {
-  return nodes.map((node, index) => node.type === "text" ? node.text
-    : createElement(node.tag, { key: index, href: node.href, start: node.start }, markdown(node.children)));
+  return nodes.map((node, index) => (node.type === "text" ? node.text : createElement(node.tag, { key: index, href: node.href, start: node.start }, markdown(node.children))));
 }
 
 function isModelAction(action: ReaderAction) {
@@ -89,24 +97,25 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
     }
   }
 
-  const setMain = useCallback<RefCallback<HTMLElement>>(element => {
-    const cleanup = mainRef(element);
-    if (!element || !anchoredMark || scrolledAnchor.current === hash) return cleanup;
-    scrolledAnchor.current = hash;
-    const frame = requestAnimationFrame(() => document.getElementById(hash)?.scrollIntoView({ block: "center" }));
-    return () => {
-      cancelAnimationFrame(frame);
-      cleanup?.();
-    };
-  }, [anchoredMark, hash, mainRef]);
+  const setMain = useCallback<RefCallback<HTMLElement>>(
+    element => {
+      const cleanup = mainRef(element);
+      if (!element || !anchoredMark || scrolledAnchor.current === hash) return cleanup;
+      scrolledAnchor.current = hash;
+      const frame = requestAnimationFrame(() => document.getElementById(hash)?.scrollIntoView({ block: "center" }));
+      return () => {
+        cancelAnimationFrame(frame);
+        cleanup?.();
+      };
+    },
+    [anchoredMark, hash, mainRef],
+  );
 
   const mutation = useMutation({
-    mutationFn: ({ action, pin, signal }: { action: ReaderAction; pin?: string; signal?: AbortSignal }) =>
-      performAction(item.code, action, pin, signal),
+    mutationFn: ({ action, pin, signal }: { action: ReaderAction; pin?: string; signal?: AbortSignal }) => performAction(item.code, action, pin, signal),
     onSuccess: async (result, { action }) => {
       if (action.type === "favorite") {
-        queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current =>
-          current?.actions ? { ...current, actions: { ...current.actions, favorite: Boolean(result.favorite) } } : current);
+        queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current => (current?.actions ? { ...current, actions: { ...current.actions, favorite: Boolean(result.favorite) } } : current));
         await queryClient.invalidateQueries({ queryKey: listKey("favorites") });
       }
       if (action.type === "delete") {
@@ -135,34 +144,37 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
     const controller = isModelAction(action) ? new AbortController() : null;
     modelAbort.current = controller;
     if (!pin && isModelAction(action)) setResultPanel(action);
-    mutation.mutate({ action, pin, signal: controller?.signal }, {
-      onError(error) {
-        if (action.data.save === "1") {
-          void queryClient.invalidateQueries({ queryKey: articleKey(item.code) });
-          void queryClient.invalidateQueries({ queryKey: listKey("highlights") });
-        }
-        if (isAbortError(error)) return;
-        if (error instanceof ReaderError && error.requiresPin) {
-          setResultPanel(null);
-          setPinPrompt(action);
-        } else {
-          setPinPrompt(null);
-          if (isModelAction(action)) {
-            if (pin) setResultPanel(action);
-          } else {
-            setFailure({ message: error.message, retry: action });
+    mutation.mutate(
+      { action, pin, signal: controller?.signal },
+      {
+        onError(error) {
+          if (action.data.save === "1") {
+            void queryClient.invalidateQueries({ queryKey: articleKey(item.code) });
+            void queryClient.invalidateQueries({ queryKey: listKey("highlights") });
           }
-        }
+          if (isAbortError(error)) return;
+          if (error instanceof ReaderError && error.requiresPin) {
+            setResultPanel(null);
+            setPinPrompt(action);
+          } else {
+            setPinPrompt(null);
+            if (isModelAction(action)) {
+              if (pin) setResultPanel(action);
+            } else {
+              setFailure({ message: error.message, retry: action });
+            }
+          }
+        },
+        onSuccess() {
+          setPinPrompt(null);
+          if (action.type === "add-later") setAddedLater(true);
+          if (action.type === "delete" && hash === `hl-${action.data.id}`) {
+            history.replaceState(history.state, "", location.pathname + location.search);
+          }
+          if (pin && isModelAction(action)) setResultPanel(action);
+        },
       },
-      onSuccess() {
-        setPinPrompt(null);
-        if (action.type === "add-later") setAddedLater(true);
-        if (action.type === "delete" && hash === `hl-${action.data.id}`) {
-          history.replaceState(history.state, "", location.pathname + location.search);
-        }
-        if (pin && isModelAction(action)) setResultPanel(action);
-      },
-    });
+    );
   }
 
   function paragraphAction(type: "highlight" | "delete" | "explain" | "original", ranges?: TokenRange[]) {
@@ -176,10 +188,12 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
       setSelected(null);
       const field = selected.field;
       if (type === "highlight") run({ type, data: { field, ranges: JSON.stringify(ranges) } });
-      else if (type === "explain") run({
-        type, data: { action: "explain", field, ranges: JSON.stringify(ranges), save: "1", context: "paragraph" },
-        quote: ranges.map(range => range.quote).join("\n"),
-      });
+      else if (type === "explain")
+        run({
+          type,
+          data: { action: "explain", field, ranges: JSON.stringify(ranges), save: "1", context: "paragraph" },
+          quote: ranges.map(range => range.quote).join("\n"),
+        });
       return;
     }
     setSelected(null);
@@ -214,9 +228,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
       return;
     }
     const field = selected.field;
-    const params: Record<string, string> = type === "highlight"
-      ? { field, start: String(start), end: String(end), quote }
-      : { action: type, field, ranges: JSON.stringify([{ start, end, quote }]), ...(type === "explain" ? { context: "around" } : {}) };
+    const params: Record<string, string> = type === "highlight" ? { field, start: String(start), end: String(end), quote } : { action: type, field, ranges: JSON.stringify([{ start, end, quote }]), ...(type === "explain" ? { context: "around" } : {}) };
     run({ type, data: params, quote });
   }
 
@@ -238,140 +250,241 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
         <article>
           <h1 lang={item.titleLang}>{item.title}</h1>
           <p className="article-byline">
-            <span className="author-row"><span>{data.date || "—"}</span>{item.author && <span>{item.author}</span>}</span>
-            {(actions || hasOriginal) && <span className="byline-actions">
-            {actions && <Link className="other-link" to="/read" search={readerSearch()} onClick={backToPreviousPage}>返回</Link>}
-            {hasOriginal && <button className="other-link" type="button" aria-controls="original-body"
-              aria-expanded={showOriginal} onClick={() => setShowOriginal(value => {
-                const next = !value;
-                try { localStorage.setItem(`read-view:${item.code}`, next ? "original" : "translation"); }
-                catch { /* Local storage can be disabled. */ }
-                return next;
-              })}>{showOriginal ? "显示翻译" : "显示原文"}</button>}
-            </span>}
+            <span className="author-row">
+              <span>{data.date || "—"}</span>
+              {item.author && <span>{item.author}</span>}
+            </span>
+            {(actions || hasOriginal) && (
+              <span className="byline-actions">
+                {actions && (
+                  <Link className="other-link" to="/read" search={readerSearch()} onClick={backToPreviousPage}>
+                    返回
+                  </Link>
+                )}
+                {hasOriginal && (
+                  <button
+                    className="other-link"
+                    type="button"
+                    aria-controls="original-body"
+                    aria-expanded={showOriginal}
+                    onClick={() =>
+                      setShowOriginal(value => {
+                        const next = !value;
+                        try {
+                          localStorage.setItem(`read-view:${item.code}`, next ? "original" : "translation");
+                        } catch {
+                          /* Local storage can be disabled. */
+                        }
+                        return next;
+                      })
+                    }
+                  >
+                    {showOriginal ? "显示翻译" : "显示原文"}
+                  </button>
+                )}
+              </span>
+            )}
           </p>
-          <ReadingBody id={hasOriginal ? "translated-body" : undefined} field={data.field} lang={data.lang}
-            paragraphs={data.body} highlights={highlights} hidden={showOriginal}
-            select={actions?.highlightsEnabled ? setSelected : undefined} />
-          {hasOriginal && <ReadingBody id="original-body" field="original" lang={data.originalLang}
-            paragraphs={data.original} highlights={highlights} hidden={!showOriginal}
-            select={actions?.highlightsEnabled ? setSelected : undefined} />}
-          {actions && <p className="other">
-            <button type="button" className="other-link" disabled={mutation.isPending || addedLater}
-              aria-label={addedLater ? "已加入待读" : "待读"}
-              onClick={() => run({ type: "add-later", data: {} })}>
-              <span role="status">{addedLater ? "已加入待读" : "待读"}</span>
-            </button>{" "}
-            <button type="button" className="other-link" disabled={mutation.isPending}
-              aria-label={actions.favorite ? "取消收藏" : "收藏"}
-              onClick={() => run({ type: "favorite", data: { favorite: actions.favorite ? "0" : "1" } })}>
-              <span role="status">{actions.favorite ? "取消收藏" : "收藏"}</span>
-            </button>{" "}
-            <a className="other-link" href={actions.notionUrl}>管理</a>{" "}
-            <ShareButton code={item.code} />
-          </p>}
+          <ReadingBody id={hasOriginal ? "translated-body" : undefined} field={data.field} lang={data.lang} paragraphs={data.body} highlights={highlights} hidden={showOriginal} select={actions?.highlightsEnabled ? setSelected : undefined} />
+          {hasOriginal && <ReadingBody id="original-body" field="original" lang={data.originalLang} paragraphs={data.original} highlights={highlights} hidden={!showOriginal} select={actions?.highlightsEnabled ? setSelected : undefined} />}
+          {actions && (
+            <p className="other">
+              <button type="button" className="other-link" disabled={mutation.isPending || addedLater} aria-label={addedLater ? "已加入待读" : "待读"} onClick={() => run({ type: "add-later", data: {} })}>
+                <span role="status">{addedLater ? "已加入待读" : "待读"}</span>
+              </button>{" "}
+              <button type="button" className="other-link" disabled={mutation.isPending} aria-label={actions.favorite ? "取消收藏" : "收藏"} onClick={() => run({ type: "favorite", data: { favorite: actions.favorite ? "0" : "1" } })}>
+                <span role="status">{actions.favorite ? "取消收藏" : "收藏"}</span>
+              </button>{" "}
+              <a className="other-link" href={actions.notionUrl}>
+                管理
+              </a>{" "}
+              <ShareButton code={item.code} />
+            </p>
+          )}
           <hr />
           <p className="detail-metadata">
-            {(data.originalUrl || data.originalTitle && data.originalTitle !== item.title) && <>
-              原文：{data.originalUrl ? <a className="metadata-link" href={data.originalUrl} lang={origTitleLang}>
-                {originalTitle}</a> : <span lang={origTitleLang}>{originalTitle}</span>}<br />
-            </>}
-            {data.publisher && <>来源：{data.publisher}<br /></>}
-            {data.chapter && <>章节：{data.chapter}<br /></>}
+            {(data.originalUrl || (data.originalTitle && data.originalTitle !== item.title)) && (
+              <>
+                原文：
+                {data.originalUrl ? (
+                  <a className="metadata-link" href={data.originalUrl} lang={origTitleLang}>
+                    {originalTitle}
+                  </a>
+                ) : (
+                  <span lang={origTitleLang}>{originalTitle}</span>
+                )}
+                <br />
+              </>
+            )}
+            {data.publisher && (
+              <>
+                来源：{data.publisher}
+                <br />
+              </>
+            )}
+            {data.chapter && (
+              <>
+                章节：{data.chapter}
+                <br />
+              </>
+            )}
             日期：{data.date || "—"}
           </p>
-          {data.terms.length > 0 && <><hr /><p>名词解释</p>
-            <ReadingBody field="terms" paragraphs={data.terms} highlights={highlights}
-              select={actions?.highlightsEnabled ? setSelected : undefined} /></>}
+          {data.terms.length > 0 && (
+            <>
+              <hr />
+              <p>名词解释</p>
+              <ReadingBody field="terms" paragraphs={data.terms} highlights={highlights} select={actions?.highlightsEnabled ? setSelected : undefined} />
+            </>
+          )}
         </article>
-        {actions && <nav className="nav-row" aria-label="文章导航">
-          {actions.prevCode
-            ? <Link to="/r/$code" params={{ code: actions.prevCode }} search={search}>上一篇</Link>
-            : <span className="is-disabled">上一篇</span>}
-          <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>返回</Link>
-          {actions.nextCode
-            ? <Link to="/r/$code" params={{ code: actions.nextCode }} search={search}>下一篇</Link>
-            : <span className="is-disabled">下一篇</span>}
-        </nav>}
+        {actions && (
+          <nav className="nav-row" aria-label="文章导航">
+            {actions.prevCode ? (
+              <Link to="/r/$code" params={{ code: actions.prevCode }} search={search}>
+                上一篇
+              </Link>
+            ) : (
+              <span className="is-disabled">上一篇</span>
+            )}
+            <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>
+              返回
+            </Link>
+            {actions.nextCode ? (
+              <Link to="/r/$code" params={{ code: actions.nextCode }} search={search}>
+                下一篇
+              </Link>
+            ) : (
+              <span className="is-disabled">下一篇</span>
+            )}
+          </nav>
+        )}
       </main>
       {remoteProgress !== null && (
         <div className="progress-sync" role="region" aria-label="阅读进度同步">
           <span>远端已读至 {Math.round(remoteProgress * 100)}%</span>
           <div className="progress-sync-actions">
-            <button type="button" onClick={syncToRemote}>同步</button>
-            <button type="button" onClick={dismissRemote}>忽略</button>
+            <button type="button" onClick={syncToRemote}>
+              同步
+            </button>
+            <button type="button" onClick={dismissRemote}>
+              忽略
+            </button>
           </div>
         </div>
       )}
-      <div className="progress" aria-hidden="true"><span className="progress-bar" style={{ width: `${progress * 100}%` }} /></div>
-      {selected && <BodyActionSheet key={`${selected.field}:${selected.paragraph.start}:${selected.highlightId ?? ""}`} selected={selected}
-        preview={selectionPreview(selected, highlights, selected.field === "original" ? data.original : selected.field === "terms" ? data.terms : data.body)}
-        showOriginalButton={hasOriginal && selected.field === "translation"} pending={mutation.isPending}
-        dismiss={() => setSelected(null)} act={paragraphAction} />}
-      {pinPrompt && <ReaderDialog id="favorite-dialog" label="收藏验证" dismiss={() => setPinPrompt(null)}>
-        <PinForm pending={mutation.isPending} error={mutation.isError && mutation.error instanceof ReaderError && mutation.error.requiresPin
-          ? (mutation.error.message === "请输入 6 位密码。" ? "" : mutation.error.message) : undefined}
-          submit={pin => run(pinPrompt, pin)} cancel={() => setPinPrompt(null)} />
-      </ReaderDialog>}
-      {failure && <ReaderDialog id="highlight-error" label="操作失败" dismiss={() => setFailure(null)}>
-        <p role="alert">{failure.message}</p>
-        <div><button type="button" onClick={() => setFailure(null)}>关闭</button>
-          {failure.retry && <button type="button" onClick={() => run(failure.retry!)}>重试</button>}
-        </div>
-      </ReaderDialog>}
-      {resultPanel && (resultPanel.type === "original" ? (
-        <ReaderDialog id="original-match-dialog" label="原文匹配" dismiss={dismissResult}>
-          <div id="original-match-content">
-            <section><h2>译文</h2><p id="original-match-current">{resultPanel.quote}</p></section>
-            <section><h2>原文</h2><p id="original-match-text" role="status">
-              {mutation.isPending ? "正在匹配原文…" : modelError ?? mutation.data?.paragraph ?? "未找到匹配段落。"}
-            </p></section>
+      <div className="progress" aria-hidden="true">
+        <span className="progress-bar" style={{ width: `${progress * 100}%` }} />
+      </div>
+      {selected && (
+        <BodyActionSheet
+          key={`${selected.field}:${selected.paragraph.start}:${selected.highlightId ?? ""}`}
+          selected={selected}
+          preview={selectionPreview(selected, highlights, selected.field === "original" ? data.original : selected.field === "terms" ? data.terms : data.body)}
+          showOriginalButton={hasOriginal && selected.field === "translation"}
+          pending={mutation.isPending}
+          dismiss={() => setSelected(null)}
+          act={paragraphAction}
+        />
+      )}
+      {pinPrompt && (
+        <ReaderDialog id="favorite-dialog" label="收藏验证" dismiss={() => setPinPrompt(null)}>
+          <PinForm pending={mutation.isPending} error={mutation.isError && mutation.error instanceof ReaderError && mutation.error.requiresPin ? (mutation.error.message === "请输入 6 位密码。" ? "" : mutation.error.message) : undefined} submit={pin => run(pinPrompt, pin)} cancel={() => setPinPrompt(null)} />
+        </ReaderDialog>
+      )}
+      {failure && (
+        <ReaderDialog id="highlight-error" label="操作失败" dismiss={() => setFailure(null)}>
+          <p role="alert">{failure.message}</p>
+          <div>
+            <button type="button" onClick={() => setFailure(null)}>
+              关闭
+            </button>
+            {failure.retry && (
+              <button type="button" onClick={() => run(failure.retry!)}>
+                重试
+              </button>
+            )}
           </div>
         </ReaderDialog>
-      ) : (
-        <ReaderDialog id="explanation-dialog" label="段落解释" dismiss={dismissResult}>
-          <div id="explanation-text" aria-live="polite">{mutation.isPending ? "正在解释…"
-            : modelError ?? (mutation.data?.markdown ? markdown(mutation.data.markdown) : mutation.data?.explanation)}</div>
-        </ReaderDialog>
-      ))}
+      )}
+      {resultPanel &&
+        (resultPanel.type === "original" ? (
+          <ReaderDialog id="original-match-dialog" label="原文匹配" dismiss={dismissResult}>
+            <div id="original-match-content">
+              <section>
+                <h2>译文</h2>
+                <p id="original-match-current">{resultPanel.quote}</p>
+              </section>
+              <section>
+                <h2>原文</h2>
+                <p id="original-match-text" role="status">
+                  {mutation.isPending ? "正在匹配原文…" : (modelError ?? mutation.data?.paragraph ?? "未找到匹配段落。")}
+                </p>
+              </section>
+            </div>
+          </ReaderDialog>
+        ) : (
+          <ReaderDialog id="explanation-dialog" label="段落解释" dismiss={dismissResult}>
+            <div id="explanation-text" aria-live="polite">
+              {mutation.isPending ? "正在解释…" : (modelError ?? (mutation.data?.markdown ? markdown(mutation.data.markdown) : mutation.data?.explanation))}
+            </div>
+          </ReaderDialog>
+        ))}
     </div>
   );
 }
 
-function PinForm({ pending, error, submit, cancel }: {
-  pending: boolean; error?: string; submit: (pin: string) => void; cancel: () => void;
-}) {
+function PinForm({ pending, error, submit, cancel }: { pending: boolean; error?: string; submit: (pin: string) => void; cancel: () => void }) {
   // Remount when the error text changes so the field clears and autoFocus runs again.
   return <PinFields key={error ?? "ready"} pending={pending} error={error} submit={submit} cancel={cancel} />;
 }
 
-function PinFields({ pending, error, submit, cancel }: {
-  pending: boolean; error?: string; submit: (pin: string) => void; cancel: () => void;
-}) {
+function PinFields({ pending, error, submit, cancel }: { pending: boolean; error?: string; submit: (pin: string) => void; cancel: () => void }) {
   const [pin, setPin] = useState("");
-  return <>
-    <form onSubmit={event => {
-      event.preventDefault();
-      if (!pending && /^[0-9]{6}$/.test(pin)) submit(pin);
-    }}>
-      <p><label htmlFor="pin">请输入 6 位密码</label></p>
-      <div className="pin-wrap pin-enhanced">
-        <input id="pin" name="pin" type="password" autoFocus inputMode="numeric" autoComplete="current-password"
-          maxLength={6} value={pin} disabled={pending} onChange={event => {
-            const value = event.currentTarget.value.replace(/\D/g, "");
-            setPin(value);
-            if (value.length === 6) submit(value);
-          }} />
-        <div className="pin-slots" aria-hidden="true">
-          {Array.from({ length: 6 }, (_, index) => <span key={index}
-            className={index < pin.length ? "filled" : index === pin.length ? "active" : undefined} />)}
+  return (
+    <>
+      <form
+        onSubmit={event => {
+          event.preventDefault();
+          if (!pending && /^[0-9]{6}$/.test(pin)) submit(pin);
+        }}
+      >
+        <p>
+          <label htmlFor="pin">请输入 6 位密码</label>
+        </p>
+        <div className="pin-wrap pin-enhanced">
+          <input
+            id="pin"
+            name="pin"
+            type="password"
+            autoFocus
+            inputMode="numeric"
+            autoComplete="current-password"
+            maxLength={6}
+            value={pin}
+            disabled={pending}
+            onChange={event => {
+              const value = event.currentTarget.value.replace(/\D/g, "");
+              setPin(value);
+              if (value.length === 6) submit(value);
+            }}
+          />
+          <div className="pin-slots" aria-hidden="true">
+            {Array.from({ length: 6 }, (_, index) => (
+              <span key={index} className={index < pin.length ? "filled" : index === pin.length ? "active" : undefined} />
+            ))}
+          </div>
         </div>
-      </div>
-      <p id="favorite-error" role="alert">{error}</p>
-      {pending && <p role="status">正在验证…</p>}
-    </form>
-    <button type="button" className="favorite-close" onClick={cancel}>取消</button>
-  </>;
+        <p id="favorite-error" role="alert">
+          {error}
+        </p>
+        {pending && <p role="status">正在验证…</p>}
+      </form>
+      <button type="button" className="favorite-close" onClick={cancel}>
+        取消
+      </button>
+    </>
+  );
 }
 
 function ShareButton({ code }: { code: string }) {
@@ -388,10 +501,18 @@ function ShareButton({ code }: { code: string }) {
       input.style.left = "-10000px";
       document.body.appendChild(input);
       input.select();
-      try { setStatus(document.execCommand("copy") ? "已复制" : "复制失败"); }
-      catch { setStatus("复制失败"); }
-      finally { input.remove(); }
+      try {
+        setStatus(document.execCommand("copy") ? "已复制" : "复制失败");
+      } catch {
+        setStatus("复制失败");
+      } finally {
+        input.remove();
+      }
     }
   }
-  return <button type="button" className="other-link" aria-label={status} onClick={() => void share()}><span role="status">{status}</span></button>;
+  return (
+    <button type="button" className="other-link" aria-label={status} onClick={() => void share()}>
+      <span role="status">{status}</span>
+    </button>
+  );
 }

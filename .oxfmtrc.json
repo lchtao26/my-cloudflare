@@ -1,0 +1,5 @@
+{
+  "printWidth": 320,
+  "arrowParens": "avoid",
+  "ignorePatterns": [".playwright-mcp/**"]
+}

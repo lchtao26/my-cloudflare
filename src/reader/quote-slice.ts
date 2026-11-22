@@ -15,11 +15,13 @@ function sliceQuote(quote: string, quoteStart: number, start: number, end: numbe
 }
 
 export function quoteBetween(paragraphs: ReaderParagraph[], start: number, end: number) {
-  return paragraphs.flatMap(paragraph => {
-    if (paragraph.end <= start || paragraph.start >= end) return [];
-    const slice = sliceQuote(paragraph.quote, paragraph.start, Math.max(start, paragraph.start), Math.min(end, paragraph.end));
-    return slice ? [slice] : [];
-  }).join("");
+  return paragraphs
+    .flatMap(paragraph => {
+      if (paragraph.end <= start || paragraph.start >= end) return [];
+      const slice = sliceQuote(paragraph.quote, paragraph.start, Math.max(start, paragraph.start), Math.min(end, paragraph.end));
+      return slice ? [slice] : [];
+    })
+    .join("");
 }
 
 export function selectionPreview(selected: ParagraphSelection, highlights: ResolvedHighlight[], paragraphs: ReaderParagraph[]) {

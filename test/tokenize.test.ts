@@ -14,16 +14,33 @@ function ranges(quote: string, selected: number[], offset = 0) {
 test("tokens keep canonical offsets and leave whitespace in place", () => {
   const quote = "甲 乙丙";
   const tokens = tokenize(quote, 10);
-  assert.deepEqual(wordTokens(quote, 10).map(token => [token.text, token.start, token.end]), [
-    ["甲", 10, 11], ["乙", 11, 12], ["丙", 12, 13],
-  ]);
-  assert.equal(tokens.filter(token => token.kind === "space").map(token => token.text).join(""), " ");
+  assert.deepEqual(
+    wordTokens(quote, 10).map(token => [token.text, token.start, token.end]),
+    [
+      ["甲", 10, 11],
+      ["乙", 11, 12],
+      ["丙", 12, 13],
+    ],
+  );
+  assert.equal(
+    tokens
+      .filter(token => token.kind === "space")
+      .map(token => token.text)
+      .join(""),
+    " ",
+  );
   assert.equal(wordTokens(quote, 10).at(-1)!.end, 10 + canonicalText(quote).length);
   for (const space of ["\n", "\u3000", "\u00a0", "\t"]) {
     const sample = `甲${space}乙`;
     const parts = tokenize(sample, 0);
     assert.equal(parts.filter(token => token.kind === "space").length, 1, space);
-    assert.deepEqual(wordTokens(sample).map(token => [token.start, token.end]), [[0, 1], [1, 2]]);
+    assert.deepEqual(
+      wordTokens(sample).map(token => [token.start, token.end]),
+      [
+        [0, 1],
+        [1, 2],
+      ],
+    );
   }
 });
 
@@ -40,7 +57,14 @@ test("selected tokens merge across whitespace and split at gaps", () => {
 
 test("emoji stays one token, including a zwj family and the code-point fallback", t => {
   const emoji = wordTokens("a😀b");
-  assert.deepEqual(emoji.map(token => [token.text, token.start, token.end]), [["a", 0, 1], ["😀", 1, 3], ["b", 3, 4]]);
+  assert.deepEqual(
+    emoji.map(token => [token.text, token.start, token.end]),
+    [
+      ["a", 0, 1],
+      ["😀", 1, 3],
+      ["b", 3, 4],
+    ],
+  );
   const family = "👨‍👩‍👧";
   const grouped = wordTokens(family);
   assert.equal(grouped.length, 1);
@@ -48,13 +72,20 @@ test("emoji stays one token, including a zwj family and the code-point fallback"
   assert.equal(family.length, 8);
   t.mock.property(Intl, "Segmenter", undefined);
   const fallback = wordTokens("a😀b");
-  assert.deepEqual(fallback.map(token => token.text), ["a", "😀", "b"]);
+  assert.deepEqual(
+    fallback.map(token => token.text),
+    ["a", "😀", "b"],
+  );
   assert.equal(fallback[1]!.end - fallback[1]!.start, 2);
 });
 
 test("every range quote canonicalizes to its offsets", () => {
   for (const quote of ["甲 乙丙", "甲\n乙", "a😀b", "全角\u3000空格", "甲\u00a0乙\t丙"]) {
-    const selected = new Set(wordTokens(quote).map((_, index) => index).filter(index => index % 2 === 0));
+    const selected = new Set(
+      wordTokens(quote)
+        .map((_, index) => index)
+        .filter(index => index % 2 === 0),
+    );
     let previous = 0;
     for (const range of ranges(quote, [...selected])) {
       assert.equal(canonicalText(range.quote).length, range.end - range.start);
@@ -132,27 +163,53 @@ test("chinese words are shorter than one token per character", () => {
 });
 
 test("latin words keep internal joins and leave punctuation as marks", () => {
-  assert.deepEqual(wordTokens("don't e-mail me at a@b.com").map(token => token.text), ["don't", "e-mail", "me", "at", "a@b.com"]);
-  assert.deepEqual(wordTokens("Hello,world.").map(token => token.text), ["Hello", "world"]);
-  assert.deepEqual(tokenize("Hello,world.", 0).filter(token => token.kind === "mark").map(token => token.text), [",", "."]);
-  assert.deepEqual(wordTokens("C++和C#").map(token => token.text), ["C++", "和", "C#"]);
+  assert.deepEqual(
+    wordTokens("don't e-mail me at a@b.com").map(token => token.text),
+    ["don't", "e-mail", "me", "at", "a@b.com"],
+  );
+  assert.deepEqual(
+    wordTokens("Hello,world.").map(token => token.text),
+    ["Hello", "world"],
+  );
+  assert.deepEqual(
+    tokenize("Hello,world.", 0)
+      .filter(token => token.kind === "mark")
+      .map(token => token.text),
+    [",", "."],
+  );
+  assert.deepEqual(
+    wordTokens("C++和C#").map(token => token.text),
+    ["C++", "和", "C#"],
+  );
 });
 
 test("numbers keep currency, percent, and unit characters", () => {
   const money = wordTokens("¥7,999，约合$1,099.50").map(token => token.text);
   assert.ok(money.includes("¥7,999"));
   assert.ok(money.includes("$1,099.50"));
-  assert.ok(wordTokens("50%的人").map(token => token.text).includes("50%"));
-  assert.deepEqual(wordTokens("2026年11月22日").map(token => token.text), ["2026年", "11月", "22日"]);
+  assert.ok(
+    wordTokens("50%的人")
+      .map(token => token.text)
+      .includes("50%"),
+  );
+  assert.deepEqual(
+    wordTokens("2026年11月22日").map(token => token.text),
+    ["2026年", "11月", "22日"],
+  );
 });
 
 test("mixed script words split on script changes", () => {
-  assert.deepEqual(wordTokens("iPhone 15 Pro的价格").map(token => token.text), ["iPhone", "15", "Pro", "的", "价格"]);
+  assert.deepEqual(
+    wordTokens("iPhone 15 Pro的价格").map(token => token.text),
+    ["iPhone", "15", "Pro", "的", "价格"],
+  );
   const quote = "人工智能（AI）模型GPT-4o";
   const words = wordTokens(quote).map(token => token.text);
   assert.ok(words.includes("AI"));
   assert.ok(words.includes("GPT-4o"));
-  const marks = tokenize(quote, 0).filter(token => token.kind === "mark").map(token => token.text);
+  const marks = tokenize(quote, 0)
+    .filter(token => token.kind === "mark")
+    .map(token => token.text);
   assert.deepEqual(marks, ["（", "）"]);
 });
 
@@ -179,10 +236,19 @@ test("whitespace does not break a run", () => {
 
 test("missing Segmenter falls back to per-character cjk and joined latin", t => {
   t.mock.property(Intl, "Segmenter", undefined);
-  assert.deepEqual(wordTokens("北京大学").map(token => token.text), ["北", "京", "大", "学"]);
-  assert.deepEqual(wordTokens("e-mail 50%").map(token => token.text), ["e-mail", "50%"]);
+  assert.deepEqual(
+    wordTokens("北京大学").map(token => token.text),
+    ["北", "京", "大", "学"],
+  );
+  assert.deepEqual(
+    wordTokens("e-mail 50%").map(token => token.text),
+    ["e-mail", "50%"],
+  );
   const emoji = wordTokens("a😀b");
-  assert.deepEqual(emoji.map(token => token.text), ["a", "😀", "b"]);
+  assert.deepEqual(
+    emoji.map(token => token.text),
+    ["a", "😀", "b"],
+  );
   assert.equal(emoji[1]!.end - emoji[1]!.start, 2);
   assert.equal(wordTokens("👨‍👩‍👧").length, 1);
 });

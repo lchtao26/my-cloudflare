@@ -24,7 +24,7 @@ export const Route = createFileRoute("/r/$code")({
   validateSearch: validateReaderSearch,
   loaderDeps: ({ search }) => ({ category: readCategory(search.tab), page: search.page ?? 1 }),
   loader: ({ params, deps }) => loadInitialArticle(params.code, deps.category, deps.page),
-  head: ({ loaderData }) => loaderData?.data ? { meta: [{ title: loaderData.data.item.title }] } : {},
+  head: ({ loaderData }) => (loaderData?.data ? { meta: [{ title: loaderData.data.item.title }] } : {}),
   headers: () => ({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" }),
   component: ReadArticle,
 });
