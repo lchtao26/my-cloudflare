@@ -94,7 +94,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const [failure, setFailure] = useState<{ message: string; retry?: ReaderAction } | null>(null);
   const [addedLater, setAddedLater] = useState(false);
   const [readingActions, setReadingActions] = useState(false);
-  const [readingTab, setReadingTab] = useState<"page" | "article" | "share">("page");
+  const [readingTab, setReadingTab] = useState<"article" | "share">("article");
   const activePress = useRef<{ x: number; y: number; scroll: number } | null>(null);
   const bindReadingPanel = useCallback(
     (panel: HTMLDivElement | null) => {
@@ -272,10 +272,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const readingActionsRef = useCallback((bar: HTMLDivElement | null) => {
     if (!bar) return;
     const tabs = () => [...bar.querySelectorAll<HTMLButtonElement>(".reading-tabs button")];
-    const toolbarItems = () => {
-      const panel = [...bar.querySelectorAll<HTMLElement>('[role="tabpanel"]')].find(item => !item.hasAttribute("hidden"));
-      return panel ? [...panel.querySelectorAll<HTMLElement>("button, a")] : [];
-    };
+    const rowItems = (row: Element) => [...row.querySelectorAll<HTMLElement>("button, a")];
     bar.querySelector(".reading-tabs")?.setAttribute("focusgroup", "tablist nomemory");
     for (const row of bar.querySelectorAll(".reading-actions-row")) row.setAttribute("focusgroup", "toolbar wrap");
     for (const tab of tabs()) tab.toggleAttribute("focusgroupstart", tab.getAttribute("aria-selected") === "true");
@@ -283,7 +280,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
       const panel = event.target;
       if (!(panel instanceof HTMLElement)) return;
       const id = panel.getAttribute("aria-labelledby");
-      if (id === "reading-tab-page" || id === "reading-tab-article" || id === "reading-tab-share") setReadingTab(id.slice("reading-tab-".length) as "page" | "article" | "share");
+      if (id === "reading-tab-article" || id === "reading-tab-share") setReadingTab(id.slice("reading-tab-".length) as "article" | "share");
     };
     bar.addEventListener("beforematch", onBeforeMatch);
     const onDocClick = (event: globalThis.MouseEvent) => {
@@ -343,14 +340,20 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
         tabs(),
         tabs().find(tab => tab.getAttribute("aria-selected") === "true"),
       );
-      mark(toolbarItems(), toolbarItems()[0]);
+      for (const row of bar.querySelectorAll(".reading-actions-row")) {
+        if (row.closest("[hidden]")) continue;
+        const items = rowItems(row);
+        mark(items, items[0]);
+      }
       const onFocusIn = (event: FocusEvent) => {
         const tabList = tabs();
         if (event.target instanceof HTMLButtonElement && tabList.includes(event.target)) {
           mark(tabList, event.target);
           return;
         }
-        const controls = toolbarItems();
+        const row = event.target instanceof Element ? event.target.closest(".reading-actions-row") : null;
+        if (!row || row.closest("[hidden]")) return;
+        const controls = rowItems(row);
         if (!(event.target instanceof HTMLElement) || !controls.includes(event.target)) return;
         mark(controls, event.target);
       };
@@ -366,7 +369,9 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
           return true;
         };
         if (move(tabs())) return;
-        move(toolbarItems());
+        const row = document.activeElement instanceof Element ? document.activeElement.closest(".reading-actions-row") : null;
+        if (!row || row.closest("[hidden]")) return;
+        move(rowItems(row));
       };
       bar.addEventListener("focusin", onFocusIn);
       bar.addEventListener("keydown", onKeyDown);
@@ -387,7 +392,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
     };
   }, []);
 
-  function chooseReadingTab(tab: "page" | "article" | "share") {
+  function chooseReadingTab(tab: "article" | "share") {
     setReadingTab(tab);
     for (const button of document.querySelectorAll<HTMLButtonElement>(".reading-tabs button")) button.toggleAttribute("focusgroupstart", button.id === `reading-tab-${tab}`);
     if ("focusGroup" in HTMLElement.prototype) return;
@@ -518,44 +523,43 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
         )}
       </main>
       {actions && readingActions && (
-        <div className="reading-actions" ref={readingActionsRef}>
-          <div className="reading-tabs" role="tablist" aria-label="阅读操作">
-            {(
-              [
-                ["page", "页面"],
-                ["article", "文章"],
-                ["share", "分享"],
-              ] as const
-            ).map(([id, label]) => (
-              <button key={id} type="button" id={`reading-tab-${id}`} role="tab" aria-selected={readingTab === id} onFocus={() => chooseReadingTab(id)}>
-                {label}
-              </button>
-            ))}
+        <div ref={readingActionsRef}>
+          <div className="reading-top reading-actions-row" role="toolbar" aria-label="页面">
+            <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>
+              返回
+            </Link>
+            <button type="button" onClick={() => window.scrollTo(0, atPageBottom ? 0 : document.documentElement.scrollHeight)}>
+              {atPageBottom ? "滑到顶部" : "滑到底部"}
+            </button>
           </div>
-          <div className="reading-panels">
-            <div role="tabpanel" id="reading-panel-page" aria-labelledby="reading-tab-page" hidden={readingTab !== "page"} ref={bindReadingPanel}>
-              <div className="reading-actions-row" role="toolbar" aria-label="页面">
-                <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>
-                  返回
-                </Link>
-                <button type="button" onClick={() => window.scrollTo(0, atPageBottom ? 0 : document.documentElement.scrollHeight)}>
-                  {atPageBottom ? "滑到顶部" : "滑到底部"}
+          <div className="reading-actions">
+            <div className="reading-tabs" role="tablist" aria-label="阅读操作">
+              {(
+                [
+                  ["article", "文章"],
+                  ["share", "分享"],
+                ] as const
+              ).map(([id, label]) => (
+                <button key={id} type="button" id={`reading-tab-${id}`} role="tab" aria-selected={readingTab === id} onFocus={() => chooseReadingTab(id)}>
+                  {label}
                 </button>
-              </div>
+              ))}
             </div>
-            <div role="tabpanel" id="reading-panel-article" aria-labelledby="reading-tab-article" hidden={readingTab !== "article"} ref={bindReadingPanel}>
-              <div className="reading-actions-row" role="toolbar" aria-label="文章">
-                <button type="button" disabled={mutation.isPending || addedLater} onClick={() => run({ type: "add-later", data: {} })}>
-                  {addedLater ? "已加入待读" : "待读"}
-                </button>
-                <button type="button" disabled={mutation.isPending} onClick={() => run({ type: "favorite", data: { favorite: actions.favorite ? "0" : "1" } })}>
-                  {actions.favorite ? "取消收藏" : "收藏"}
-                </button>
-                <a href={actions.notionUrl}>管理</a>
+            <div className="reading-panels">
+              <div role="tabpanel" id="reading-panel-article" aria-labelledby="reading-tab-article" hidden={readingTab !== "article"} ref={bindReadingPanel}>
+                <div className="reading-actions-row" role="toolbar" aria-label="文章">
+                  <button type="button" disabled={mutation.isPending || addedLater} onClick={() => run({ type: "add-later", data: {} })}>
+                    {addedLater ? "已加入待读" : "待读"}
+                  </button>
+                  <button type="button" disabled={mutation.isPending} onClick={() => run({ type: "favorite", data: { favorite: actions.favorite ? "0" : "1" } })}>
+                    {actions.favorite ? "取消收藏" : "收藏"}
+                  </button>
+                  <a href={actions.notionUrl}>管理</a>
+                </div>
               </div>
-            </div>
-            <div role="tabpanel" id="reading-panel-share" aria-labelledby="reading-tab-share" hidden={readingTab !== "share"} ref={bindReadingPanel}>
-              <ShareLink code={item.code} />
+              <div role="tabpanel" id="reading-panel-share" aria-labelledby="reading-tab-share" hidden={readingTab !== "share"} ref={bindReadingPanel}>
+                <ShareLink code={item.code} />
+              </div>
             </div>
           </div>
         </div>
