@@ -114,7 +114,7 @@ test("highlight writes reuse PIN and CSRF, validate text and expose private data
   assert.equal(injection.status, 200);
   const readApi = await worker.fetch(new Request(`${origin}/api/r/${code}`), env);
   const article = await readApi.json<import("../src/reader/data.ts").ReaderArticle>();
-  assert.equal(readApi.headers.get("cache-control"), "no-store");
+  assert.equal(readApi.headers.get("cache-control"), "public, max-age=300, must-revalidate");
   assert.ok(article.body.some(paragraph => paragraph.quote.includes("<script>")));
   assert.ok(article.actions?.highlights.some(mark => mark.id === value.highlight.id));
   const shareApi = await worker.fetch(new Request(`${origin}/api/s/${code}`), env);

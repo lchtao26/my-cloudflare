@@ -30,10 +30,19 @@ export const FavoriteLoginLimit = Sentry.instrumentDurableObjectWithSentry(sentr
 
 const startWithSentry = wrapFetchWithSentry(start);
 
-function noStore(response: Response): Response {
+function withCacheControl(response: Response, value: string): Response {
   const headers = new Headers(response.headers);
-  headers.set("Cache-Control", "no-store");
+  headers.set("Cache-Control", value);
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+function noStore(response: Response): Response {
+  return withCacheControl(response, "no-store");
+}
+
+function publicReadCache(response: Response): Response {
+  if (response.status >= 500) return noStore(response);
+  return withCacheControl(response, "public, max-age=300, must-revalidate");
 }
 
 export default Sentry.withSentry(sentryOptions, {
@@ -47,9 +56,7 @@ export default Sentry.withSentry(sentryOptions, {
     if (progressMatch) return readProgress(request, env.HIGHLIGHTS_DB, progressMatch[1]!);
     const isDetail = /^\/r\/[A-Za-z0-9]{6}\/?$/.test(url.pathname);
     if (!isDetail && !/^\/(?:read|s\/[A-Za-z0-9]{6})\/?$/.test(url.pathname)) {
-      const response = await worker.fetch(request, env);
-      if (!/^\/api\/(?:read\/?|r\/[A-Za-z0-9]{6}\/?)$/.test(url.pathname)) return response;
-      return noStore(response);
+      return worker.fetch(request, env);
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
@@ -57,7 +64,8 @@ export default Sentry.withSentry(sentryOptions, {
 
     if (isDetail || import.meta.env.DEV) {
       const response = await startWithSentry.fetch(request);
-      if (!isDetail && !/^\/read\/?$/.test(url.pathname)) return response;
+      if (isDetail) return publicReadCache(response);
+      if (!/^\/read\/?$/.test(url.pathname)) return response;
       return noStore(response);
     }
 

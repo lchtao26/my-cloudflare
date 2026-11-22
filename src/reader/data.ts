@@ -56,10 +56,29 @@ export type ReaderArticle = {
     notionUrl: string;
     highlightsEnabled: boolean;
     highlights: ResolvedHighlight[];
-    prevCode: string | null;
-    nextCode: string | null;
   };
 };
+
+export type ReaderNeighbors = { prevCode: string | null; nextCode: string | null };
+
+export function listNeighborCodes(list: ReaderList, code: string): ReaderNeighbors | undefined {
+  const codes = list.kind === "articles" ? list.items.map(item => item.code) : highlightCodes(list.items);
+  const index = codes.indexOf(code);
+  if (index < 0) return undefined;
+  return {
+    prevCode: index > 0 ? codes[index - 1]! : null,
+    nextCode: index < codes.length - 1 ? codes[index + 1]! : null,
+  };
+}
+
+function highlightCodes(items: ReaderHighlight[]): string[] {
+  const codes: string[] = [];
+  for (const item of items) {
+    const articleCode = item.article?.code;
+    if (articleCode && !codes.includes(articleCode)) codes.push(articleCode);
+  }
+  return codes;
+}
 
 export function readPage(value: unknown): number {
   const page = typeof value === "number" || typeof value === "string" ? String(value) : "";

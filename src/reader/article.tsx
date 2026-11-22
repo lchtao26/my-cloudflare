@@ -1,16 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated, useLocation } from "@tanstack/react-router";
-import { createElement, useCallback, useRef, useState, type MouseEvent, type ReactNode, type RefCallback } from "react";
+import { createElement, useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefCallback } from "react";
 import type { MarkdownNode } from "./explanation-markdown.ts";
 import { canonicalText } from "./highlight-anchor.ts";
-import type { ReadCategory, ReaderArticle } from "./data.ts";
+import { listNeighborCodes, type ReadCategory, type ReaderArticle, type ReaderList, type ReaderNeighbors } from "./data.ts";
 import { ReadingBody, type ParagraphSelection } from "./body.tsx";
 import { BodyActionSheet } from "./body-actions.tsx";
 import { quoteBetween, selectionPreview } from "./quote-slice.ts";
 import { ReaderDialog } from "./dialog.tsx";
 import type { TokenRange } from "./tokenize.ts";
 import { LoadingStatus } from "./loading.tsx";
-import { articleKey, articleQuery, listKey, performAction, ReaderError, readerSearch, readSessionQuery, type ReaderAction } from "./queries.ts";
+import { articleKey, articleQuery, listKey, listQuery, performAction, ReaderError, readerSearch, readSessionQuery, revalidateReader, type ReaderAction } from "./queries.ts";
 import { useReaderScroll } from "./reading.ts";
 
 export type InitialArticle = { data: ReaderArticle; error?: never } | { data?: never; error: { message: string; status: number } };
@@ -79,8 +79,42 @@ function isAbortError(error: unknown) {
   return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
 }
 
+function useArticleNeighbors(code: string, category: ReadCategory, page: number, enabled: boolean): { neighbors: ReaderNeighbors | undefined; navRef: RefCallback<HTMLElement> } {
+  const queryClient = useQueryClient();
+  const [near, setNear] = useState(false);
+  const [nav, setNav] = useState<HTMLElement | null>(null);
+  const snapshot = queryClient.getQueryData<ReaderList>([...listKey(category), page]);
+  const cachedNeighbors = snapshot ? listNeighborCodes(snapshot, code) : undefined;
+  const query = useQuery({
+    ...listQuery(category, page),
+    enabled: enabled && near && cachedNeighbors === undefined,
+  });
+  const list = query.data ?? snapshot;
+  const fromList = list ? listNeighborCodes(list, code) : undefined;
+  const finishedEmpty = near && query.isFetched && !query.isFetching && fromList === undefined;
+  const neighbors = !enabled ? undefined : (cachedNeighbors ?? fromList ?? (finishedEmpty ? { prevCode: null, nextCode: null } : undefined));
+  const waiting = enabled && neighbors === undefined;
+  useEffect(() => {
+    if (!nav || !waiting) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setNear(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries.some(entry => entry.isIntersecting)) setNear(true);
+      },
+      { rootMargin: "200px 0px" },
+    );
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [nav, waiting]);
+  return { neighbors, navRef: setNav };
+}
+
 function Article({ data, category, page, hydrated }: { data: ReaderArticle; category: ReadCategory; page: number; hydrated: boolean }) {
   const { item, actions } = data;
+  const { neighbors, navRef } = useArticleNeighbors(item.code, category, page, Boolean(actions));
   const queryClient = useQueryClient();
   const session = useQuery({ ...readSessionQuery(), enabled: Boolean(actions) });
   const signedIn = session.data === true;
@@ -150,17 +184,25 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
     mutationFn: ({ action, pin, signal }: { action: ReaderAction; pin?: string; signal?: AbortSignal }) => performAction(item.code, action, pin, signal),
     onSuccess: async (result, { action }) => {
       if (action.type === "favorite") {
+        revalidateReader(item.code);
+        revalidateReader("favorites");
         queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current => (current?.actions ? { ...current, actions: { ...current.actions, favorite: Boolean(result.favorite) } } : current));
+        await queryClient.invalidateQueries({ queryKey: articleKey(item.code) });
         await queryClient.invalidateQueries({ queryKey: listKey("favorites") });
       }
       if (action.type === "delete") {
+        revalidateReader(item.code);
+        revalidateReader("highlights");
         queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current => {
           if (!current?.actions) return current;
           return { ...current, actions: { ...current.actions, highlights: current.actions.highlights.filter(mark => mark.id !== result.id) } };
         });
+        await queryClient.invalidateQueries({ queryKey: articleKey(item.code) });
         await queryClient.invalidateQueries({ queryKey: listKey("highlights") });
       }
       if (result.highlights?.length) {
+        revalidateReader(item.code);
+        revalidateReader("highlights");
         const savedIds = new Set(result.highlights.map(mark => mark.id));
         queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current => {
           if (!current?.actions) return current;
@@ -168,6 +210,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
           updated.push(...result.highlights!);
           return { ...current, actions: { ...current.actions, highlights: updated } };
         });
+        await queryClient.invalidateQueries({ queryKey: articleKey(item.code) });
         await queryClient.invalidateQueries({ queryKey: listKey("highlights") });
       }
     },
@@ -184,6 +227,8 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
       {
         onError(error) {
           if (action.data.save === "1") {
+            revalidateReader(item.code);
+            revalidateReader("highlights");
             void queryClient.invalidateQueries({ queryKey: articleKey(item.code) });
             void queryClient.invalidateQueries({ queryKey: listKey("highlights") });
           }
@@ -202,7 +247,11 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
         },
         onSuccess() {
           setPinPrompt(null);
-          if (action.type === "add-later") setAddedLater(true);
+          if (action.type === "add-later") {
+            setAddedLater(true);
+            revalidateReader("later");
+            void queryClient.invalidateQueries({ queryKey: listKey("later") });
+          }
           if (action.type === "delete" && hash === `hl-${action.data.id}`) {
             history.replaceState(history.state, "", location.pathname + location.search);
           }
@@ -504,9 +553,9 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
             )}
         </article>
         {actions && (
-          <nav className="nav-row" aria-label="文章导航">
-            {actions.prevCode ? (
-              <Link to="/r/$code" params={{ code: actions.prevCode }} search={search}>
+          <nav className="nav-row" aria-label="文章导航" ref={navRef}>
+            {neighbors?.prevCode ? (
+              <Link to="/r/$code" params={{ code: neighbors.prevCode }} search={search}>
                 上一篇
               </Link>
             ) : (
@@ -515,8 +564,8 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
             <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>
               返回
             </Link>
-            {actions.nextCode ? (
-              <Link to="/r/$code" params={{ code: actions.nextCode }} search={search}>
+            {neighbors?.nextCode ? (
+              <Link to="/r/$code" params={{ code: neighbors.nextCode }} search={search}>
                 下一篇
               </Link>
             ) : (

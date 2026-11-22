@@ -31,11 +31,26 @@ export class ReaderError extends Error {
   }
 }
 
+const REVALIDATE_MS = 300_000;
+const revalidateUntil = new Map<string, number>();
+
+export function revalidateReader(key: string) {
+  revalidateUntil.set(key, Date.now() + REVALIDATE_MS);
+}
+
+function cacheHeaders(key: string, force = false): HeadersInit | undefined {
+  const until = revalidateUntil.get(key);
+  if (!force && (until === undefined || until <= Date.now())) return undefined;
+  return { "Cache-Control": "no-cache" };
+}
+
 async function requestJson<T>(path: string, init?: RequestInit, fallback = "暂时无法读取，请稍后重试。"): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("Accept", "application/json");
   const response = await fetch(path, {
     ...init,
     credentials: "same-origin",
-    headers: { Accept: "application/json" },
+    headers,
   });
   if (!response.ok) {
     const data = await response.json<{ error?: string; requiresPin?: boolean }>().catch(() => null);
@@ -54,7 +69,7 @@ export function articlePath(code: string, shared: boolean, category: ReadCategor
 export function listQuery(category: ReadCategory, page: number, cache?: RequestCache) {
   return queryOptions({
     queryKey: [...listKey(category), page],
-    queryFn: ({ signal }) => requestJson<ReaderList>(`/api/read${searchParams(category, page)}`, { signal, cache }),
+    queryFn: ({ signal }) => requestJson<ReaderList>(`/api/read${searchParams(category, page)}`, { signal, cache, headers: cacheHeaders(category, cache === "reload") }),
     staleTime: category === "highlights" || category === "favorites" ? 0 : 60_000,
   });
 }
@@ -72,10 +87,10 @@ export function readSessionQuery() {
   });
 }
 
-export function articleQuery(code: string, shared: boolean, category: ReadCategory, page: number) {
+export function articleQuery(code: string, shared: boolean, category: ReadCategory, page: number, priority?: "low" | "high" | "auto") {
   return queryOptions({
     queryKey: [...articleKey(code), shared, category, page],
-    queryFn: ({ signal }) => requestJson<ReaderArticle>(articlePath(code, shared, category, page), { signal }),
+    queryFn: ({ signal }) => requestJson<ReaderArticle>(articlePath(code, shared, category, page), { signal, headers: cacheHeaders(code), priority }),
     staleTime: shared ? 60_000 : 0,
   });
 }

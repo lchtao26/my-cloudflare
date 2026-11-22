@@ -804,7 +804,7 @@ test("reading list API uses the RSS view", async context => {
   );
 });
 
-test("reading API applies category filters and selects article neighbors", async context => {
+test("reading API applies category filters without loading article neighbors", async context => {
   const originalFetch = globalThis.fetch;
   const pageId = "407e75a1-639c-81ca-8919-f4bff2a57884";
   const nextId = "408e75a1-639c-8152-ab6f-f35a59ab2d27";
@@ -871,13 +871,33 @@ test("reading API applies category filters and selects article neighbors", async
   const later = await worker.fetch(new Request("https://example.com/api/read?tab=later"), env);
   assert.equal(later.status, 200);
   assert.deepEqual(queries.at(-1)?.filter, { property: "提取来源", select: { equals: "稍后阅读" } });
+  const beforeDetails = queries.length;
   for (const category of ["later", "weekly", "likes"]) {
     const detail = await worker.fetch(new Request(`https://example.com/api/r/${code}?tab=${category}`), env);
     const article = await detail.json<import("../src/reader/data.ts").ReaderArticle>();
-    assert.equal(article.actions?.nextCode, nextCode);
-    if (category === "later") assert.deepEqual(queries.at(-1)?.filter, { property: "提取来源", select: { equals: "稍后阅读" } });
-    if (category === "likes") assert.deepEqual(queries.at(-1), { page_size: 30, filter: favoritesFilter, sorts: favoritesSorts });
+    assert.equal(detail.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
+    assert.equal(article.actions && "nextCode" in article.actions, false);
   }
+  assert.equal(queries.length, beforeDetails);
+  const { listNeighborCodes } = await import("../src/reader/data.ts");
+  const item = { title: "", titleLang: "", source: "", author: "" };
+  assert.equal(listNeighborCodes({ kind: "articles", hasMore: false, items: [{ ...item, code }, { ...item, code: nextCode }] }, code)?.nextCode, nextCode);
+  assert.equal(
+    listNeighborCodes(
+      {
+        kind: "highlights",
+        hasMore: false,
+        available: true,
+        items: [
+          { id: "a", quote: "", located: true, article: { ...item, code } },
+          { id: "b", quote: "", located: true, article: { ...item, code } },
+          { id: "c", quote: "", located: true, article: { ...item, code: nextCode } },
+        ],
+      },
+      code,
+    )?.nextCode,
+    nextCode,
+  );
   const fallback = await worker.fetch(new Request("https://example.com/api/read?tab=unknown"), env);
   assert.equal(fallback.headers.get("Cache-Control"), "public, max-age=300, must-revalidate");
   assert.deepEqual(queries.at(-1)?.filter, viewFilter);
@@ -927,9 +947,12 @@ test("reading list API expands pages within its category", async context => {
     assert.equal(list.items.length, count);
     assert.equal(list.hasMore, hasMore);
   }
+  const listed = await (await worker.fetch(new Request("https://example.com/api/read?tab=weekly&page=2"), env)).json<import("../src/reader/data.ts").ReaderList>();
+  const { listNeighborCodes } = await import("../src/reader/data.ts");
+  assert.equal(listNeighborCodes(listed, code(40))?.nextCode, code(41));
   const detail = await worker.fetch(new Request(`https://example.com/api/r/${code(40)}?tab=weekly&page=2`), env);
   const article = await detail.json<import("../src/reader/data.ts").ReaderArticle>();
-  assert.equal(article.actions?.nextCode, code(41));
+  assert.equal(article.actions && "nextCode" in article.actions, false);
 });
 
 test("article and share APIs resolve the Notion ID property", async context => {

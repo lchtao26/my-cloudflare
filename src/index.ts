@@ -445,20 +445,6 @@ function einkDocument(title: string, body: string, panguedTitle = false, afterMa
   ].join("\n");
 }
 
-export type EinkNeighbors = {
-  prevCode: string | null;
-  nextCode: string | null;
-};
-
-export function neighborsFor(excerpts: Excerpt[], code: string): EinkNeighbors | undefined {
-  const index = excerpts.findIndex(item => item.code === code);
-  if (index < 0) return undefined;
-  return {
-    prevCode: index > 0 ? excerpts[index - 1]!.code : null,
-    nextCode: index < excerpts.length - 1 ? excerpts[index + 1]!.code : null,
-  };
-}
-
 type HighlightRow = {
   id: string;
   excerpt_number: number;
@@ -1111,7 +1097,6 @@ const worker = {
 
       if (shortId !== null) {
         const showNavigation = detailShortId !== null;
-        // Load the selected list in parallel so prev/next follow the same order as /read.
         const excerptPromise = fetchExcerptByShortId(configured, shortId);
         const highlightPromise =
           env.HIGHLIGHTS_DB && showNavigation
@@ -1124,38 +1109,9 @@ const worker = {
                   return [] as HighlightRow[];
                 })
             : Promise.resolve([] as HighlightRow[]);
-        const listPromise =
-          env.HIGHLIGHTS_DB && showNavigation && category === "highlights"
-            ? Promise.resolve()
-                .then(() =>
-                  env
-                    .HIGHLIGHTS_DB!.prepare("SELECT excerpt_number FROM highlights ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?")
-                    .bind(FEED_ITEM_LIMIT, (page - 1) * FEED_ITEM_LIMIT)
-                    .all<{ excerpt_number: number }>(),
-                )
-                .then(async result => {
-                  const ids = [...new Set(result.results.map(row => row.excerpt_number))];
-                  const excerpts = await fetchHighlightExcerpts(configured, ids);
-                  return ids.flatMap(id => (excerpts.has(id) ? [excerpts.get(id)!] : []));
-                })
-                .catch(error => {
-                  captureException(error);
-                  console.error("Failed to load highlight navigation", error);
-                  return [] as Excerpt[];
-                })
-            : excerptsViewId && showNavigation && category !== "highlights"
-              ? fetchExcerptPages(configured, excerptsViewId, category, page * FEED_ITEM_LIMIT)
-                  .then(pages => pages.map(excerptFromPage).filter((item): item is Excerpt => item !== null))
-                  .catch(error => {
-                    captureException(error);
-                    console.error("Failed to load article navigation", error);
-                    return [] as Excerpt[];
-                  })
-              : Promise.resolve([] as Excerpt[]);
-        const [excerpt, list, highlightRows] = await Promise.all([excerptPromise, listPromise, highlightPromise]);
+        const [excerpt, highlightRows] = await Promise.all([excerptPromise, highlightPromise]);
         // Cache misses too, so probing unused codes does not reach Notion on every request.
         if (!excerpt) return readerApi ? highlightError("未找到文章。", 404) : new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=300" } });
-        const neighbors = neighborsFor(list, excerpt.code) ?? { prevCode: null, nextCode: null };
         const highlights = showNavigation ? await resolveHighlights(excerpt, highlightRows) : [];
         const paragraphs = (text: string) => readerParagraphs(text, excerpt.id, READ_ASSET_PREFIX);
         return readerResponse(
@@ -1178,12 +1134,11 @@ const worker = {
                   notionUrl: excerpt.link,
                   highlightsEnabled: Boolean(env.HIGHLIGHTS_DB),
                   highlights,
-                  ...neighbors,
                 }
               : null,
           },
           request.method,
-          !showNavigation,
+          true,
         );
       }
 

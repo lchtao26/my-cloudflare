@@ -1,8 +1,8 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { READ_CATEGORIES, readCategory } from "../reader/data.ts";
-import { listQuery, readerSearch, validateReaderSearch } from "../reader/queries.ts";
+import { articleQuery, listQuery, readerSearch, revalidateReader, validateReaderSearch } from "../reader/queries.ts";
 import { LoadingStatus } from "../reader/loading.tsx";
 import { usePullToRefresh } from "../reader/pull-to-refresh.ts";
 import { useReaderScroll } from "../reader/reading.ts";
@@ -27,6 +27,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
   });
   const data = query.data;
   const reload = useCallback(async () => {
+    revalidateReader(category);
     try {
       await queryClient.fetchQuery({ ...listQuery(category, page, "reload"), staleTime: 0, networkMode: "always" });
     } catch {
@@ -35,11 +36,41 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
   }, [category, page, queryClient]);
   const { surfaceRef, indicatorHeight, label, refreshing, refresh } = usePullToRefresh(reload);
   const { gutter, mainRef } = useReaderScroll(undefined, Boolean(data));
+  const list = useRef<HTMLElement | null>(null);
+  const prefetched = useRef(new Set<string>());
+  const setMain = useCallback(
+    (element: HTMLElement | null) => {
+      list.current = element;
+      return mainRef(element);
+    },
+    [mainRef],
+  );
+  useEffect(() => {
+    prefetched.current = new Set();
+  }, [category, page]);
+  useEffect(() => {
+    const root = list.current;
+    if (!root || !data || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      entries => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const code = (entry.target as HTMLElement).dataset.code;
+          if (!code || prefetched.current.has(code)) continue;
+          prefetched.current.add(code);
+          observer.unobserve(entry.target);
+          void queryClient.prefetchQuery(articleQuery(code, false, category, page, "low")).catch(() => {});
+        }
+      },
+    );
+    for (const link of root.querySelectorAll<HTMLElement>("a.item-link[data-code]")) observer.observe(link);
+    return () => observer.disconnect();
+  }, [category, data, page, queryClient]);
   const search = readerSearch(category, page);
 
   return (
     <div className="reader-surface" ref={surfaceRef} {...gutter}>
-      <main className="read-list" ref={mainRef}>
+      <main className="read-list" ref={setMain}>
         <h1 className="visually-hidden">阅读节选</h1>
         <div className="pull-refresh" role="status" style={{ height: indicatorHeight }}>
           {indicatorHeight >= 22 ? label : ""}
@@ -65,7 +96,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
           <ul>
             {data.items.map(item => (
               <li key={item.code} lang={item.titleLang}>
-                <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search}>
+                <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search} data-code={item.code}>
                   {item.title}
                   {(item.source || item.author) && (
                     <p className="meta" lang="zh-CN">
@@ -87,7 +118,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
               return (
                 <li key={item.id}>
                   {article && item.located ? (
-                    <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={search} hash={`hl-${item.id}`} hashScrollIntoView={{ block: "center", behavior: "instant" }}>
+                    <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={search} hash={`hl-${item.id}`} hashScrollIntoView={{ block: "center", behavior: "instant" }} data-code={article.code}>
                       {item.quote}
                       {meta}
                     </Link>
