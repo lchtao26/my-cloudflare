@@ -94,7 +94,8 @@ export async function updateArticleCache(queryClient: QueryClient, code: string,
   revalidateReader(listCategory);
   await queryClient.cancelQueries({ queryKey: articleKey(code) });
   queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(code) }, current => (current ? updater(current) : current));
-  void Promise.all([queryClient.invalidateQueries({ queryKey: articleKey(code) }), queryClient.invalidateQueries({ queryKey: listKey(listCategory) })]);
+  void queryClient.invalidateQueries({ queryKey: articleKey(code) });
+  void queryClient.invalidateQueries({ queryKey: listKey(listCategory), refetchType: "none" }).then(() => queryClient.invalidateQueries({ queryKey: ["reader", "infinite", listCategory] }));
 }
 
 export function reconcileArticleOnError(queryClient: QueryClient, code: string, action: ReaderAction, error: unknown) {
@@ -102,7 +103,9 @@ export function reconcileArticleOnError(queryClient: QueryClient, code: string, 
   if (clientRejected || !(action.data.save === "1" || action.type === "highlight" || action.type === "delete")) return;
   revalidateReader(code);
   revalidateReader("highlights");
-  void queryClient.cancelQueries({ queryKey: articleKey(code) }).then(() => Promise.all([queryClient.invalidateQueries({ queryKey: articleKey(code) }), queryClient.invalidateQueries({ queryKey: listKey("highlights") })]));
+  void queryClient
+    .cancelQueries({ queryKey: articleKey(code) })
+    .then(() => Promise.all([queryClient.invalidateQueries({ queryKey: articleKey(code) }), queryClient.invalidateQueries({ queryKey: listKey("highlights"), refetchType: "none" }).then(() => queryClient.invalidateQueries({ queryKey: ["reader", "infinite", "highlights"] }))]));
 }
 
 function withCacheBust(path: string, version: number | undefined): string {

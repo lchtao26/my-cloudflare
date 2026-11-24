@@ -157,7 +157,7 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
     onSuccess: async (result, { action }) => {
       if (action.type === "add-later") {
         revalidateReader("later");
-        void queryClient.invalidateQueries({ queryKey: listKey("later") });
+        void queryClient.invalidateQueries({ queryKey: listKey("later"), refetchType: "none" }).then(() => queryClient.invalidateQueries({ queryKey: ["reader", "infinite", "later"] }));
       }
       if (action.type === "favorite") {
         await updateArticleCache(queryClient, item.code, "favorites", current => (current.actions ? { ...current, actions: { ...current.actions, favorite: Boolean(result.favorite) } } : current));

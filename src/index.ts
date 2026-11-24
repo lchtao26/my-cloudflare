@@ -31,6 +31,7 @@ const SHARE_CODE_KEYS = [0x3c6e, 0xa54f, 0x510e, 0x9b05];
 const SHARE_CODE_ALPHABET = "hqAiRYEFKT2xePmzuOfgrw4dBbNscH78S9kI30LQjpaGUJXonCMZ6ly15DtWvV";
 const SHARE_CODE = /^[0-9A-Za-z]{6}$/;
 const FEED_ITEM_LIMIT = 30;
+const READER_PAGE_SIZE = 10;
 
 function shareCodeRound(half: number, key: number): number {
   let value = Math.imul(half ^ key, 0x45d9f3b);
@@ -533,7 +534,7 @@ async function fetchHighlightExcerpts(env: ConfiguredBindings, ids: number[]): P
 
 async function loadHighlightList(db: D1Database | undefined, env: ConfiguredBindings, page: number) {
   if (!db) return { rows: [], excerpts: new Map<number, Excerpt>(), resolved: new Set<string>(), hasMore: false };
-  const limit = FEED_ITEM_LIMIT;
+  const limit = READER_PAGE_SIZE;
   const result = await db
     .prepare("SELECT * FROM highlights ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?")
     .bind(limit + 1, (page - 1) * limit)
@@ -1177,7 +1178,7 @@ const worker = {
         );
       }
       if (isEinkList) {
-        const limit = page * FEED_ITEM_LIMIT;
+        const limit = page * READER_PAGE_SIZE;
         const pages = await fetchExcerptPages(configured, excerptsViewId!, category, limit + 1);
         const excerpts = pages
           .slice(0, limit)

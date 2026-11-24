@@ -1,8 +1,9 @@
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef } from "react";
 import { READ_CATEGORIES, readCategory } from "../reader/data.ts";
-import { articleQuery, listQuery, readerSearch, revalidateReader, validateReaderSearch } from "../reader/queries.ts";
+import type { ReaderList } from "../reader/data.ts";
+import { articleQuery, listKey, listQuery, readerSearch, revalidateReader, validateReaderSearch } from "../reader/queries.ts";
 import { LoadingStatus } from "../reader/loading.tsx";
 import { usePullToRefresh } from "../reader/pull-to-refresh.ts";
 import { useReaderScroll } from "../reader/reading.ts";
@@ -21,22 +22,26 @@ function ReadingList() {
 
 function CategoryList({ category, page }: { category: ReturnType<typeof readCategory>; page: number }) {
   const queryClient = useQueryClient();
-  const query = useQuery({
-    ...listQuery(category, page),
-    placeholderData: category === "highlights" ? undefined : keepPreviousData,
+  const query = useInfiniteQuery<ReaderList, Error, InfiniteData<ReaderList, number>, readonly unknown[], number>({
+    queryKey: ["reader", "infinite", category, page],
+    initialPageParam: page,
+    queryFn: ({ pageParam }) => queryClient.fetchQuery(listQuery(category, pageParam)),
+    getNextPageParam: (lastPage, _pages, lastPageParam) => (lastPage.hasMore ? lastPageParam + 1 : undefined),
+    staleTime: category === "highlights" || category === "favorites" ? 0 : 60_000,
   });
-  const data = query.data;
+  const pages = query.data?.pages;
+  const lastPage = pages?.at(-1);
+  const data = lastPage?.kind === "highlights" ? { ...lastPage, items: pages!.flatMap(result => (result.kind === "highlights" ? result.items : [])) } : lastPage;
+  const currentPage = query.data?.pageParams.at(-1) ?? page;
   const reload = useCallback(async () => {
     revalidateReader(category);
-    try {
-      await queryClient.fetchQuery({ ...listQuery(category, page, "reload"), staleTime: 0, networkMode: "always" });
-    } catch {
-      /* React Query exposes the error alongside the existing list. */
-    }
-  }, [category, page, queryClient]);
+    await queryClient.invalidateQueries({ queryKey: listKey(category), refetchType: "none" });
+    await query.refetch();
+  }, [category, queryClient, query.refetch]);
   const { surfaceRef, indicatorHeight, label, refreshing, refresh } = usePullToRefresh(reload);
   const { gutter, mainRef } = useReaderScroll(undefined, Boolean(data));
   const list = useRef<HTMLElement | null>(null);
+  const sentinel = useRef<HTMLDivElement | null>(null);
   const prefetched = useRef(new Set<string>());
   const setMain = useCallback(
     (element: HTMLElement | null) => {
@@ -58,13 +63,26 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
         if (!code || prefetched.current.has(code)) continue;
         prefetched.current.add(code);
         observer.unobserve(entry.target);
-        void queryClient.prefetchQuery(articleQuery(code, false, category, page, "low")).catch(() => {});
+        const itemPage = Number((entry.target as HTMLElement).dataset.page) || currentPage;
+        void queryClient.prefetchQuery(articleQuery(code, false, category, itemPage, "low")).catch(() => {});
       }
     });
     for (const link of root.querySelectorAll<HTMLElement>("a.item-link[data-code]")) observer.observe(link);
     return () => observer.disconnect();
-  }, [category, data, page, queryClient]);
-  const search = readerSearch(category, page);
+  }, [category, query.data, currentPage, queryClient]);
+  useEffect(() => {
+    const target = sentinel.current;
+    if (!target || !query.hasNextPage || query.isFetching || query.isFetchNextPageError || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries.some(entry => entry.isIntersecting)) void query.fetchNextPage({ cancelRefetch: false });
+      },
+      { rootMargin: "200px 0px" },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [query.hasNextPage, query.isFetching, query.isFetchNextPageError, query.fetchNextPage]);
+  const search = readerSearch(category, currentPage);
 
   return (
     <div className="reader-surface" ref={surfaceRef} {...gutter}>
@@ -81,7 +99,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
           ))}
         </nav>
         {query.isPending && <LoadingStatus />}
-        {query.isError && (
+        {query.isError && !data && (
           <p role="alert">
             {query.error.message}{" "}
             <button type="button" className="other-link" disabled={refreshing} onClick={() => void refresh()}>
@@ -111,12 +129,14 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
         {data?.kind === "highlights" && data.items.length > 0 && (
           <ul>
             {data.items.map(item => {
+              const itemPageIndex = pages?.findIndex(result => result.kind === "highlights" && result.items.some(entry => entry.id === item.id)) ?? -1;
+              const itemSearch = readerSearch(category, query.data?.pageParams[itemPageIndex] ?? page);
               const article = item.article;
               const meta = <p className="meta">{article ? [article.title, article.source, item.located ? "" : "正文已变动，未能定位"].filter(Boolean).join(" · ") : "文章不可用"}</p>;
               return (
                 <li key={item.id}>
                   {article && item.located ? (
-                    <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={search} hash={`hl-${item.id}`} hashScrollIntoView={{ block: "center", behavior: "instant" }} data-code={article.code}>
+                    <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={itemSearch} hash={`hl-${item.id}`} hashScrollIntoView={{ block: "center", behavior: "instant" }} data-code={article.code} data-page={query.data?.pageParams[itemPageIndex]}>
                       {item.quote}
                       {meta}
                     </Link>
@@ -131,23 +151,19 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
             })}
           </ul>
         )}
-        {data && (
-          <div className="list-actions" id="list-actions" aria-busy={query.isPlaceholderData}>
-            {category === "highlights" && page > 1 && (
-              <Link className="btn" to="/read" search={readerSearch(category, page - 1)}>
-                上一页
-              </Link>
-            )}
-            {data.hasMore &&
-              (query.isPlaceholderData ? (
-                <button className="btn" type="button" disabled>
-                  加载中
-                </button>
-              ) : (
-                <Link className="btn" id="load-more" to="/read" search={readerSearch(category, page + 1)} resetScroll={category === "highlights"}>
-                  {category === "highlights" ? "下一页" : "加载更多"}
-                </Link>
-              ))}
+        {data && query.hasNextPage && (
+          <div className="list-actions" ref={sentinel} aria-live="polite" aria-busy={query.isFetchingNextPage}>
+            {query.isFetchingNextPage ? (
+              "加载中"
+            ) : query.isFetchNextPageError ? (
+              <button className="btn" type="button" onClick={() => void query.fetchNextPage()}>
+                加载失败，重试
+              </button>
+            ) : typeof IntersectionObserver === "undefined" ? (
+              <button className="btn" type="button" onClick={() => void query.fetchNextPage()}>
+                加载更多
+              </button>
+            ) : null}
           </div>
         )}
       </main>

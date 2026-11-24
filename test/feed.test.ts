@@ -917,7 +917,7 @@ test("reading API applies category filters without loading article neighbors", a
   const favorites = await worker.fetch(new Request("https://example.com/api/read?tab=likes"), env);
   assert.equal(favorites.status, 200);
   assert.equal(favorites.headers.get("Cache-Control"), "no-store");
-  assert.deepEqual(queries.at(-1), { page_size: 31, filter: favoritesFilter, sorts: favoritesSorts });
+  assert.deepEqual(queries.at(-1), { page_size: 11, filter: favoritesFilter, sorts: favoritesSorts });
   const rss = await worker.fetch(new Request("https://example.com/read.xml?tab=likes"), env);
   assert.equal(rss.status, 200);
   assert.deepEqual(queries.at(-1)?.filter, viewFilter);
@@ -951,16 +951,16 @@ test("reading list API expands pages within its category", async context => {
   });
   const env = { NOTION_TOKEN: "test", NOTION_EXCERPTS_DATA_SOURCE_ID: "source", NOTION_EXCERPTS_VIEW_ID: "view" };
   for (const [page, count, hasMore] of [
-    [1, 30, true],
-    [2, 60, true],
-    [3, 65, false],
+    [1, 10, true],
+    [2, 20, true],
+    [7, 65, false],
   ] as const) {
     const response = await worker.fetch(new Request(`https://example.com/api/read?tab=weekly&page=${page}`), env);
     const list = await response.json<import("../src/reader/data.ts").ReaderList>();
     assert.equal(list.items.length, count);
     assert.equal(list.hasMore, hasMore);
   }
-  const listed = await (await worker.fetch(new Request("https://example.com/api/read?tab=weekly&page=2"), env)).json<import("../src/reader/data.ts").ReaderList>();
+  const listed = await (await worker.fetch(new Request("https://example.com/api/read?tab=weekly&page=5"), env)).json<import("../src/reader/data.ts").ReaderList>();
   const { listNeighborCodes } = await import("../src/reader/data.ts");
   assert.equal(listNeighborCodes(listed, code(40))?.nextCode, code(41));
   const detail = await worker.fetch(new Request(`https://example.com/api/r/${code(40)}?tab=weekly&page=2`), env);

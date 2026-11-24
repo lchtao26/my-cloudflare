@@ -25,6 +25,7 @@ export const EINK_STYLE = [
   "li{margin:0;}",
   "ul{list-style:none;margin:0;padding:0;}",
   "li{border-top:2px solid #000;padding:2rem 0;}",
+  ".read-list>ul>li:first-child{border-top:0;}",
   "li:last-child{border-bottom:2px solid #000;}",
   "a{color:#000;text-decoration:none;}",
   "a:visited{color:#767676;}",
