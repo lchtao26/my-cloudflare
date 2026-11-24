@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useHydrated, useLocation } from "@tanstack/react-router";
-import { createElement, useCallback, useRef, useState, type MouseEvent, type ReactNode, type RefCallback } from "react";
-import { useEffect } from "./external-effect.ts";
-import type { MarkdownNode } from "./explanation-markdown.ts";
+import { Link, useLocation } from "@tanstack/react-router";
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type RefCallback } from "react";
+import { renderMarkdown } from "./markdown-elements.ts";
 import { canonicalText } from "./highlight-anchor.ts";
 import { listNeighborCodes, type ReadCategory, type ReaderArticle, type ReaderList, type ReaderNeighbors } from "./data.ts";
 import { ReadingBody, type ParagraphSelection } from "./body.tsx";
@@ -11,43 +10,19 @@ import { quoteBetween, selectionPreview } from "./quote-slice.ts";
 import { ReaderDialog } from "./dialog.tsx";
 import type { TokenRange } from "./tokenize.ts";
 import { LoadingStatus } from "./loading.tsx";
-import { articleKey, articleQuery, listKey, listQuery, performAction, ReaderError, readerSearch, readSessionQuery, revalidateReader, type ReaderAction } from "./queries.ts";
+import { articleQuery, listKey, listQuery, performAction, ReaderError, readerSearch, readSessionQuery, reconcileArticleOnError, revalidateReader, updateArticleCache, type ReaderAction } from "./queries.ts";
 import { useReaderScroll } from "./reading.ts";
 
-export type InitialArticle = { data: ReaderArticle; error?: never } | { data?: never; error: { message: string; status: number } };
-
-function referrerIsCurrentOrigin(): boolean {
-  try {
-    return new URL(document.referrer).origin === window.location.origin;
-  } catch {
-    return false;
-  }
-}
-
-function backToPreviousPage(event: MouseEvent<HTMLAnchorElement>) {
-  if (!referrerIsCurrentOrigin() || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || (event.currentTarget.target && event.currentTarget.target !== "_self") || event.currentTarget.hasAttribute("download") || window.history.length <= 1) return;
-  try {
-    window.history.back();
-    event.preventDefault();
-  } catch {}
-}
-
-export function ArticleRoute({ code, category, page, shared, initial }: { code: string; category: ReadCategory; page: number; shared: boolean; initial?: InitialArticle }) {
-  const hydrated = useHydrated();
-  const query = useQuery({
-    ...articleQuery(code, shared, category, page),
-    initialData: initial?.data,
-    enabled: !initial?.error,
-    refetchOnMount: !initial || hydrated,
-  });
-  const error = query.error ?? initial?.error;
-  if (query.isPending && (!error || query.isFetching))
+export function ArticleRoute({ code, category, page, shared }: { code: string; category: ReadCategory; page: number; shared: boolean }) {
+  const query = useQuery(articleQuery(code, shared, category, page));
+  if (query.isPending)
     return (
       <main>
         <LoadingStatus />
       </main>
     );
   if (!query.data) {
+    const error = query.error;
     const missing = error != null && "status" in error && error.status === 404;
     return (
       <main>
@@ -58,18 +33,14 @@ export function ArticleRoute({ code, category, page, shared, initial }: { code: 
           </button>
         )}
         <p>
-          <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>
+          <Link to="/read" search={readerSearch(category, page)}>
             返回
           </Link>
         </p>
       </main>
     );
   }
-  return <Article data={query.data} category={category} page={page} hydrated={hydrated} />;
-}
-
-function markdown(nodes: MarkdownNode[]): ReactNode[] {
-  return nodes.map((node, index) => (node.type === "text" ? node.text : createElement(node.tag, { key: index, href: node.href, start: node.start }, markdown(node.children))));
+  return <Article data={query.data} category={category} page={page} />;
 }
 
 function isModelAction(action: ReaderAction) {
@@ -113,7 +84,7 @@ function useArticleNeighbors(code: string, category: ReadCategory, page: number,
   return { neighbors, navRef: setNav };
 }
 
-function Article({ data, category, page, hydrated }: { data: ReaderArticle; category: ReadCategory; page: number; hydrated: boolean }) {
+function Article({ data, category, page }: { data: ReaderArticle; category: ReadCategory; page: number }) {
   const { item, actions } = data;
   const { neighbors, navRef } = useArticleNeighbors(item.code, category, page, Boolean(actions));
   const queryClient = useQueryClient();
@@ -126,7 +97,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const highlights = actions?.highlights ?? [];
   const anchoredMark = highlights.find(mark => hash === `hl-${mark.id}`);
   const hasOriginal = data.original.length > 0;
-  const [showOriginal, setShowOriginal] = useState(hydrated && anchoredMark?.field === "original" && hasOriginal);
+  const [showOriginal, setShowOriginal] = useState(anchoredMark?.field === "original" && hasOriginal);
   const [selected, setSelected] = useState<ParagraphSelection | null>(null);
   const [pinPrompt, setPinPrompt] = useState<ReaderAction | null>(null);
   const [resultPanel, setResultPanel] = useState<ReaderAction | null>(null);
@@ -184,36 +155,31 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
   const mutation = useMutation({
     mutationFn: ({ action, pin, signal }: { action: ReaderAction; pin?: string; signal?: AbortSignal }) => performAction(item.code, action, pin, signal),
     onSuccess: async (result, { action }) => {
+      if (action.type === "add-later") {
+        revalidateReader("later");
+        void queryClient.invalidateQueries({ queryKey: listKey("later") });
+      }
       if (action.type === "favorite") {
-        revalidateReader(item.code);
-        revalidateReader("favorites");
-        queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current => (current?.actions ? { ...current, actions: { ...current.actions, favorite: Boolean(result.favorite) } } : current));
-        await queryClient.invalidateQueries({ queryKey: articleKey(item.code) });
-        await queryClient.invalidateQueries({ queryKey: listKey("favorites") });
+        await updateArticleCache(queryClient, item.code, "favorites", current => (current.actions ? { ...current, actions: { ...current.actions, favorite: Boolean(result.favorite) } } : current));
       }
       if (action.type === "delete") {
-        revalidateReader(item.code);
-        revalidateReader("highlights");
-        queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current => {
-          if (!current?.actions) return current;
+        await updateArticleCache(queryClient, item.code, "highlights", current => {
+          if (!current.actions) return current;
           return { ...current, actions: { ...current.actions, highlights: current.actions.highlights.filter(mark => mark.id !== result.id) } };
         });
-        await queryClient.invalidateQueries({ queryKey: articleKey(item.code) });
-        await queryClient.invalidateQueries({ queryKey: listKey("highlights") });
       }
       if (result.highlights?.length) {
-        revalidateReader(item.code);
-        revalidateReader("highlights");
         const savedIds = new Set(result.highlights.map(mark => mark.id));
-        queryClient.setQueriesData<ReaderArticle>({ queryKey: articleKey(item.code) }, current => {
-          if (!current?.actions) return current;
+        await updateArticleCache(queryClient, item.code, "highlights", current => {
+          if (!current.actions) return current;
           const updated = current.actions.highlights.filter(mark => !savedIds.has(mark.id));
           updated.push(...result.highlights!);
           return { ...current, actions: { ...current.actions, highlights: updated } };
         });
-        await queryClient.invalidateQueries({ queryKey: articleKey(item.code) });
-        await queryClient.invalidateQueries({ queryKey: listKey("highlights") });
       }
+    },
+    onError: (error, { action }) => {
+      reconcileArticleOnError(queryClient, item.code, action, error);
     },
   });
 
@@ -227,12 +193,6 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
       { action, pin, signal: controller?.signal },
       {
         onError(error) {
-          if (action.data.save === "1") {
-            revalidateReader(item.code);
-            revalidateReader("highlights");
-            void queryClient.invalidateQueries({ queryKey: articleKey(item.code) });
-            void queryClient.invalidateQueries({ queryKey: listKey("highlights") });
-          }
           if (isAbortError(error)) return;
           if (error instanceof ReaderError && error.requiresPin) {
             setResultPanel(null);
@@ -242,17 +202,13 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
             if (isModelAction(action)) {
               if (pin) setResultPanel(action);
             } else {
-              setFailure({ message: error.message, retry: action });
+              setFailure({ message: error.message || "操作失败，请稍后重试。", retry: action });
             }
           }
         },
         onSuccess() {
           setPinPrompt(null);
-          if (action.type === "add-later") {
-            setAddedLater(true);
-            revalidateReader("later");
-            void queryClient.invalidateQueries({ queryKey: listKey("later") });
-          }
+          if (action.type === "add-later") setAddedLater(true);
           if (action.type === "delete" && hash === `hl-${action.data.id}`) {
             history.replaceState(history.state, "", location.pathname + location.search);
           }
@@ -472,7 +428,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
     setReadingActions(true);
   }
 
-  const modelError = mutation.error && !isAbortError(mutation.error) ? mutation.error.message : undefined;
+  const modelError = mutation.error && !isAbortError(mutation.error) ? mutation.error.message || "操作失败，请稍后重试。" : undefined;
   const search = readerSearch(category, page);
   const originalTitle = data.originalTitle || item.title;
   const origTitleLang = data.originalTitle ? data.originalLang : item.titleLang;
@@ -562,7 +518,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
               ) : (
                 <span className="is-disabled">上一篇</span>
               )}
-              <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>
+              <Link to="/read" search={search}>
                 返回
               </Link>
               {neighbors?.nextCode ? (
@@ -579,7 +535,7 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
       {actions && readingActions && (
         <div ref={readingActionsRef}>
           <div className="reading-top reading-actions-row" role="toolbar" aria-label="页面">
-            <Link to="/read" search={readerSearch()} onClick={backToPreviousPage}>
+            <Link to="/read" search={search}>
               返回
             </Link>
             <button type="button" onClick={() => window.scrollTo(0, atPageBottom ? 0 : document.documentElement.scrollHeight)}>
@@ -684,17 +640,37 @@ function Article({ data, category, page, hydrated }: { data: ReaderArticle; cate
               </section>
               <section>
                 <h2>原文</h2>
-                <p id="original-match-text" role="status">
+                <p id="original-match-text" role={modelError ? "alert" : "status"}>
                   {mutation.isPending ? "正在匹配原文…" : (modelError ?? mutation.data?.paragraph ?? "未找到匹配段落。")}
                 </p>
               </section>
             </div>
+            {!mutation.isPending && modelError && (
+              <div className="dialog-actions">
+                <button type="button" onClick={dismissResult}>
+                  关闭
+                </button>
+                <button type="button" onClick={() => run(resultPanel)}>
+                  重试
+                </button>
+              </div>
+            )}
           </ReaderDialog>
         ) : (
           <ReaderDialog id="explanation-dialog" label="段落解释" dismiss={dismissResult}>
-            <div id="explanation-text" aria-live="polite">
-              {mutation.isPending ? "正在解释…" : (modelError ?? (mutation.data?.markdown ? markdown(mutation.data.markdown) : mutation.data?.explanation))}
+            <div id="explanation-text" aria-live="polite" role={modelError ? "alert" : undefined}>
+              {mutation.isPending ? "正在解释…" : (modelError ?? (mutation.data?.markdown ? renderMarkdown(mutation.data.markdown) : mutation.data?.explanation))}
             </div>
+            {!mutation.isPending && modelError && (
+              <div className="dialog-actions">
+                <button type="button" onClick={dismissResult}>
+                  关闭
+                </button>
+                <button type="button" onClick={() => run(resultPanel)}>
+                  重试
+                </button>
+              </div>
+            )}
           </ReaderDialog>
         ))}
     </div>

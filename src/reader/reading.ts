@@ -1,5 +1,4 @@
-import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { useEffect } from "./external-effect.ts";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 export function shouldOfferRemoteSync(current: number, remote: number | null, maxScrollPx: number): boolean {
   return remote !== null && remote - current >= 0.02 && (remote - current) * maxScrollPx >= 40;

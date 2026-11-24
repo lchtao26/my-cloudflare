@@ -48,11 +48,35 @@ test("reading access requires the existing session and login rejects forged requ
   assert.deepEqual(await (await readSession(new Request(`${origin}/api/session`, { headers: { Cookie: session } }), env)).json(), { authenticated: true });
   assert.ok(await protectRead(new Request(`${origin}/api/progress/${code}`, { headers: { Cookie: session } }), { ...env, FAVORITE_PIN: "654321" }));
   assert.deepEqual(await (await readSession(new Request(`${origin}/api/session`, { headers: { Cookie: session } }), { ...env, FAVORITE_PIN: "654321" })).json(), { authenticated: false });
-  const logout = readLogout(new Request(`${origin}/api/session`, { method: "POST", headers: { Origin: origin, Cookie: session } }));
-  assert.equal(logout.status, 204);
+  assert.equal((await readSession(new Request(`${origin}/api/session`, { method: "POST", headers: { Origin: origin, Cookie: session } }), env)).status, 405);
+  const logout = readLogout(new Request(`${origin}/logout`, { headers: { Cookie: session, "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none" } }));
+  assert.equal(logout.status, 303);
+  assert.equal(logout.headers.get("Location"), "/read");
+  assert.equal(logout.headers.get("Cache-Control"), "no-store");
   assert.match(logout.headers.get("Set-Cookie")!, /^__Host-read-session=;/);
   assert.match(logout.headers.get("Set-Cookie")!, /Max-Age=0/);
-  assert.equal(readLogout(new Request(`${origin}/api/session`, { method: "POST", headers: { Origin: "https://evil.example", Cookie: session } })).status, 403);
+  assert.equal(readLogout(new Request(`${origin}/logout`, { headers: { Cookie: session, "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Site": "cross-site" } })).status, 403);
+  assert.equal(readLogout(new Request(`${origin}/logout`, { headers: { Cookie: session, "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "cross-site" } })).status, 403);
+  const directNoFetchMeta = readLogout(new Request(`${origin}/logout`, { headers: { Cookie: session } }));
+  assert.equal(directNoFetchMeta.status, 303);
+  assert.match(directNoFetchMeta.headers.get("Set-Cookie")!, /^__Host-read-session=;/);
+  const sameOriginReferer = readLogout(new Request(`${origin}/logout`, { headers: { Cookie: session, Referer: `${origin}/read` } }));
+  assert.equal(sameOriginReferer.status, 303);
+  for (const header of [{ Referer: "https://evil.example/page" }, { Origin: "https://evil.example" }, { Origin: "null" }] as Array<Record<string, string>>) {
+    const crossOrigin = readLogout(new Request(`${origin}/logout`, { headers: { Cookie: session, ...header } }));
+    assert.equal(crossOrigin.status, 403);
+    assert.equal(crossOrigin.headers.get("Set-Cookie"), null);
+  }
+  const prefetchHeaders: Array<Record<string, string>> = [{ "Sec-Purpose": "prefetch" }, { "Sec-Purpose": "prefetch;prerender", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none" }, { Purpose: "prefetch", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none" }];
+  for (const header of prefetchHeaders) {
+    const prefetched = readLogout(new Request(`${origin}/logout`, { headers: { Cookie: session, ...header } }));
+    assert.equal(prefetched.status, 503);
+    assert.equal(prefetched.headers.get("Cache-Control"), "no-store");
+    assert.equal(prefetched.headers.get("Set-Cookie"), null);
+  }
+  assert.equal(readLogout(new Request(`${origin}/logout`, { method: "POST", headers: { Origin: origin, Cookie: session } })).status, 303);
+  assert.equal(readLogout(new Request(`${origin}/logout`, { method: "POST", headers: { Origin: "https://evil.example", Cookie: session } })).status, 403);
+  assert.equal(readLogout(new Request(`${origin}/logout`, { method: "DELETE", headers: { Cookie: session } })).status, 405);
   assert.deepEqual(await (await readSession(new Request(`${origin}/api/session`, { headers: { Cookie: logout.headers.get("Set-Cookie")!.split(";")[0]! } }), env)).json(), { authenticated: false });
 });
 

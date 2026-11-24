@@ -1,5 +1,6 @@
 import { Fragment, createElement, useCallback, useRef, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent } from "react";
 import type { MarkdownNode } from "./explanation-markdown.ts";
+import { VOID_MARKDOWN_TAGS } from "./markdown-elements.ts";
 import type { ReaderField, ReaderParagraph, ResolvedHighlight } from "./data.ts";
 
 export type ParagraphSelection = {
@@ -128,7 +129,12 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
     // Open from the release click, after that click is stopped, so it cannot dismiss the new dialog.
     const onRelease = () => {
       const finished = held;
+      const scrolled = Math.abs(origin.scroll - window.scrollY) > 5;
       detach();
+      if (scrolled) {
+        swallowClick.current = true;
+        return;
+      }
       if (!finished || !select) return;
       swallowClick.current = true;
       let opened = false;
@@ -166,10 +172,21 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
   }
 
   function onClick(event: MouseEvent<HTMLDivElement>) {
-    if (!swallowClick.current) return;
-    swallowClick.current = false;
+    if (swallowClick.current) {
+      swallowClick.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (!select || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || window.getSelection()?.toString()) return;
+    const paragraph = targetParagraph(event);
+    if (paragraph === null) return;
+    const highlightId = event.target instanceof Element ? (event.target.closest("mark[data-hl]")?.getAttribute("data-hl") ?? null) : null;
+    if (!highlightId) return;
     event.preventDefault();
     event.stopPropagation();
+    window.getSelection()?.removeAllRanges();
+    select({ field, paragraph: paragraphs[paragraph]!, highlightId });
   }
 
   function onContextMenu(event: MouseEvent<HTMLDivElement>) {
@@ -227,7 +244,7 @@ export function ReadingBody({ id, field, lang, paragraphs, highlights, hidden, s
               offset += node.text.replace(/\s/g, "").length;
               return <Fragment key={index}>{content}</Fragment>;
             }
-            return createElement(node.tag, { key: index, href: node.href, src: node.src, alt: node.alt, start: node.start }, node.tag === "img" || node.tag === "br" || node.tag === "hr" ? undefined : render(node.children));
+            return createElement(node.tag, { key: index, href: node.href, src: node.src, alt: node.alt, start: node.start }, VOID_MARKDOWN_TAGS.has(node.tag) ? undefined : render(node.children));
           });
         }
         return (

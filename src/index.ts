@@ -946,18 +946,27 @@ const worker = {
             const highlights = data.get("save") === "1" ? await saveHighlights(db, id, excerpt.id, field, text, ranges) : undefined;
             const contextMode = data.get("context") === "paragraph" ? "paragraph" : data.get("context") === "around" ? "around" : "";
             const context = contextMode ? explainContext(excerpt, field, ranges, contextMode) : "";
-            const response = await fetch("https://api.302.ai/v1/responses", {
-              method: "POST",
-              headers: { Authorization: `Bearer ${env.AI302_API_KEY}`, "Content-Type": "application/json" },
-              body: JSON.stringify({ model: "gpt-6-luna", store: false, reasoning: { effort: "low" }, max_output_tokens: 1500, input: `文章标题：${excerpt.title}${context ? `\n上下文：\n${context}` : ""}\n\n解释一下：${ranges.map(range => range.quote).join("\n")}` }),
-              signal: AbortSignal.any([request.signal, AbortSignal.timeout(60000)]),
-            });
-            if (!response.ok) {
-              const failure = (await response.json().catch(() => null)) as { error?: { type?: unknown; code?: unknown } } | null;
-              console.error("Explanation API request failed", { status: response.status, type: typeof failure?.error?.type === "string" ? failure.error.type : undefined, code: typeof failure?.error?.code === "string" ? failure.error.code : undefined });
-              throw highlightError("解释服务暂不可用，请稍后再试。", 502);
+            const timeout = AbortSignal.timeout(60000);
+            let result: { status?: string; output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }> };
+            try {
+              const response = await fetch("https://api.302.ai/v1/responses", {
+                method: "POST",
+                headers: { Authorization: `Bearer ${env.AI302_API_KEY}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ model: "gpt-6-luna", store: false, reasoning: { effort: "low" }, max_output_tokens: 1500, input: `文章标题：${excerpt.title}${context ? `\n上下文：\n${context}` : ""}\n\n解释一下：${ranges.map(range => range.quote).join("\n")}` }),
+                signal: AbortSignal.any([request.signal, timeout]),
+              });
+              if (!response.ok) {
+                const failure = (await response.json().catch(() => null)) as { error?: { type?: unknown; code?: unknown } } | null;
+                if (!request.signal.aborted && timeout.aborted) throw highlightError("解释超时，请重试。", 504);
+                console.error("Explanation API request failed", { status: response.status, type: typeof failure?.error?.type === "string" ? failure.error.type : undefined, code: typeof failure?.error?.code === "string" ? failure.error.code : undefined });
+                throw highlightError("解释服务暂不可用，请稍后再试。", 502);
+              }
+              result = (await response.json()) as { status?: string; output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }> };
+            } catch (error) {
+              if (error instanceof Response) throw error;
+              if (!request.signal.aborted && (timeout.aborted || (error instanceof Error && error.name === "TimeoutError"))) throw highlightError("解释超时，请重试。", 504);
+              throw error;
             }
-            const result = (await response.json()) as { status?: string; output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }> };
             const explanation = result.output
               ?.flatMap(item => (item.type === "message" ? item.content || [] : []))
               .filter(part => part.type === "output_text" && typeof part.text === "string")
@@ -979,21 +988,29 @@ const worker = {
             const lastCandidate = Math.min(allCandidates.length, estimatedIndex + JEV_CANDIDATE_RADIUS + 1);
             const candidates = allCandidates.slice(firstCandidate, lastCandidate);
             const criteria = Object.fromEntries(candidates.map((paragraph, index) => [`p${index}`, Array.from(paragraph).slice(0, JEV_CANDIDATE_TEXT_LIMIT).join("")]));
-            const response = await fetch("https://api.302.ai/typesafeai/v1/systemone", {
-              method: "POST",
-              headers: { Authorization: `Bearer ${env.AI302_API_KEY}`, "Content-Type": "application/json" },
-              body: JSON.stringify({
-                model: "jev-latest",
-                state: JSON.stringify({ title: excerpt.originalTitle || excerpt.title, selected_paragraph: ranges.map(range => range.quote).join("\n"), estimated_source_position: `${estimatedIndex + 1} / ${allCandidates.length}` }),
-                questions: { match: { type: "choice", instructions: "从原文候选段落中，选择与所选译文段落内容最对应的原文。依据语义、实体、细节和段落主旨匹配，不要只按关键词匹配。若都不匹配，也选择最可能的一段。", criteria } },
-              }),
-              signal: AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
-            });
-            if (!response.ok) {
-              console.error("302.AI Jev request failed", { status: response.status });
-              throw highlightError("原文匹配服务暂不可用，请稍后再试。", 502);
+            const timeout = AbortSignal.timeout(30000);
+            let result: { answers?: { match?: { type?: string; choice?: string; confidence?: number } } };
+            try {
+              const response = await fetch("https://api.302.ai/typesafeai/v1/systemone", {
+                method: "POST",
+                headers: { Authorization: `Bearer ${env.AI302_API_KEY}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  model: "jev-latest",
+                  state: JSON.stringify({ title: excerpt.originalTitle || excerpt.title, selected_paragraph: ranges.map(range => range.quote).join("\n"), estimated_source_position: `${estimatedIndex + 1} / ${allCandidates.length}` }),
+                  questions: { match: { type: "choice", instructions: "从原文候选段落中，选择与所选译文段落内容最对应的原文。依据语义、实体、细节和段落主旨匹配，不要只按关键词匹配。若都不匹配，也选择最可能的一段。", criteria } },
+                }),
+                signal: AbortSignal.any([request.signal, timeout]),
+              });
+              if (!response.ok) {
+                console.error("302.AI Jev request failed", { status: response.status });
+                throw highlightError("原文匹配服务暂不可用，请稍后再试。", 502);
+              }
+              result = (await response.json()) as { answers?: { match?: { type?: string; choice?: string; confidence?: number } } };
+            } catch (error) {
+              if (error instanceof Response) throw error;
+              if (!request.signal.aborted && (timeout.aborted || (error instanceof Error && error.name === "TimeoutError"))) throw highlightError("原文匹配超时，请重试。", 504);
+              throw error;
             }
-            const result = (await response.json()) as { answers?: { match?: { type?: string; choice?: string; confidence?: number } } };
             const answer = result.answers?.match;
             const choice = answer?.type === "choice" ? answer.choice || "" : "";
             const confidence = answer?.confidence;
@@ -1095,6 +1112,7 @@ const worker = {
         return request.method === "HEAD" ? new Response(null, { status: cover.status, headers: cover.headers }) : cover;
       }
 
+      const bypassCache = url.searchParams.has("_") || (request.headers.get("Cache-Control")?.toLowerCase().includes("no-cache") ?? false);
       if (shortId !== null) {
         const showNavigation = detailShortId !== null;
         const excerptPromise = fetchExcerptByShortId(configured, shortId);
@@ -1138,7 +1156,7 @@ const worker = {
               : null,
           },
           request.method,
-          true,
+          !bypassCache,
         );
       }
 
@@ -1172,7 +1190,7 @@ const worker = {
             hasMore: pages.length > limit && page < 999,
           },
           request.method,
-          category !== "favorites",
+          category !== "favorites" && !bypassCache,
         );
       }
 

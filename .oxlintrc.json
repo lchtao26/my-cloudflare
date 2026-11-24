@@ -3,19 +3,5 @@
   "categories": {
     "correctness": "off"
   },
-  "ignorePatterns": ["src/routeTree.gen.ts", "worker-configuration.d.ts", "dist/**"],
-  "rules": {
-    "no-restricted-imports": [
-      "error",
-      {
-        "paths": [
-          {
-            "name": "react",
-            "importNames": ["useEffect"],
-            "message": "Prefer declarative replacements (derived state, event handlers, TanStack Query) or a reviewed external-integration hook instead of useEffect."
-          }
-        ]
-      }
-    ]
-  }
+  "ignorePatterns": ["src/routeTree.gen.ts", "worker-configuration.d.ts", "dist/**"]
 }

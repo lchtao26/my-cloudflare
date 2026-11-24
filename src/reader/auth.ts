@@ -10,17 +10,38 @@ export async function protectRead(request: Request, env: FavoriteBindings): Prom
 }
 
 export async function readSession(request: Request, env: FavoriteBindings): Promise<Response> {
-  if (request.method === "POST") return readLogout(request);
-  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD, POST", "Cache-Control": "no-store" } });
+  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD", "Cache-Control": "no-store" } });
   const authenticated = await isReadAuthorized(request, env);
   return new Response(request.method === "HEAD" ? null : JSON.stringify({ authenticated }), {
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
   });
 }
 
+function isCrossOriginSource(value: string | null, expectedOrigin: string): boolean {
+  if (!value) return false;
+  try {
+    return new URL(value).origin !== expectedOrigin;
+  } catch {
+    return true;
+  }
+}
+
 export function readLogout(request: Request): Response {
-  if (request.headers.get("Origin") !== new URL(request.url).origin) return new Response("请求无效，请重试。", { status: 403, headers: { "Cache-Control": "no-store" } });
-  return new Response(null, { status: 204, headers: { "Cache-Control": "no-store", "Set-Cookie": clearedSessionCookie(request) } });
+  if (request.method !== "GET" && request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, POST", "Cache-Control": "no-store" } });
+  const origin = new URL(request.url).origin;
+  if (request.method === "POST") {
+    if (request.headers.get("Origin") !== origin) return new Response("请求无效，请重试。", { status: 403, headers: { "Cache-Control": "no-store" } });
+  } else {
+    const purpose = (request.headers.get("Sec-Purpose") || request.headers.get("Purpose") || "").toLowerCase();
+    if (purpose.includes("prefetch") || purpose.includes("prerender")) return new Response(null, { status: 503, headers: { "Cache-Control": "no-store" } });
+    const mode = request.headers.get("Sec-Fetch-Mode");
+    const site = request.headers.get("Sec-Fetch-Site");
+    if ((mode && mode !== "navigate") || site === "cross-site") return new Response("请求无效，请重试。", { status: 403, headers: { "Cache-Control": "no-store" } });
+    if (isCrossOriginSource(request.headers.get("Origin"), origin) || isCrossOriginSource(request.headers.get("Referer"), origin)) {
+      return new Response("请求无效，请重试。", { status: 403, headers: { "Cache-Control": "no-store" } });
+    }
+  }
+  return new Response(null, { status: 303, headers: { Location: "/read", "Cache-Control": "no-store", "Set-Cookie": clearedSessionCookie(request) } });
 }
 
 function destination(url: URL): string {

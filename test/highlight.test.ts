@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import test from "node:test";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import worker, { shareCode } from "../src/index.ts";
+import type { ReaderArticle, ResolvedHighlight } from "../src/reader/data.ts";
+import { articleQuery, ReaderError, reconcileArticleOnError, revalidateReader, updateArticleCache } from "../src/reader/queries.ts";
 
 const origin = "https://example.com",
   code = shareCode(42),
@@ -115,6 +118,14 @@ test("highlight writes reuse PIN and CSRF, validate text and expose private data
   const readApi = await worker.fetch(new Request(`${origin}/api/r/${code}`), env);
   const article = await readApi.json<import("../src/reader/data.ts").ReaderArticle>();
   assert.equal(readApi.headers.get("cache-control"), "public, max-age=300, must-revalidate");
+  const revalidatedApi = await worker.fetch(new Request(`${origin}/api/r/${code}?_=1`), env);
+  assert.equal(revalidatedApi.headers.get("cache-control"), "no-store");
+  const noCacheHeaderApi = await worker.fetch(new Request(`${origin}/api/r/${code}`, { headers: { "Cache-Control": "no-cache" } }), env);
+  assert.equal(noCacheHeaderApi.headers.get("cache-control"), "no-store");
+  const listApi = await worker.fetch(new Request(`${origin}/api/read`), env);
+  assert.equal(listApi.headers.get("cache-control"), "public, max-age=300, must-revalidate");
+  const revalidatedListApi = await worker.fetch(new Request(`${origin}/api/read?_=1`), env);
+  assert.equal(revalidatedListApi.headers.get("cache-control"), "no-store");
   assert.ok(article.body.some(paragraph => paragraph.quote.includes("<script>")));
   assert.ok(article.actions?.highlights.some(mark => mark.id === value.highlight.id));
   const shareApi = await worker.fetch(new Request(`${origin}/api/s/${code}`), env);
@@ -606,4 +617,247 @@ test("explanation context is the current paragraph with its neighbors, or only t
   assert.equal(last.status, 200);
   assert.equal(requests[5], "文章标题：测试\n上下文：\n六段\n\n解释一下：七段");
   assert.equal((sql.prepare("SELECT count(*) AS n FROM highlights").get() as { n: number }).n, 1);
+});
+
+test("revalidated article queries bypass both browser and edge caches", async t => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ input: string; cache?: RequestCache }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ input: String(input), cache: init?.cache });
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const targetCode = shareCode(77);
+  const query = articleQuery(targetCode, false, "weekly", 1);
+  await query.queryFn!({ client: undefined as never, queryKey: query.queryKey, signal: new AbortController().signal, meta: undefined });
+  assert.equal(calls[0]?.input, `/api/r/${targetCode}?tab=weekly`);
+  assert.equal(calls[0]?.cache, undefined);
+
+  revalidateReader(targetCode);
+  await query.queryFn!({ client: undefined as never, queryKey: query.queryKey, signal: new AbortController().signal, meta: undefined });
+  assert.match(calls[1]?.input ?? "", new RegExp(`^/api/r/${targetCode}\\?tab=weekly&_=\\d+$`));
+  assert.equal(calls[1]?.cache, "no-store");
+});
+
+test("requestJson wraps network failures and malformed JSON responses in ReaderError", async t => {
+  const originalFetch = globalThis.fetch;
+  let mode: "network" | "malformed" = "network";
+  globalThis.fetch = (async () => {
+    if (mode === "network") throw new TypeError("Failed to fetch");
+    return new Response("<html>not json</html>", { status: 200, headers: { "Content-Type": "text/html" } });
+  }) as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const query = articleQuery(shareCode(80), false, "all", 1);
+  await assert.rejects(
+    async () => await query.queryFn!({ client: undefined as never, queryKey: query.queryKey, signal: new AbortController().signal, meta: undefined }),
+    (error: unknown) => error instanceof ReaderError && error.status === 0 && error.message === "暂时无法读取，请稍后重试。",
+  );
+
+  mode = "malformed";
+  await assert.rejects(
+    async () => await query.queryFn!({ client: undefined as never, queryKey: query.queryKey, signal: new AbortController().signal, meta: undefined }),
+    (error: unknown) => error instanceof ReaderError && error.status === 200 && error.message === "暂时无法读取，请稍后重试。",
+  );
+});
+
+test("explanation and original matching upstream timeouts return retryable 504 JSON errors", async t => {
+  const { db, sql } = database();
+  t.after(() => sql.close());
+  const originalFetch = globalThis.fetch;
+  let stage: "fetch" | "body" = "fetch";
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes("/data_sources/source/query")) return Response.json({ results: [page] });
+    if (String(input) === "https://api.302.ai/v1/responses" || String(input) === "https://api.302.ai/typesafeai/v1/systemone") {
+      if (stage === "fetch") throw new DOMException("The operation timed out.", "TimeoutError");
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          throw new DOMException("The operation timed out.", "TimeoutError");
+        },
+      } as unknown as Response;
+    }
+    throw new Error(`unexpected fetch ${input}`);
+  }) as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const env = { ...sessionEnv, HIGHLIGHTS_DB: db, AI302_API_KEY: "test-key" };
+  const { csrf, cookie } = await highlightSession(env);
+  for (const mode of ["fetch", "body"] as const) {
+    stage = mode;
+    const explainResponse = await worker.fetch(
+      new Request(url, {
+        method: "POST",
+        headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ csrf, action: "explain", field: "translation", start: "5", end: "7", quote: "重复" }),
+      }),
+      env,
+    );
+    assert.equal(explainResponse.status, 504);
+    assert.deepEqual(await explainResponse.json(), { error: "解释超时，请重试。" });
+
+    const originalResponse = await worker.fetch(
+      new Request(url, {
+        method: "POST",
+        headers: { Origin: origin, Cookie: cookie, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ csrf, action: "original", field: "translation", start: "0", end: "1", quote: "甲" }),
+      }),
+      env,
+    );
+    assert.equal(originalResponse.status, 504);
+    assert.deepEqual(await originalResponse.json(), { error: "原文匹配超时，请重试。" });
+  }
+});
+
+test("throwing sessionStorage getter falls back to in-memory revalidation without crashing", async t => {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ input: string; cache?: RequestCache }> = [];
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    get() {
+      throw new DOMException("The operation is insecure.", "SecurityError");
+    },
+  });
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ input: String(input), cache: init?.cache });
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    if (originalDescriptor) Object.defineProperty(globalThis, "sessionStorage", originalDescriptor);
+    else delete (globalThis as Record<string, unknown>).sessionStorage;
+  });
+
+  const targetCode = shareCode(78);
+  const query = articleQuery(targetCode, false, "all", 1);
+  await query.queryFn!({ client: undefined as never, queryKey: query.queryKey, signal: new AbortController().signal, meta: undefined });
+  assert.equal(calls[0]?.input, `/api/r/${targetCode}`);
+
+  assert.doesNotThrow(() => revalidateReader(targetCode));
+  await query.queryFn!({ client: undefined as never, queryKey: query.queryKey, signal: new AbortController().signal, meta: undefined });
+  assert.match(calls[1]?.input ?? "", new RegExp(`^/api/r/${targetCode}\\?_=\\d+$`));
+  assert.equal(calls[1]?.cache, "no-store");
+});
+
+test("updateArticleCache cancels in-flight inactive prefetches and refetches active queries without blocking", async t => {
+  const targetCode = shareCode(79);
+  const mark: ResolvedHighlight = { id: "11111111-1111-4111-8111-111111111111", field: "translation", start: 0, end: 2 };
+  const articleSnapshot = (highlights: ResolvedHighlight[]): ReaderArticle => ({
+    item: { code: targetCode, title: "测试", titleLang: "zh-CN", source: "", author: "" },
+    lang: "zh-CN",
+    originalLang: "en",
+    originalTitle: "",
+    originalUrl: null,
+    publisher: "",
+    chapter: "",
+    date: "",
+    body: [{ parts: [{ text: "测试内容" }], quote: "测试内容", start: 0, end: 4 }],
+    field: "translation",
+    original: [],
+    terms: [],
+    actions: { favorite: false, notionUrl: "https://notion.so/test", highlightsEnabled: true, highlights },
+  });
+
+  const originalFetch = globalThis.fetch;
+  let serverHighlights: ResolvedHighlight[] = [];
+  const activeRefetches: Array<{ url: string; cache?: RequestCache }> = [];
+  const pendingResponses: Array<{ resolve: () => void; signal?: AbortSignal | null }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const requestUrl = String(input);
+    if (requestUrl.includes("tab=weekly") && !requestUrl.includes("_=")) {
+      const stale = [...serverHighlights];
+      return new Promise<Response>(resolve => {
+        pendingResponses.push({ resolve: () => resolve(Response.json(articleSnapshot(stale))), signal: init?.signal });
+      });
+    }
+    activeRefetches.push({ url: requestUrl, cache: init?.cache });
+    return Response.json(articleSnapshot([...serverHighlights]));
+  }) as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Number.POSITIVE_INFINITY } } });
+  const activeQuery = articleQuery(targetCode, false, "all", 1);
+  const inactiveQuery = articleQuery(targetCode, false, "weekly", 1);
+
+  queryClient.setQueryData(activeQuery.queryKey, articleSnapshot([]));
+  queryClient.setQueryData(inactiveQuery.queryKey, articleSnapshot([]));
+  const observer = new QueryObserver(queryClient, { ...activeQuery, refetchOnMount: false });
+  const unsubscribe = observer.subscribe(() => {});
+  t.after(() => unsubscribe());
+
+  const addPrefetch = queryClient.prefetchQuery(inactiveQuery);
+  assert.equal(pendingResponses.length, 1);
+
+  serverHighlights = [mark];
+  await updateArticleCache(queryClient, targetCode, "highlights", current => (current.actions ? { ...current, actions: { ...current.actions, highlights: [mark] } } : current));
+  assert.equal(pendingResponses[0]?.signal?.aborted, true);
+  pendingResponses[0]?.resolve();
+  await addPrefetch;
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(activeRefetches.length, 1);
+  assert.match(activeRefetches[0]!.url, new RegExp(`^/api/r/${targetCode}\\?_=\\d+$`));
+  assert.equal(activeRefetches[0]!.cache, "no-store");
+  assert.deepEqual(queryClient.getQueryData<ReaderArticle>(activeQuery.queryKey)?.actions?.highlights, [mark]);
+  assert.deepEqual(queryClient.getQueryData<ReaderArticle>(inactiveQuery.queryKey)?.actions?.highlights, [mark]);
+
+  const inactivePage2 = articleQuery(targetCode, false, "weekly", 2);
+  queryClient.setQueryData(inactivePage2.queryKey, articleSnapshot([mark]));
+  const deletePrefetch = queryClient.fetchQuery({
+    queryKey: inactivePage2.queryKey,
+    queryFn: ({ signal }) =>
+      new Promise<ReaderArticle>(resolve => {
+        pendingResponses.push({ resolve: () => resolve(articleSnapshot([mark])), signal });
+      }),
+  });
+  assert.equal(pendingResponses.length, 2);
+
+  serverHighlights = [];
+  await updateArticleCache(queryClient, targetCode, "highlights", current => (current.actions ? { ...current, actions: { ...current.actions, highlights: current.actions.highlights.filter(item => item.id !== mark.id) } } : current));
+  assert.equal(pendingResponses[1]?.signal?.aborted, true);
+  pendingResponses[1]?.resolve();
+  await deletePrefetch.catch(() => {});
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(activeRefetches.length, 2);
+  assert.deepEqual(queryClient.getQueryData<ReaderArticle>(activeQuery.queryKey)?.actions?.highlights, []);
+  assert.deepEqual(queryClient.getQueryData<ReaderArticle>(inactiveQuery.queryKey)?.actions?.highlights, []);
+  assert.deepEqual(queryClient.getQueryData<ReaderArticle>(inactivePage2.queryKey)?.actions?.highlights, []);
+});
+
+test("reconcileArticleOnError marks article for revalidation on ambiguous errors and skips 4xx rejections", async t => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ input: string; cache?: RequestCache }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ input: String(input), cache: init?.cache });
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const rejectedCode = shareCode(81);
+  reconcileArticleOnError(queryClient, rejectedCode, { type: "highlight", data: {} }, new ReaderError("请输入 6 位密码。", 401, true));
+  const rejectedQuery = articleQuery(rejectedCode, false, "all", 1);
+  await rejectedQuery.queryFn!({ client: undefined as never, queryKey: rejectedQuery.queryKey, signal: new AbortController().signal, meta: undefined });
+  assert.equal(calls[0]?.input, `/api/r/${rejectedCode}`);
+  assert.equal(calls[0]?.cache, undefined);
+
+  const networkCode = shareCode(82);
+  reconcileArticleOnError(queryClient, networkCode, { type: "delete", data: {} }, new ReaderError("操作失败，请稍后重试。", 0));
+  const networkQuery = articleQuery(networkCode, false, "all", 1);
+  await networkQuery.queryFn!({ client: undefined as never, queryKey: networkQuery.queryKey, signal: new AbortController().signal, meta: undefined });
+  assert.match(calls[1]?.input ?? "", new RegExp(`^/api/r/${networkCode}\\?_=\\d+$`));
+  assert.equal(calls[1]?.cache, "no-store");
 });

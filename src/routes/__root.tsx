@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { createRootRoute, HeadContent, Outlet, Scripts, useLocation } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 import { readSessionQuery } from "../reader/queries.ts";
@@ -15,6 +15,19 @@ export const Route = createRootRoute({
   }),
   component: ReaderApp,
   shellComponent: ReaderDocument,
+  errorComponent: ({ reset }) => (
+    <main>
+      <p role="alert">页面出错了，请重试。</p>
+      <p>
+        <button type="button" className="other-link" onClick={reset}>
+          重试
+        </button>
+      </p>
+      <p>
+        <a href="/read">返回列表</a>
+      </p>
+    </main>
+  ),
   notFoundComponent: () => (
     <main>
       <p>未找到页面。</p>
@@ -38,39 +51,22 @@ function ReaderApp() {
 }
 
 function useReadSession(active: boolean) {
-  const queryClient = useQueryClient();
   const session = useQuery({ ...readSessionQuery(), enabled: active });
-  const setAuthenticated = (authenticated: boolean) => queryClient.setQueryData(readSessionQuery().queryKey, authenticated);
-  return [session.isSuccess ? session.data : null, setAuthenticated] as const;
+  return session.isSuccess ? session.data : null;
 }
 
 function ReadBar() {
   const pathname = useLocation({ select: location => location.pathname });
   const search = useLocation({ select: location => location.searchStr });
   const active = /^\/read\/?$/.test(pathname);
-  const [authenticated, setAuthenticated] = useReadSession(active);
+  const authenticated = useReadSession(active);
   if (!active) return null;
   const next = pathname + search;
   return (
     <header className="read-bar">
       <div className="read-bar-side" />
       <p className="read-bar-title">Read</p>
-      <div className="read-bar-side">
-        {authenticated === true ? (
-          <button
-            type="button"
-            onClick={() => {
-              void fetch("/api/session", { method: "POST", credentials: "same-origin", cache: "no-store" }).then(response => {
-                if (response.ok) setAuthenticated(false);
-              });
-            }}
-          >
-            登出
-          </button>
-        ) : authenticated === false ? (
-          <a href={`/auth?next=${encodeURIComponent(next)}`}>登录</a>
-        ) : null}
-      </div>
+      <div className="read-bar-side">{authenticated === false ? <a href={`/auth?next=${encodeURIComponent(next)}`}>登录</a> : null}</div>
     </header>
   );
 }
