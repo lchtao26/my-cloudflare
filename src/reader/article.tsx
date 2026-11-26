@@ -94,12 +94,16 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
   const pathname = useLocation({ select: location => location.pathname });
   const searchStr = useLocation({ select: location => location.searchStr });
   const hash = useLocation({ select: location => location.hash });
-  const { progress, syncError, remoteProgress, syncToRemote, dismissRemote, gutter, mainRef } = useReaderScroll(actions ? item.code : undefined, true, Boolean(hash), signedIn);
+  const [chrome, setChrome] = useState<ReadingChrome>({ open: false });
+  const { progress, syncError, remoteProgress, syncToRemote, dismissRemote, gutter, mainRef } = useReaderScroll(actions ? item.code : undefined, true, Boolean(hash), signedIn, () => {
+    if (!chrome.open) return false;
+    setChrome(closeChrome());
+    return true;
+  });
   const highlights = actions?.highlights ?? [];
   const anchoredMark = highlights.find(mark => hash === `hl-${mark.id}`);
   const hasOriginal = data.original.length > 0;
   const [showOriginal, setShowOriginal] = useState(anchoredMark?.field === "original" && hasOriginal);
-  const [chrome, setChrome] = useState<ReadingChrome>({ open: false });
   const [pinPrompt, setPinPrompt] = useState<ReaderAction | null>(null);
   const [resultPanel, setResultPanel] = useState<ReaderAction | null>(null);
   const [failure, setFailure] = useState<{ message: string; retry?: ReaderAction } | null>(null);

@@ -4,7 +4,7 @@ export function shouldOfferRemoteSync(current: number, remote: number | null, ma
   return remote !== null && remote - current >= 0.02 && (remote - current) * maxScrollPx >= 40;
 }
 
-export function useReaderScroll(code?: string, enabled = true, hasAnchor = false, authorized = false) {
+export function useReaderScroll(code?: string, enabled = true, hasAnchor = false, authorized = false, onGutterTap?: () => boolean) {
   const main = useRef<HTMLElement | null>(null);
   const [progress, setProgress] = useState(0);
   const [syncError, setSyncError] = useState(false);
@@ -264,6 +264,7 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
         if (!start || Math.abs(start.x - event.clientX) > 15 || Math.abs(start.y - event.clientY) > 15 || performance.now() - start.time > 700 || Math.abs(scrollOffset() - start.scroll) > 5) return;
         const direction = gutterDirection(event);
         if (!direction) return;
+        if (onGutterTap?.()) return;
         const column = main.current;
         const step = direction * Math.max(80, column?.clientHeight ?? window.innerHeight);
         if (column?.classList.contains("reader-scroll")) column.scrollBy(0, step);
