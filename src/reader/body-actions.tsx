@@ -1,12 +1,11 @@
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type TouchEvent } from "react";
 import type { ParagraphSelection } from "./body.tsx";
-import { ReaderDialog } from "./dialog.tsx";
 import { tokenRanges, tokenize, type TokenRange } from "./tokenize.ts";
 
 const HOLD_MS = 500;
 const RELEASE_GUARD_MS = 400;
 
-export function BodyActionSheet({ selected, preview, showOriginalButton, pending, dismiss, act }: { selected: ParagraphSelection; preview: string; showOriginalButton: boolean; pending: boolean; dismiss: () => void; act: (type: "highlight" | "delete" | "explain" | "original", ranges?: TokenRange[]) => void }) {
+export function ParagraphPanel({ selected, preview, showOriginalButton, pending, act }: { selected: ParagraphSelection; preview: string; showOriginalButton: boolean; pending: boolean; act: (type: "highlight" | "delete" | "explain" | "original", ranges?: TokenRange[]) => void }) {
   const [tokenMode, setTokenMode] = useState(false);
   const [chosen, setChosen] = useState<Set<number>>(() => new Set());
   const releaseGuard = useRef(0);
@@ -84,7 +83,7 @@ export function BodyActionSheet({ selected, preview, showOriginalButton, pending
   let tokenIndex = 0;
   const empty = chosen.size === 0;
   return (
-    <ReaderDialog id="body-actions" label="正文操作" mode={marking ? "mark" : tokenMode ? "token" : "body"} dismiss={dismiss}>
+    <div id="body-actions" data-mode={marking ? "mark" : tokenMode ? "token" : "body"}>
       <span ref={releaseOnUnmount} hidden />
       <div id="body-preview-scroll" onScroll={() => moved(press.current?.x ?? 0, press.current?.y ?? 0)}>
         <p
@@ -154,13 +153,29 @@ export function BodyActionSheet({ selected, preview, showOriginalButton, pending
             : preview}
         </p>
       </div>
-      <div id="body-actions-buttons">
+      <div id="body-actions-buttons" className="reading-actions-row" role="toolbar" aria-label="段落">
         {marking ? (
           <>
-            <button id="body-explain" type="button" disabled={pending} onClick={() => act("explain")}>
+            <button
+              id="body-explain"
+              type="button"
+              aria-disabled={pending || undefined}
+              onClick={() => {
+                if (pending) return;
+                act("explain");
+              }}
+            >
               解释
             </button>
-            <button id="body-unhighlight" type="button" disabled={pending} onClick={() => act("delete")}>
+            <button
+              id="body-unhighlight"
+              type="button"
+              aria-disabled={pending || undefined}
+              onClick={() => {
+                if (pending) return;
+                act("delete");
+              }}
+            >
               取消划线
             </button>
           </>
@@ -176,29 +191,69 @@ export function BodyActionSheet({ selected, preview, showOriginalButton, pending
             >
               返回
             </button>
-            <button id="body-explain" type="button" disabled={pending || empty} onClick={() => act("explain", tokenRanges(selected.paragraph.quote, tokens, chosen))}>
+            <button
+              id="body-explain"
+              type="button"
+              aria-disabled={pending || empty || undefined}
+              onClick={() => {
+                if (pending || empty) return;
+                act("explain", tokenRanges(selected.paragraph.quote, tokens, chosen));
+              }}
+            >
               解释
             </button>
-            <button id="body-highlight" type="button" disabled={pending || empty} onClick={() => act("highlight", tokenRanges(selected.paragraph.quote, tokens, chosen))}>
+            <button
+              id="body-highlight"
+              type="button"
+              aria-disabled={pending || empty || undefined}
+              onClick={() => {
+                if (pending || empty) return;
+                act("highlight", tokenRanges(selected.paragraph.quote, tokens, chosen));
+              }}
+            >
               划线
             </button>
           </>
         ) : (
           <>
             {showOriginalButton && (
-              <button id="body-toggle" type="button" disabled={pending} onClick={() => act("original")}>
+              <button
+                id="body-toggle"
+                type="button"
+                aria-disabled={pending || undefined}
+                onClick={() => {
+                  if (pending) return;
+                  act("original");
+                }}
+              >
                 显示原文
               </button>
             )}
-            <button id="body-explain" type="button" disabled={pending} onClick={() => act("explain")}>
+            <button
+              id="body-explain"
+              type="button"
+              aria-disabled={pending || undefined}
+              onClick={() => {
+                if (pending) return;
+                act("explain");
+              }}
+            >
               解释
             </button>
-            <button id="body-highlight" type="button" disabled={pending} onClick={() => act("highlight")}>
+            <button
+              id="body-highlight"
+              type="button"
+              aria-disabled={pending || undefined}
+              onClick={() => {
+                if (pending) return;
+                act("highlight");
+              }}
+            >
               划线
             </button>
           </>
         )}
       </div>
-    </ReaderDialog>
+    </div>
   );
 }

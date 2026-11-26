@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 
-export function ReaderDialog({ id, label, mode, dismiss, children }: { id: string; label: string; mode?: "body" | "mark" | "token"; dismiss: () => void; children: ReactNode }) {
+export function ReaderDialog({ id, label, dismiss, children }: { id: string; label: string; dismiss: () => void; children: ReactNode }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const pressedOutside = useRef(false);
   useLayoutEffect(() => {
@@ -19,7 +19,6 @@ export function ReaderDialog({ id, label, mode, dismiss, children }: { id: strin
       ref={dialog}
       aria-label={label}
       closedby="any"
-      data-mode={mode}
       onClose={dismiss}
       onPointerDown={event => {
         pressedOutside.current = !("closedBy" in event.currentTarget) && outside(event.currentTarget, event.clientX, event.clientY);

@@ -25,8 +25,14 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
 
       const column = element;
       const key = code ? `eink-progress:${code}` : null;
-      const maxScroll = () => Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-      const ratio = () => (maxScroll() > 0 ? Math.min(1, Math.max(0, window.scrollY / maxScroll())) : 1);
+      const nested = column.classList.contains("reader-scroll");
+      const maxScroll = () => (nested ? Math.max(0, column.scrollHeight - column.clientHeight) : Math.max(0, document.documentElement.scrollHeight - window.innerHeight));
+      const scrollY = () => (nested ? column.scrollTop : window.scrollY);
+      const scrollToY = (y: number) => {
+        if (nested) column.scrollTo(0, y);
+        else window.scrollTo(0, y);
+      };
+      const ratio = () => (maxScroll() > 0 ? Math.min(1, Math.max(0, scrollY() / maxScroll())) : 1);
       let disposed = false,
         ready = false,
         loading = false,
@@ -140,19 +146,19 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
         const local = readLocal();
         if (local === null || maxScroll() <= 0) return;
         const y = local * maxScroll();
-        if (Math.abs(window.scrollY - y) < 2) {
+        if (Math.abs(scrollY() - y) < 2) {
           restoredY = null;
           return;
         }
         restoredY = y;
-        window.scrollTo(0, y);
+        scrollToY(y);
       }
 
       function update() {
         setProgress(ratio());
       }
       function onScroll() {
-        if (restoredY !== null && Math.abs(window.scrollY - restoredY) < 2) {
+        if (restoredY !== null && Math.abs(scrollY() - restoredY) < 2) {
           restoredY = null;
           update();
           return;
@@ -186,7 +192,7 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
         const y = offered * maxScroll();
         restoredY = y;
         moved = true;
-        window.scrollTo(0, y);
+        scrollToY(y);
         writeLocal(ratio());
         setProgress(ratio());
         offered = null;
@@ -198,7 +204,8 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
         setRemoteProgress(null);
       };
       const resize = new ResizeObserver(onResize);
-      window.addEventListener("scroll", onScroll, { passive: true });
+      const scrollTarget: HTMLElement | Window = nested ? column : window;
+      scrollTarget.addEventListener("scroll", onScroll, { passive: true });
       window.addEventListener("resize", onResize);
       const onPageHide = () => flush();
       window.addEventListener("pagehide", onPageHide);
@@ -216,7 +223,7 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
         dismissRemoteRef.current = () => {};
         if (main.current === column) main.current = null;
         resize.disconnect();
-        window.removeEventListener("scroll", onScroll);
+        scrollTarget.removeEventListener("scroll", onScroll);
         window.removeEventListener("resize", onResize);
         window.removeEventListener("pagehide", onPageHide);
         document.removeEventListener("visibilitychange", onVisibility);
@@ -227,6 +234,10 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
   );
 
   const tap = useRef<{ x: number; y: number; time: number; scroll: number } | null>(null);
+  function scrollOffset() {
+    const column = main.current;
+    return column?.classList.contains("reader-scroll") ? column.scrollTop : window.scrollY;
+  }
   function gutterDirection(event: ReactPointerEvent) {
     if (event.target !== event.currentTarget || event.pointerType === "mouse" || !main.current) return 0;
     if (document.querySelector("dialog[open]") || window.getSelection()?.toString()) return 0;
@@ -242,7 +253,7 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
     dismissRemote: () => dismissRemoteRef.current(),
     gutter: {
       onPointerDown(event: ReactPointerEvent) {
-        tap.current = event.isPrimary && gutterDirection(event) ? { x: event.clientX, y: event.clientY, time: performance.now(), scroll: window.scrollY } : null;
+        tap.current = event.isPrimary && gutterDirection(event) ? { x: event.clientX, y: event.clientY, time: performance.now(), scroll: scrollOffset() } : null;
       },
       onPointerCancel() {
         tap.current = null;
@@ -250,9 +261,13 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
       onPointerUp(event: ReactPointerEvent) {
         const start = tap.current;
         tap.current = null;
-        if (!start || Math.abs(start.x - event.clientX) > 15 || Math.abs(start.y - event.clientY) > 15 || performance.now() - start.time > 700 || Math.abs(window.scrollY - start.scroll) > 5) return;
+        if (!start || Math.abs(start.x - event.clientX) > 15 || Math.abs(start.y - event.clientY) > 15 || performance.now() - start.time > 700 || Math.abs(scrollOffset() - start.scroll) > 5) return;
         const direction = gutterDirection(event);
-        if (direction) window.scrollBy(0, direction * Math.max(80, window.innerHeight));
+        if (!direction) return;
+        const column = main.current;
+        const step = direction * Math.max(80, column?.clientHeight ?? window.innerHeight);
+        if (column?.classList.contains("reader-scroll")) column.scrollBy(0, step);
+        else window.scrollBy(0, step);
       },
     },
   };

@@ -5,7 +5,8 @@ import { renderMarkdown } from "./markdown-elements.ts";
 import { canonicalText } from "./highlight-anchor.ts";
 import { listNeighborCodes, type ReadCategory, type ReaderArticle, type ReaderList, type ReaderNeighbors } from "./data.ts";
 import { ReadingBody, type ParagraphSelection } from "./body.tsx";
-import { BodyActionSheet } from "./body-actions.tsx";
+import { ParagraphPanel } from "./body-actions.tsx";
+import { clickParagraphChrome, clickSurfaceChrome, closeChrome, selectChromeTab, type ReadingChrome, type ReadingTab } from "./chrome.ts";
 import { quoteBetween, selectionPreview } from "./quote-slice.ts";
 import { ReaderDialog } from "./dialog.tsx";
 import type { TokenRange } from "./tokenize.ts";
@@ -76,7 +77,7 @@ function useArticleNeighbors(code: string, category: ReadCategory, page: number,
       entries => {
         if (entries.some(entry => entry.isIntersecting)) setNear(true);
       },
-      { rootMargin: "200px 0px" },
+      { root: nav.closest(".reader-scroll"), rootMargin: "200px 0px" },
     );
     observer.observe(nav);
     return () => observer.disconnect();
@@ -98,13 +99,12 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
   const anchoredMark = highlights.find(mark => hash === `hl-${mark.id}`);
   const hasOriginal = data.original.length > 0;
   const [showOriginal, setShowOriginal] = useState(anchoredMark?.field === "original" && hasOriginal);
-  const [selected, setSelected] = useState<ParagraphSelection | null>(null);
+  const [chrome, setChrome] = useState<ReadingChrome>({ open: false });
   const [pinPrompt, setPinPrompt] = useState<ReaderAction | null>(null);
   const [resultPanel, setResultPanel] = useState<ReaderAction | null>(null);
   const [failure, setFailure] = useState<{ message: string; retry?: ReaderAction } | null>(null);
   const [addedLater, setAddedLater] = useState(false);
-  const [readingActions, setReadingActions] = useState(false);
-  const [readingTab, setReadingTab] = useState<"article" | "share">("article");
+  const readingTab = chrome.open ? chrome.tab : null;
   const activePress = useRef<{ x: number; y: number; scroll: number } | null>(null);
   const bindReadingPanel = useCallback(
     (panel: HTMLDivElement | null) => {
@@ -219,6 +219,7 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
   }
 
   function paragraphAction(type: "highlight" | "delete" | "explain" | "original", ranges?: TokenRange[]) {
+    const selected = chrome.open ? chrome.selection : null;
     if (!selected) return;
     if (ranges) {
       const length = ranges.reduce((total, range) => total + range.end - range.start, 0);
@@ -226,7 +227,7 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
         if (length > 1500) setFailure({ message: "最多选择 1500 字。" });
         return;
       }
-      setSelected(null);
+      setChrome(closeChrome());
       const field = selected.field;
       if (type === "highlight") run({ type, data: { field, ranges: JSON.stringify(ranges) } });
       else if (type === "explain")
@@ -237,7 +238,7 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
         });
       return;
     }
-    setSelected(null);
+    setChrome(closeChrome());
     if (type === "delete") {
       if (selected.highlightId) run({ type, data: { action: "delete", id: selected.highlightId } });
       return;
@@ -279,164 +280,214 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
     setResultPanel(null);
   }
 
-  const readingActionsRef = useCallback((bar: HTMLDivElement | null) => {
-    if (!bar) return;
-    const tabs = () => [...bar.querySelectorAll<HTMLButtonElement>(".reading-tabs button")];
-    const rowItems = (row: Element) => [...row.querySelectorAll<HTMLElement>("button, a")];
-    bar.querySelector(".reading-tabs")?.setAttribute("focusgroup", "tablist nomemory");
-    for (const row of bar.querySelectorAll(".reading-actions-row")) row.setAttribute("focusgroup", "toolbar wrap");
-    for (const tab of tabs()) tab.toggleAttribute("focusgroupstart", tab.getAttribute("aria-selected") === "true");
-    const onBeforeMatch = (event: Event) => {
-      const panel = event.target;
-      if (!(panel instanceof HTMLElement)) return;
-      const id = panel.getAttribute("aria-labelledby");
-      if (id === "reading-tab-article" || id === "reading-tab-share") setReadingTab(id.slice("reading-tab-".length) as "article" | "share");
-    };
-    bar.addEventListener("beforematch", onBeforeMatch);
-    const onDocClick = (event: globalThis.MouseEvent) => {
-      if (!(event.target instanceof Node) || bar.contains(event.target)) return;
-      setReadingActions(false);
-    };
-    const rememberPress = (x: number, y: number, target: EventTarget | null) => {
-      if (target instanceof Node && bar.contains(target)) {
-        activePress.current = null;
-        return;
-      }
-      activePress.current = { x, y, scroll: window.scrollY };
-    };
-    const dismissScrolledPress = (x: number, y: number) => {
-      const press = activePress.current;
-      if (!press) return;
-      if (Math.abs(x - press.x) <= 10 && Math.abs(y - press.y) <= 10 && Math.abs(window.scrollY - press.scroll) <= 5) return;
-      activePress.current = null;
-      setReadingActions(false);
-    };
-    const onPointerDown = (event: globalThis.PointerEvent) => {
-      if (!event.isPrimary || event.button !== 0) return;
-      rememberPress(event.clientX, event.clientY, event.target);
-    };
-    const onPointerMove = (event: globalThis.PointerEvent) => {
-      if (!event.isPrimary) return;
-      dismissScrolledPress(event.clientX, event.clientY);
-    };
-    const onTouchStart = (event: globalThis.TouchEvent) => {
-      if (window.PointerEvent) return;
-      const touch = event.touches[0];
-      if (event.touches.length === 1 && touch) rememberPress(touch.clientX, touch.clientY, event.target);
-    };
-    const onTouchMove = (event: globalThis.TouchEvent) => {
-      if (window.PointerEvent) return;
-      const touch = event.touches[0];
-      if (touch) dismissScrolledPress(touch.clientX, touch.clientY);
-    };
-    const onScroll = () => {
-      const press = activePress.current;
-      if (press) dismissScrolledPress(press.x, press.y);
-    };
-    document.addEventListener("click", onDocClick);
-    document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("pointermove", onPointerMove);
-    document.addEventListener("touchstart", onTouchStart, true);
-    document.addEventListener("touchmove", onTouchMove);
-    window.addEventListener("scroll", onScroll);
-    let removeKeys = () => {};
-    if (!("focusGroup" in HTMLElement.prototype)) {
+  const readingActionsRef = useCallback((top: HTMLDivElement | null) => {
+    if (!top) return;
+    const surface = top.parentElement;
+    if (!surface) return;
+    // Footer mounts as a sibling after this header; wait a frame so tabs exist.
+    let teardown = () => {};
+    const frame = requestAnimationFrame(() => {
+      const scroller = () => surface.querySelector<HTMLElement>(":scope > .reader-scroll");
+      const scrollY = () => scroller()?.scrollTop ?? window.scrollY;
+      const actionBar = () => surface.querySelector(":scope > .reading-actions");
+      const chromeContains = (node: Node) => top.contains(node) || Boolean(actionBar()?.contains(node));
+      const tabs = () => [...surface.querySelectorAll<HTMLButtonElement>(".reading-tabs button")];
+      const rows = () => [...surface.querySelectorAll(".reading-top.reading-actions-row, .reading-actions .reading-actions-row")];
+      const rowItems = (row: Element) => [...row.querySelectorAll<HTMLElement>("button, a")];
+      const nativeFocusGroup = "focusGroup" in HTMLElement.prototype;
       const mark = (controls: HTMLElement[], selected: HTMLElement | undefined) => {
         controls.forEach(control => {
           control.tabIndex = control === selected ? 0 : -1;
         });
       };
-      mark(
-        tabs(),
-        tabs().find(tab => tab.getAttribute("aria-selected") === "true"),
-      );
-      for (const row of bar.querySelectorAll(".reading-actions-row")) {
-        if (row.closest("[hidden]")) continue;
-        const items = rowItems(row);
-        mark(items, items[0]);
-      }
-      const onFocusIn = (event: FocusEvent) => {
+      const syncControls = () => {
+        surface.querySelector(".reading-tabs")?.setAttribute("focusgroup", "tablist nomemory");
         const tabList = tabs();
-        if (event.target instanceof HTMLButtonElement && tabList.includes(event.target)) {
-          mark(tabList, event.target);
+        for (const tab of tabList) tab.toggleAttribute("focusgroupstart", tab.getAttribute("aria-selected") === "true");
+        if (!nativeFocusGroup)
+          mark(
+            tabList,
+            tabList.find(tab => tab.getAttribute("aria-selected") === "true"),
+          );
+        for (const row of rows()) {
+          row.setAttribute("focusgroup", "toolbar wrap");
+          if (nativeFocusGroup || row.closest("[hidden]")) continue;
+          const controls = rowItems(row);
+          const active = controls.find(control => control === document.activeElement) ?? controls.find(control => control.tabIndex === 0) ?? controls[0];
+          mark(controls, active);
+        }
+      };
+      syncControls();
+      const controlsObserver = new MutationObserver(syncControls);
+      controlsObserver.observe(surface, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "aria-selected"] });
+      const onBeforeMatch = (event: Event) => {
+        const panel = event.target;
+        if (!(panel instanceof HTMLElement)) return;
+        const id = panel.getAttribute("aria-labelledby");
+        if (id === "reading-tab-article" || id === "reading-tab-share") setChrome(current => selectChromeTab(current, id.slice("reading-tab-".length) as ReadingTab));
+      };
+      surface.addEventListener("beforematch", onBeforeMatch);
+      let pressedInChrome = false;
+      const onDocClick = (event: globalThis.MouseEvent) => {
+        if (pressedInChrome) {
+          pressedInChrome = false;
           return;
         }
-        const row = event.target instanceof Element ? event.target.closest(".reading-actions-row") : null;
-        if (!row || row.closest("[hidden]")) return;
-        const controls = rowItems(row);
-        if (!(event.target instanceof HTMLElement) || !controls.includes(event.target)) return;
-        mark(controls, event.target);
+        const path = event.composedPath();
+        const bar = actionBar();
+        if (!(event.target instanceof Node) || path.includes(top) || (bar && path.includes(bar)) || chromeContains(event.target)) return;
+        setChrome(closeChrome());
       };
-      const onKeyDown = (event: KeyboardEvent) => {
-        const move = (controls: HTMLElement[]) => {
-          const index = controls.indexOf(document.activeElement as HTMLElement);
-          if (index < 0) return false;
-          const rtl = getComputedStyle(bar).direction === "rtl";
-          const next = event.key === "Home" ? 0 : event.key === "End" ? controls.length - 1 : event.key === "ArrowRight" ? (index + (rtl ? -1 : 1) + controls.length) % controls.length : event.key === "ArrowLeft" ? (index + (rtl ? 1 : -1) + controls.length) % controls.length : -1;
-          if (next < 0) return false;
-          event.preventDefault();
-          controls[next]?.focus();
-          return true;
+      const rememberPress = (x: number, y: number, target: EventTarget | null) => {
+        pressedInChrome = target instanceof Node && chromeContains(target);
+        if (pressedInChrome) {
+          activePress.current = null;
+          return;
+        }
+        activePress.current = { x, y, scroll: scrollY() };
+      };
+      const dismissScrolledPress = (x: number, y: number) => {
+        const press = activePress.current;
+        if (!press) return;
+        if (Math.abs(x - press.x) <= 10 && Math.abs(y - press.y) <= 10 && Math.abs(scrollY() - press.scroll) <= 5) return;
+        activePress.current = null;
+        setChrome(closeChrome());
+      };
+      const onPointerDown = (event: globalThis.PointerEvent) => {
+        if (!event.isPrimary || event.button !== 0) return;
+        rememberPress(event.clientX, event.clientY, event.target);
+      };
+      const onPointerMove = (event: globalThis.PointerEvent) => {
+        if (!event.isPrimary) return;
+        dismissScrolledPress(event.clientX, event.clientY);
+      };
+      const onTouchStart = (event: globalThis.TouchEvent) => {
+        if (window.PointerEvent) return;
+        const touch = event.touches[0];
+        if (event.touches.length === 1 && touch) rememberPress(touch.clientX, touch.clientY, event.target);
+      };
+      const onTouchMove = (event: globalThis.TouchEvent) => {
+        if (window.PointerEvent) return;
+        const touch = event.touches[0];
+        if (touch) dismissScrolledPress(touch.clientX, touch.clientY);
+      };
+      const onScroll = () => {
+        const press = activePress.current;
+        if (press) dismissScrolledPress(press.x, press.y);
+      };
+      document.addEventListener("click", onDocClick);
+      document.addEventListener("pointerdown", onPointerDown, true);
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("touchstart", onTouchStart, true);
+      document.addEventListener("touchmove", onTouchMove);
+      const scrollRoot = scroller();
+      scrollRoot?.addEventListener("scroll", onScroll, { passive: true });
+      let removeKeys = () => {};
+      if (!nativeFocusGroup) {
+        const onFocusIn = (event: FocusEvent) => {
+          const tabList = tabs();
+          if (event.target instanceof HTMLButtonElement && tabList.includes(event.target)) {
+            mark(tabList, event.target);
+            return;
+          }
+          const row = event.target instanceof Element ? event.target.closest(".reading-actions-row") : null;
+          if (!row || row.closest("[hidden]")) return;
+          const controls = rowItems(row);
+          if (!(event.target instanceof HTMLElement) || !controls.includes(event.target)) return;
+          mark(controls, event.target);
         };
-        if (move(tabs())) return;
-        const row = document.activeElement instanceof Element ? document.activeElement.closest(".reading-actions-row") : null;
-        if (!row || row.closest("[hidden]")) return;
-        move(rowItems(row));
+        const onFocusOut = (event: FocusEvent) => {
+          const tabList = tabs();
+          if (!(event.target instanceof HTMLButtonElement) || !tabList.includes(event.target)) return;
+          if (event.relatedTarget instanceof HTMLButtonElement && tabList.includes(event.relatedTarget)) return;
+          mark(
+            tabList,
+            tabList.find(tab => tab.getAttribute("aria-selected") === "true"),
+          );
+        };
+        const onKeyDown = (event: KeyboardEvent) => {
+          const move = (controls: HTMLElement[]) => {
+            const index = controls.indexOf(document.activeElement as HTMLElement);
+            if (index < 0) return false;
+            const rtl = getComputedStyle(surface).direction === "rtl";
+            const next = event.key === "Home" ? 0 : event.key === "End" ? controls.length - 1 : event.key === "ArrowRight" ? (index + (rtl ? -1 : 1) + controls.length) % controls.length : event.key === "ArrowLeft" ? (index + (rtl ? 1 : -1) + controls.length) % controls.length : -1;
+            if (next < 0) return false;
+            event.preventDefault();
+            controls[next]?.focus();
+            return true;
+          };
+          if (move(tabs())) return;
+          const row = document.activeElement instanceof Element ? document.activeElement.closest(".reading-actions-row") : null;
+          if (!row || row.closest("[hidden]")) return;
+          move(rowItems(row));
+        };
+        surface.addEventListener("focusin", onFocusIn);
+        surface.addEventListener("focusout", onFocusOut);
+        surface.addEventListener("keydown", onKeyDown);
+        removeKeys = () => {
+          surface.removeEventListener("focusin", onFocusIn);
+          surface.removeEventListener("focusout", onFocusOut);
+          surface.removeEventListener("keydown", onKeyDown);
+        };
+      }
+      teardown = () => {
+        document.removeEventListener("click", onDocClick);
+        document.removeEventListener("pointerdown", onPointerDown, true);
+        document.removeEventListener("pointermove", onPointerMove);
+        document.removeEventListener("touchstart", onTouchStart, true);
+        document.removeEventListener("touchmove", onTouchMove);
+        scrollRoot?.removeEventListener("scroll", onScroll);
+        surface.removeEventListener("beforematch", onBeforeMatch);
+        controlsObserver.disconnect();
+        removeKeys();
       };
-      bar.addEventListener("focusin", onFocusIn);
-      bar.addEventListener("keydown", onKeyDown);
-      removeKeys = () => {
-        bar.removeEventListener("focusin", onFocusIn);
-        bar.removeEventListener("keydown", onKeyDown);
-      };
-    }
+    });
     return () => {
-      document.removeEventListener("click", onDocClick);
-      document.removeEventListener("pointerdown", onPointerDown, true);
-      document.removeEventListener("pointermove", onPointerMove);
-      document.removeEventListener("touchstart", onTouchStart, true);
-      document.removeEventListener("touchmove", onTouchMove);
-      window.removeEventListener("scroll", onScroll);
-      bar.removeEventListener("beforematch", onBeforeMatch);
-      removeKeys();
+      cancelAnimationFrame(frame);
+      teardown();
     };
   }, []);
 
-  function chooseReadingTab(tab: "article" | "share") {
-    setReadingTab(tab);
-    for (const button of document.querySelectorAll<HTMLButtonElement>(".reading-tabs button")) button.toggleAttribute("focusgroupstart", button.id === `reading-tab-${tab}`);
-    if ("focusGroup" in HTMLElement.prototype) return;
-    requestAnimationFrame(() => {
-      const panel = document.getElementById(`reading-panel-${tab}`);
-      if (!panel) return;
-      const controls = [...panel.querySelectorAll<HTMLElement>("button, a")];
-      controls.forEach((control, index) => {
-        control.tabIndex = index ? -1 : 0;
-      });
-    });
+  function chooseReadingTab(tab: ReadingTab) {
+    setChrome(current => selectChromeTab(current, tab));
   }
 
   function selectParagraph(selection: ParagraphSelection) {
-    setReadingActions(false);
-    setSelected(selection);
+    setChrome(current => clickParagraphChrome(current, selection));
   }
 
   function showReadingActions(event: MouseEvent<HTMLDivElement>) {
     if (event.defaultPrevented) return;
     const target = event.target;
     if (!(target instanceof Element) || target.closest("a, button") || window.getSelection()?.toString()) return;
-    setReadingActions(true);
+    event.stopPropagation();
+    setChrome(clickSurfaceChrome);
   }
 
   const modelError = mutation.error && !isAbortError(mutation.error) ? mutation.error.message || "操作失败，请稍后重试。" : undefined;
   const search = readerSearch(category, page);
   const originalTitle = data.originalTitle || item.title;
   const origTitleLang = data.originalTitle ? data.originalLang : item.titleLang;
-  const atPageBottom = progress > 0 && document.documentElement.scrollHeight - window.innerHeight - window.scrollY <= 2;
+  const atPageBottom = progress > 0 && progress >= 1 - Number.EPSILON;
+  function scrollReading(to: "top" | "bottom") {
+    const column = document.querySelector<HTMLElement>(".reader-scroll");
+    if (!column) return;
+    column.scrollTo(0, to === "top" ? 0 : column.scrollHeight);
+  }
   return (
     <div className="reader-surface" {...gutter}>
       <title>{item.title}</title>
-      <main ref={setMain}>
+      {actions && chrome.open && (
+        <div className="reading-top reading-actions-row" role="toolbar" aria-label="页面" ref={readingActionsRef}>
+          <Link to="/read" search={search}>
+            返回
+          </Link>
+          <button type="button" onClick={() => scrollReading(atPageBottom ? "top" : "bottom")}>
+            {atPageBottom ? "滑到顶部" : "滑到底部"}
+          </button>
+        </div>
+      )}
+      <main className="reader-scroll" ref={setMain}>
         {syncError && <p role="status">阅读进度暂未同步，请检查网络后继续阅读。</p>}
         <div onClick={actions ? showReadingActions : undefined}>
           <article>
@@ -532,57 +583,68 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
           )}
         </div>
       </main>
-      {actions && readingActions && (
-        <div ref={readingActionsRef}>
-          <div className="reading-top reading-actions-row" role="toolbar" aria-label="页面">
-            <Link to="/read" search={search}>
-              返回
-            </Link>
-            <button type="button" onClick={() => window.scrollTo(0, atPageBottom ? 0 : document.documentElement.scrollHeight)}>
-              {atPageBottom ? "滑到顶部" : "滑到底部"}
-            </button>
-          </div>
-          {signedIn ? (
-            <div className="reading-actions">
-              <div className="reading-tabs" role="tablist" aria-label="阅读操作">
-                {(
-                  [
+      {actions &&
+        chrome.open &&
+        (signedIn ? (
+          <div className="reading-actions">
+            <div className="reading-tabs" role="tablist" aria-label="阅读操作">
+              {(actions.highlightsEnabled
+                ? ([
+                    ["paragraph", "段落"],
                     ["article", "文章"],
                     ["share", "分享"],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button key={id} type="button" id={`reading-tab-${id}`} role="tab" aria-selected={readingTab === id} onFocus={() => chooseReadingTab(id)}>
-                    {label}
+                  ] as const)
+                : ([
+                    ["article", "文章"],
+                    ["share", "分享"],
+                  ] as const)
+              ).map(([id, label]) => (
+                <button key={id} type="button" id={`reading-tab-${id}`} role="tab" aria-selected={chrome.tab === id} onClick={() => chooseReadingTab(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="reading-panels">
+              {actions.highlightsEnabled && (
+                <div role="tabpanel" id="reading-panel-paragraph" aria-labelledby="reading-tab-paragraph" hidden={chrome.tab !== "paragraph"} tabIndex={!chrome.selection && chrome.tab === "paragraph" ? 0 : undefined}>
+                  {chrome.selection ? (
+                    <ParagraphPanel
+                      key={`${chrome.selection.field}:${chrome.selection.paragraph.start}:${chrome.selection.highlightId ?? ""}`}
+                      selected={chrome.selection}
+                      preview={selectionPreview(chrome.selection, highlights, chrome.selection.field === "original" ? data.original : chrome.selection.field === "terms" ? data.terms : data.body)}
+                      showOriginalButton={hasOriginal && chrome.selection.field === "translation"}
+                      pending={mutation.isPending}
+                      act={paragraphAction}
+                    />
+                  ) : (
+                    <p className="reading-paragraph-empty">单击正文段落后可在此操作。</p>
+                  )}
+                </div>
+              )}
+              <div role="tabpanel" id="reading-panel-article" aria-labelledby="reading-tab-article" hidden={readingTab !== "article"} ref={bindReadingPanel}>
+                <div className="reading-actions-row" role="toolbar" aria-label="文章">
+                  <button type="button" disabled={mutation.isPending || addedLater} onClick={() => run({ type: "add-later", data: {} })}>
+                    {addedLater ? "已加入待读" : "待读"}
                   </button>
-                ))}
-              </div>
-              <div className="reading-panels">
-                <div role="tabpanel" id="reading-panel-article" aria-labelledby="reading-tab-article" hidden={readingTab !== "article"} ref={bindReadingPanel}>
-                  <div className="reading-actions-row" role="toolbar" aria-label="文章">
-                    <button type="button" disabled={mutation.isPending || addedLater} onClick={() => run({ type: "add-later", data: {} })}>
-                      {addedLater ? "已加入待读" : "待读"}
-                    </button>
-                    <button type="button" disabled={mutation.isPending} onClick={() => run({ type: "favorite", data: { favorite: actions.favorite ? "0" : "1" } })}>
-                      {actions.favorite ? "取消收藏" : "收藏"}
-                    </button>
-                    <a href={actions.notionUrl}>管理</a>
-                  </div>
-                </div>
-                <div role="tabpanel" id="reading-panel-share" aria-labelledby="reading-tab-share" hidden={readingTab !== "share"} ref={bindReadingPanel}>
-                  <ShareLink code={item.code} />
+                  <button type="button" disabled={mutation.isPending} onClick={() => run({ type: "favorite", data: { favorite: actions.favorite ? "0" : "1" } })}>
+                    {actions.favorite ? "取消收藏" : "收藏"}
+                  </button>
+                  <a href={actions.notionUrl}>管理</a>
                 </div>
               </div>
-            </div>
-          ) : session.isSuccess ? (
-            <div className="reading-actions" role="region" aria-label="登录">
-              <div className="reading-actions-row">
-                <span>请登录</span>
-                <a href={`/auth?next=${encodeURIComponent(pathname + searchStr + hash)}`}>登录</a>
+              <div role="tabpanel" id="reading-panel-share" aria-labelledby="reading-tab-share" hidden={readingTab !== "share"} ref={bindReadingPanel}>
+                <ShareLink code={item.code} />
               </div>
             </div>
-          ) : null}
-        </div>
-      )}
+          </div>
+        ) : session.isSuccess ? (
+          <div className="reading-actions" role="region" aria-label="登录">
+            <div className="reading-actions-row">
+              <span>请登录</span>
+              <a href={`/auth?next=${encodeURIComponent(pathname + searchStr + hash)}`}>登录</a>
+            </div>
+          </div>
+        ) : null)}
       {remoteProgress !== null && (
         <div className="progress-sync" role="region" aria-label="阅读进度同步">
           <span>远端已读至 {Math.round(remoteProgress * 100)}%</span>
@@ -599,17 +661,6 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
       <div className="progress" aria-hidden="true">
         <span className="progress-bar" style={{ width: `${progress * 100}%` }} />
       </div>
-      {selected && signedIn && (
-        <BodyActionSheet
-          key={`${selected.field}:${selected.paragraph.start}:${selected.highlightId ?? ""}`}
-          selected={selected}
-          preview={selectionPreview(selected, highlights, selected.field === "original" ? data.original : selected.field === "terms" ? data.terms : data.body)}
-          showOriginalButton={hasOriginal && selected.field === "translation"}
-          pending={mutation.isPending}
-          dismiss={() => setSelected(null)}
-          act={paragraphAction}
-        />
-      )}
       {pinPrompt && (
         <ReaderDialog id="favorite-dialog" label="收藏验证" dismiss={() => setPinPrompt(null)}>
           <PinForm pending={mutation.isPending} error={mutation.isError && mutation.error instanceof ReaderError && mutation.error.requiresPin ? (mutation.error.message === "请输入 6 位密码。" ? "" : mutation.error.message) : undefined} submit={pin => run(pinPrompt, pin)} cancel={() => setPinPrompt(null)} />
