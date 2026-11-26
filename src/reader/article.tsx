@@ -622,14 +622,13 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
                 </div>
               )}
               <div role="tabpanel" id="reading-panel-article" aria-labelledby="reading-tab-article" hidden={readingTab !== "article"} ref={bindReadingPanel}>
-                <div className="reading-actions-row" role="toolbar" aria-label="文章">
+                <div className="reading-actions-row reading-article-actions" role="toolbar" aria-label="文章">
                   <button type="button" disabled={mutation.isPending || addedLater} onClick={() => run({ type: "add-later", data: {} })}>
                     {addedLater ? "已加入待读" : "待读"}
                   </button>
                   <button type="button" disabled={mutation.isPending} onClick={() => run({ type: "favorite", data: { favorite: actions.favorite ? "0" : "1" } })}>
                     {actions.favorite ? "取消收藏" : "收藏"}
                   </button>
-                  <a href={actions.notionUrl}>管理</a>
                 </div>
               </div>
               <div role="tabpanel" id="reading-panel-share" aria-labelledby="reading-tab-share" hidden={readingTab !== "share"} ref={bindReadingPanel}>
