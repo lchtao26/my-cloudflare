@@ -105,7 +105,9 @@ export const EINK_STYLE = [
   "#favorite-dialog .favorite-close{min-height:2.25rem;min-width:3.25rem;margin:0.15rem 0 0.15rem auto;padding:0.2rem 0.5rem;border:1px solid #000;background:#fff;text-decoration:none}",
   "body:has(.reader-surface){padding:0}.reader-surface{display:flow-root;min-height:100vh;padding:1.25rem 1.625rem 2.5rem}.reader-surface:has(.read-list){padding-top:max(1.25rem,env(safe-area-inset-top,0px));padding-bottom:calc(8rem + env(safe-area-inset-bottom,0px));}",
   "html:has(.reader-scroll),body:has(.reader-scroll){height:100%;overflow:hidden;}.reader-surface:has(> .reader-scroll){display:flex;flex-direction:column;height:100%;height:100dvh;min-height:0;padding:0;overflow:hidden;}.reader-scroll{flex:1 1 auto;width:100%;min-height:0;overflow:auto;overscroll-behavior-y:contain;padding:1.25rem 1.625rem 2.5rem;scrollbar-width:none;-ms-overflow-style:none;}.reader-scroll::-webkit-scrollbar{display:none;width:0;height:0;}",
-  "@media (min-width:440px){.reader-surface{padding-right:1.25rem;padding-left:1.25rem;}.reader-surface:has(> .reader-scroll){padding-right:0;padding-left:0;}.reader-scroll{padding-right:1.25rem;padding-left:1.25rem;}}",
+  ".reader-scroll{max-width:calc(365px + 3.25rem);}",
+  "@media (min-width:440px){.reader-surface{padding-right:1.25rem;padding-left:1.25rem;}.reader-surface:has(> .reader-scroll){padding-right:0;padding-left:0;}.reader-scroll{padding-right:1.25rem;padding-left:1.25rem;max-width:calc(365px + 2.5rem);}}",
+  "@media (min-width:720px){.reader-scroll{max-width:calc(36rem + 2.5rem);}}",
   "html:has(.read-list){overscroll-behavior-y:contain}.pull-refresh{display:grid;place-items:center;overflow:hidden;font-size:0.85em;line-height:1.35}",
   // Dual expanding rings; black on the white page (source demo used white on dark).
   ".loading{position:fixed;inset:0;z-index:1;display:grid;place-items:center;margin:0;pointer-events:none;}",
