@@ -6,6 +6,8 @@ import { routeTree } from "./routeTree.gen";
 export function getRouter() {
   const router = createRouter({
     routeTree,
+    scrollRestoration: ({ location }) => /^\/read\/?$/.test(location.pathname),
+    getScrollRestorationKey: location => (/^\/read\/?$/.test(location.pathname) ? location.href : location.state.__TSR_key || location.href),
     defaultOnCatch: (error, info) => {
       Sentry.captureException(error, { contexts: { react: { componentStack: info.componentStack } } });
     },
@@ -25,6 +27,10 @@ export function getRouter() {
 }
 
 declare module "@tanstack/react-router" {
+  interface HistoryState {
+    readerListPage?: number;
+  }
+
   interface Register {
     router: ReturnType<typeof getRouter>;
   }

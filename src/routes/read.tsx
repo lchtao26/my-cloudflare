@@ -28,6 +28,8 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
     queryFn: ({ pageParam }) => queryClient.fetchQuery(listQuery(category, pageParam)),
     getNextPageParam: (lastPage, _pages, lastPageParam) => (lastPage.hasMore ? lastPageParam + 1 : undefined),
     staleTime: category === "highlights" || category === "favorites" ? 0 : 60_000,
+    // Keep loaded pages available for synchronous scroll restoration after reading.
+    gcTime: Infinity,
   });
   const pages = query.data?.pages;
   const lastPage = pages?.at(-1);
@@ -112,7 +114,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
           <ul>
             {data.items.map(item => (
               <li key={item.code} lang={item.titleLang}>
-                <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search} data-code={item.code}>
+                <Link className="item-link" to="/r/$code" params={{ code: item.code }} search={search} state={{ readerListPage: page }} data-code={item.code}>
                   {item.title}
                   {(item.source || item.author) && (
                     <p className="meta" lang="zh-CN">
@@ -136,7 +138,7 @@ function CategoryList({ category, page }: { category: ReturnType<typeof readCate
               return (
                 <li key={item.id}>
                   {article && item.located ? (
-                    <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={itemSearch} hash={`hl-${item.id}`} hashScrollIntoView={{ block: "center", behavior: "instant" }} data-code={article.code} data-page={query.data?.pageParams[itemPageIndex]}>
+                    <Link className="item-link" to="/r/$code" params={{ code: article.code }} search={itemSearch} state={{ readerListPage: page }} hash={`hl-${item.id}`} hashScrollIntoView={{ block: "center", behavior: "instant" }} data-code={article.code} data-page={query.data?.pageParams[itemPageIndex]}>
                       {item.quote}
                       {meta}
                     </Link>

@@ -15,6 +15,7 @@ import { articleQuery, listKey, listQuery, performAction, ReaderError, readerSea
 import { useReaderScroll } from "./reading.ts";
 
 export function ArticleRoute({ code, category, page, shared }: { code: string; category: ReadCategory; page: number; shared: boolean }) {
+  const listPage = useLocation({ select: location => location.state.readerListPage ?? page });
   const query = useQuery(articleQuery(code, shared, category, page));
   if (query.isPending)
     return (
@@ -34,14 +35,14 @@ export function ArticleRoute({ code, category, page, shared }: { code: string; c
           </button>
         )}
         <p>
-          <Link to="/read" search={readerSearch(category, page)}>
+          <Link to="/read" search={readerSearch(category, listPage)}>
             返回
           </Link>
         </p>
       </main>
     );
   }
-  return <Article data={query.data} category={category} page={page} />;
+  return <Article data={query.data} category={category} page={page} listPage={listPage} />;
 }
 
 function isModelAction(action: ReaderAction) {
@@ -85,7 +86,7 @@ function useArticleNeighbors(code: string, category: ReadCategory, page: number,
   return { neighbors, navRef: setNav };
 }
 
-function Article({ data, category, page }: { data: ReaderArticle; category: ReadCategory; page: number }) {
+function Article({ data, category, page, listPage }: { data: ReaderArticle; category: ReadCategory; page: number; listPage: number }) {
   const { item, actions } = data;
   const { neighbors, navRef } = useArticleNeighbors(item.code, category, page, Boolean(actions));
   const queryClient = useQueryClient();
@@ -470,6 +471,7 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
 
   const modelError = mutation.error && !isAbortError(mutation.error) ? mutation.error.message || "操作失败，请稍后重试。" : undefined;
   const search = readerSearch(category, page);
+  const listSearch = readerSearch(category, listPage);
   const originalTitle = data.originalTitle || item.title;
   const origTitleLang = data.originalTitle ? data.originalLang : item.titleLang;
   const atPageBottom = progress > 0 && progress >= 1 - Number.EPSILON;
@@ -483,7 +485,7 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
       <title>{item.title}</title>
       {actions && chrome.open && (
         <div className="reading-top reading-actions-row" role="toolbar" aria-label="页面" ref={readingActionsRef}>
-          <Link to="/read" search={search}>
+          <Link to="/read" search={listSearch}>
             返回
           </Link>
           <button type="button" onClick={() => scrollReading(atPageBottom ? "top" : "bottom")}>
@@ -567,17 +569,17 @@ function Article({ data, category, page }: { data: ReaderArticle; category: Read
           {actions && (
             <nav className="nav-row" aria-label="文章导航" ref={navRef}>
               {neighbors?.prevCode ? (
-                <Link to="/r/$code" params={{ code: neighbors.prevCode }} search={search}>
+                <Link to="/r/$code" params={{ code: neighbors.prevCode }} search={search} state={{ readerListPage: listPage }}>
                   上一篇
                 </Link>
               ) : (
                 <span className="is-disabled">上一篇</span>
               )}
-              <Link to="/read" search={search}>
+              <Link to="/read" search={listSearch}>
                 返回
               </Link>
               {neighbors?.nextCode ? (
-                <Link to="/r/$code" params={{ code: neighbors.nextCode }} search={search}>
+                <Link to="/r/$code" params={{ code: neighbors.nextCode }} search={search} state={{ readerListPage: listPage }}>
                   下一篇
                 </Link>
               ) : (
