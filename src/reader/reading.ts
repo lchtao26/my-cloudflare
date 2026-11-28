@@ -266,9 +266,15 @@ export function useReaderScroll(code?: string, enabled = true, hasAnchor = false
         if (!direction) return;
         if (onGutterTap?.()) return;
         const column = main.current;
-        const step = direction * Math.max(80, column?.clientHeight ?? window.innerHeight);
-        if (column?.classList.contains("reader-scroll")) column.scrollBy(0, step);
-        else window.scrollBy(0, step);
+        if (column?.classList.contains("reader-scroll")) {
+          column.scrollBy(0, direction * Math.max(80, column.clientHeight));
+        } else {
+          const top = document.querySelector(".read-bar")?.getBoundingClientRect().bottom ?? 0;
+          const bottom = document.querySelector(".categories")?.getBoundingClientRect().top ?? window.innerHeight;
+          const visibleHeight = Math.max(0, Math.min(window.innerHeight, bottom) - Math.max(0, top));
+          const overlap = parseFloat(getComputedStyle(column!).lineHeight) || 32;
+          window.scrollBy(0, direction * Math.max(1, visibleHeight - overlap));
+        }
       },
     },
   };
